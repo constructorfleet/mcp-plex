@@ -11,7 +11,8 @@ from typing import List, Optional
 import click
 import httpx
 from fastembed import SparseTextEmbedding, TextEmbedding
-from qdrant_client import QdrantClient, models
+from qdrant_client.async_qdrant_client import AsyncQdrantClient
+from qdrant_client import models
 
 from .types import (
     AggregatedItem,
@@ -306,8 +307,8 @@ async def run(
     dense_vectors = list(dense_model.embed(texts))
     sparse_vectors = list(sparse_model.passage_embed(texts))
 
-    client = QdrantClient(qdrant_url or ":memory:", api_key=qdrant_api_key)
-    client.recreate_collection(
+    client = AsyncQdrantClient(qdrant_url or ":memory:", api_key=qdrant_api_key)
+    await client.recreate_collection(
         collection_name="media-items",
         vectors_config={
             "dense": models.VectorParams(
@@ -333,7 +334,7 @@ async def run(
         )
 
     if points:
-        client.upsert(collection_name="media-items", points=points)
+        await client.upsert(collection_name="media-items", points=points)
 
     json.dump([item.model_dump() for item in items], fp=sys.stdout, indent=2)
     sys.stdout.write("\n")
