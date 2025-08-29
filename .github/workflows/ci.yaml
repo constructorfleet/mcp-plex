@@ -1,4 +1,6 @@
 name: Test and Lint
+permissions:
+  contents: read
 
 on:
   push:
