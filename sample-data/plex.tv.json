@@ -1,0 +1,390 @@
+{
+  "MediaContainer": {
+    "size": 1,
+    "allowSync": true,
+    "identifier": "com.plexapp.plugins.library",
+    "librarySectionID": 2,
+    "librarySectionTitle": "TV Shows",
+    "librarySectionUUID": "9a547dcb-4e1e-47fa-8ddd-ff75357d3d01",
+    "mediaTagPrefix": "/system/bundle/media/flags/",
+    "mediaTagVersion": 1754902275,
+    "Metadata": [
+      {
+        "ratingKey": "61960",
+        "key": "/library/metadata/61960",
+        "parentRatingKey": "61597",
+        "grandparentRatingKey": "61596",
+        "guid": "plex://episode/6824891cf785e1295679ed1a",
+        "parentGuid": "plex://season/66391fb2895fabeb26443402",
+        "grandparentGuid": "plex://show/66391fb2895fabeb264433d1",
+        "grandparentSlug": "alien-earth",
+        "type": "episode",
+        "title": "Observation",
+        "grandparentKey": "/library/metadata/61596",
+        "parentKey": "/library/metadata/61597",
+        "librarySectionTitle": "TV Shows",
+        "librarySectionID": 2,
+        "librarySectionKey": "/library/sections/2",
+        "grandparentTitle": "Alien: Earth",
+        "parentTitle": "Season 1",
+        "contentRating": "TV-MA",
+        "summary": "An unexpected connection is formed while a covert plot puts everyone in danger.",
+        "index": 4,
+        "parentIndex": 1,
+        "audienceRating": 7.3,
+        "viewCount": 1,
+        "lastViewedAt": 1756339100,
+        "year": 2025,
+        "thumb": "/library/metadata/61960/thumb/1756480667",
+        "art": "/library/metadata/61597/art/1756256936",
+        "parentThumb": "/library/metadata/61597/thumb/1756256936",
+        "grandparentThumb": "/library/metadata/61596/thumb/1756480808",
+        "grandparentArt": "/library/metadata/61596/art/1756480808",
+        "duration": 3540992,
+        "originallyAvailableAt": "2025-08-26",
+        "addedAt": 1756256934,
+        "updatedAt": 1756480667,
+        "audienceRatingImage": "themoviedb://image.rating",
+        "Media": [
+          {
+            "id": 131933,
+            "duration": 3540992,
+            "bitrate": 15273,
+            "width": 3840,
+            "height": 2160,
+            "aspectRatio": 1.78,
+            "audioChannels": 6,
+            "audioCodec": "eac3",
+            "videoCodec": "hevc",
+            "videoResolution": "4k",
+            "container": "mkv",
+            "videoFrameRate": "24p",
+            "videoProfile": "main 10",
+            "hasVoiceActivity": false,
+            "Part": [
+              {
+                "accessible": true,
+                "exists": true,
+                "id": 131933,
+                "key": "/library/parts/131933/1756259382/file.mkv",
+                "duration": 3540992,
+                "file": "/tvshows/Alien - EarthAlien - Earth (2025)/Season 1/Alien - Earth - S01E04 - Observation WEBDL-2160p.mkv",
+                "size": 6761112423,
+                "container": "mkv",
+                "deepAnalysisVersion": "6",
+                "indexes": "sd",
+                "requiredBandwidths": "16247,16215,16140,16060,16050,16050,16050,16050",
+                "videoProfile": "main 10",
+                "Stream": [
+                  {
+                    "id": 461705,
+                    "streamType": 1,
+                    "default": true,
+                    "codec": "hevc",
+                    "index": 0,
+                    "bitrate": 15017,
+                    "bitDepth": 10,
+                    "chromaLocation": "left",
+                    "chromaSubsampling": "4:2:0",
+                    "codedHeight": 2160,
+                    "codedWidth": 3840,
+                    "colorRange": "tv",
+                    "frameRate": 24,
+                    "height": 2160,
+                    "level": 153,
+                    "profile": "main 10",
+                    "refFrames": 1,
+                    "requiredBandwidths": "15991,15959,15883,15804,15794,15794,15794,15794",
+                    "width": 3840,
+                    "displayTitle": "4K",
+                    "extendedDisplayTitle": "4K (HEVC Main 10)"
+                  },
+                  {
+                    "id": 461706,
+                    "streamType": 2,
+                    "selected": true,
+                    "default": true,
+                    "codec": "eac3",
+                    "index": 1,
+                    "channels": 6,
+                    "bitrate": 256,
+                    "language": "English",
+                    "languageTag": "en",
+                    "languageCode": "eng",
+                    "audioChannelLayout": "5.1(side)",
+                    "requiredBandwidths": "256,256,256,256,256,256,256,256",
+                    "samplingRate": 48000,
+                    "displayTitle": "English (EAC3 5.1)",
+                    "extendedDisplayTitle": "English (EAC3 5.1)"
+                  },
+                  {
+                    "id": 461707,
+                    "streamType": 3,
+                    "canAutoSync": false,
+                    "selected": true,
+                    "codec": "srt",
+                    "index": 2,
+                    "bitrate": 0,
+                    "language": "English",
+                    "languageTag": "en",
+                    "languageCode": "eng",
+                    "requiredBandwidths": "1,1,1,1,1,1,1,1",
+                    "title": "English [SDH]",
+                    "displayTitle": "English",
+                    "extendedDisplayTitle": "English [SDH] (SRT)"
+                  }
+                ]
+              }
+            ]
+          }
+        ],
+        "Image": [
+          {
+            "alt": "Observation",
+            "type": "coverPoster",
+            "url": "/library/metadata/61596/thumb/1756480808"
+          },
+          {
+            "alt": "Observation",
+            "type": "snapshot",
+            "url": "/library/metadata/61960/thumb/1756480667"
+          },
+          {
+            "alt": "Observation",
+            "type": "background",
+            "url": "/library/metadata/61597/art/1756256936"
+          },
+          {
+            "alt": "Observation",
+            "type": "clearLogo",
+            "url": "/library/metadata/61596/clearLogo/1756480808"
+          }
+        ],
+        "UltraBlurColors": {
+          "topLeft": "123240",
+          "topRight": "43504c",
+          "bottomRight": "123141",
+          "bottomLeft": "235666"
+        },
+        "Guid": [
+          {
+            "id": "imdb://tt32572896"
+          },
+          {
+            "id": "tmdb://6231085"
+          }
+        ],
+        "Rating": [
+          {
+            "image": "imdb://image.rating",
+            "value": 7.6,
+            "type": "audience"
+          },
+          {
+            "image": "themoviedb://image.rating",
+            "value": 7.3,
+            "type": "audience"
+          }
+        ],
+        "Director": [
+          {
+            "id": 282488,
+            "filter": "director=282488",
+            "tag": "Ugla Hauksdóttir",
+            "tagKey": "5d776b7ffb0d55001f569704",
+            "thumb": "https://metadata-static.plex.tv/6/people/62cfc1f74b809713e31e2ccfdf0c92e3.jpg"
+          }
+        ],
+        "Writer": [
+          {
+            "id": 317690,
+            "filter": "writer=317690",
+            "tag": "Noah Hawley",
+            "tagKey": "5d776d857a53e9001e75beba",
+            "thumb": "https://metadata-static.plex.tv/1/people/15fff4032516d0a11cb856c7565b4b2b.jpg"
+          },
+          {
+            "id": 173218,
+            "filter": "writer=173218",
+            "tag": "Bobak Esfarjani",
+            "tagKey": "5f403bf9bf3e560040bb5b6e",
+            "thumb": "https://metadata-static.plex.tv/2/people/27f707e3c14c59f2d2bc32c0d7a5df2e.jpg"
+          }
+        ],
+        "Role": [
+          {
+            "id": 26595,
+            "filter": "actor=26595",
+            "tag": "Sydney Chandler",
+            "tagKey": "5f4048908642250042877180",
+            "role": "Wendy",
+            "thumb": "https://metadata-static.plex.tv/b/people/b73f5bede8f133142d84af1629c3811d.jpg"
+          },
+          {
+            "id": 75966,
+            "filter": "actor=75966",
+            "tag": "Alex Lawther",
+            "tagKey": "5d7769de96b655001fddc0b3",
+            "role": "Joe DiMaggio Hermit",
+            "thumb": "https://metadata-static.plex.tv/a/people/a4e9db691cb2e90cb1583ba1a2d42888.jpg"
+          },
+          {
+            "id": 8228,
+            "filter": "actor=8228",
+            "tag": "Essie Davis",
+            "tagKey": "5d776827eb5d26001f1dd921",
+            "role": "Dame Sylvia",
+            "thumb": "https://metadata-static.plex.tv/5/people/536e3f9a17cdcb107779deb83ad153fc.jpg"
+          },
+          {
+            "id": 95190,
+            "filter": "actor=95190",
+            "tag": "Samuel Blenkin",
+            "tagKey": "5e165b3acd0850003b783abe",
+            "role": "Boy Kavalier",
+            "thumb": "https://metadata-static.plex.tv/d/people/decca1f9fcfc6191b181f4df6d30f052.jpg"
+          },
+          {
+            "id": 60788,
+            "filter": "actor=60788",
+            "tag": "Babou Ceesay",
+            "tagKey": "5d77682f7228e5001f1ddd16",
+            "role": "Kumi Morrow",
+            "thumb": "https://metadata-static.plex.tv/2/people/25bb518609fabd2ba15b137636341b83.jpg"
+          },
+          {
+            "id": 113135,
+            "filter": "actor=113135",
+            "tag": "Adarsh Gourav",
+            "tagKey": "5d776c2ead5437001f7b60fd",
+            "role": "Slightly",
+            "thumb": "https://metadata-static.plex.tv/e/people/e97044753481da5146e0d8c169218599.jpg"
+          },
+          {
+            "id": 317678,
+            "filter": "actor=317678",
+            "tag": "Erana James",
+            "tagKey": "5d776c8b96b655001fe345b5",
+            "role": "Curly",
+            "thumb": "https://metadata-static.plex.tv/6/people/6728bb6a779836911e226549388fc6ac.jpg"
+          },
+          {
+            "id": 65032,
+            "filter": "actor=65032",
+            "tag": "Lily Newmark",
+            "tagKey": "5d776bbcfb0d55001f571335",
+            "role": "Nibs",
+            "thumb": "https://metadata-static.plex.tv/8/people/8fb96e156259ce0c0e498dd2a2949824.jpg"
+          },
+          {
+            "id": 88796,
+            "filter": "actor=88796",
+            "tag": "Jonathan Ajayi",
+            "tagKey": "5e6792c7771950003f8e6de8",
+            "role": "Smee",
+            "thumb": "https://metadata-static.plex.tv/e/people/e1de9672479012684ae11b67c7dc5ae3.jpg"
+          },
+          {
+            "id": 52928,
+            "filter": "actor=52928",
+            "tag": "David Rysdahl",
+            "tagKey": "5d776bac96b655001fe18ddc",
+            "role": "Arthur Sylvia",
+            "thumb": "https://metadata-static.plex.tv/e/people/ece32ffda81d86e410bbfd687bc17972.jpg"
+          },
+          {
+            "id": 317679,
+            "filter": "actor=317679",
+            "tag": "Diêm Camille",
+            "tagKey": "5d776d3296b655001fe424df",
+            "role": "Siberian",
+            "thumb": "https://metadata-static.plex.tv/0/people/003a0cfb8048e90e6b4132df1828753c.jpg"
+          },
+          {
+            "id": 165259,
+            "filter": "actor=165259",
+            "tag": "Moe Bar-El",
+            "tagKey": "5d776bc6ad5437001f7a9a93",
+            "role": "Benjamin Rashidi",
+            "thumb": "https://metadata-static.plex.tv/3/people/3405fe391e4af44957a9fe7f49327d7c.jpg"
+          },
+          {
+            "id": 195850,
+            "filter": "actor=195850",
+            "tag": "Adrian Edmondson",
+            "tagKey": "5d77682d151a60001f24c29b",
+            "role": "Atom Eins",
+            "thumb": "https://metadata-static.plex.tv/3/people/312bd32cbbe0d4e87fb66c8666c57e93.jpg"
+          },
+          {
+            "id": 24025,
+            "filter": "actor=24025",
+            "tag": "Timothy Olyphant",
+            "tagKey": "5d77682aeb5d26001f1de417",
+            "role": "Kirsh",
+            "thumb": "https://metadata-static.plex.tv/c/people/c8ce27a2cac06603cb12ddb2ee160fb7.jpg"
+          }
+        ],
+        "Producer": [
+          {
+            "id": 274900,
+            "filter": "producer=274900",
+            "tag": "Regis Kimble",
+            "tagKey": "5dce6f8a7ec909001ea71e40"
+          },
+          {
+            "id": 317691,
+            "filter": "producer=317691",
+            "tag": "Chris Lowenstein",
+            "tagKey": "5d9f3d02adeb7a0021cea0f6",
+            "thumb": "https://metadata-static.plex.tv/6/people/62b2381b245e8b1e3ffa1d5a934f376b.jpg"
+          },
+          {
+            "id": 317692,
+            "filter": "producer=317692",
+            "tag": "Darin McLeod",
+            "tagKey": "5d776ac29ab54400215032ac"
+          },
+          {
+            "id": 317693,
+            "filter": "producer=317693",
+            "tag": "Maria Melnik",
+            "tagKey": "5d77704a6afb3d0020616d80"
+          },
+          {
+            "id": 317694,
+            "filter": "producer=317694",
+            "tag": "Kristy Reed",
+            "tagKey": "5f4010a11ae710004103a126"
+          }
+        ],
+        "Marker": [
+          {
+            "final": true,
+            "id": 92266,
+            "type": "credits",
+            "startTimeOffset": 3354892,
+            "endTimeOffset": 3540992,
+            "Attributes": {
+              "id": 92266,
+              "version": 4
+            }
+          },
+          {
+            "id": 92266,
+            "type": "intro",
+            "startTimeOffset": 1857,
+            "endTimeOffset": 27202,
+            "Attributes": {
+              "id": 92266
+            }
+          }
+        ],
+        "Extras": {
+          "size": 0
+        },
+        "Related": {}
+      }
+    ]
+  }
+}

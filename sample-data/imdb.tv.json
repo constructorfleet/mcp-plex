@@ -1,0 +1,166 @@
+{
+  "id": "tt32572896",
+  "type": "tvEpisode",
+  "primaryTitle": "Observation",
+  "primaryImage": {
+    "url": "https://m.media-amazon.com/images/M/MV5BNWFjNGFmYWUtYzQ1Yy00OWQ3LTllZjEtYTYxMzU2NDA1ZDVkXkEyXkFqcGc@._V1_.jpg",
+    "width": 1920,
+    "height": 1080
+  },
+  "startYear": 2025,
+  "runtimeSeconds": 3480,
+  "genres": [
+    "Horror",
+    "Sci-Fi",
+    "Thriller"
+  ],
+  "rating": {
+    "aggregateRating": 7.5,
+    "voteCount": 2484
+  },
+  "plot": "An unexpected connection is formed while a covert plot puts everyone in danger.",
+  "directors": [
+    {
+      "id": "nm4671636",
+      "displayName": "Ugla Hauksdóttir",
+      "primaryImage": {
+        "url": "https://m.media-amazon.com/images/M/MV5BMTIwYmNkYTUtZmJmZi00ZjEyLWFhNmUtNGRmYzU1Mjk5MDI5XkEyXkFqcGc@._V1_.jpg",
+        "width": 2063,
+        "height": 2072
+      }
+    }
+  ],
+  "writers": [
+    {
+      "id": "nm0639321",
+      "displayName": "Dan O'Bannon",
+      "primaryImage": {
+        "url": "https://m.media-amazon.com/images/M/MV5BMTM1NjkzNjc0MV5BMl5BanBnXkFtZTcwMjU2NTg2OA@@._V1_.jpg",
+        "width": 1308,
+        "height": 1757
+      },
+      "primaryProfessions": [
+        "writer",
+        "miscellaneous",
+        "actor"
+      ]
+    },
+    {
+      "id": "nm1279638",
+      "displayName": "Noah Hawley",
+      "primaryImage": {
+        "url": "https://m.media-amazon.com/images/M/MV5BYzgyODUzNDMtM2EyZS00ZmFjLTlkZDYtZDc0Njk4YzZkM2VmXkEyXkFqcGc@._V1_.jpg",
+        "width": 1047,
+        "height": 1047
+      },
+      "primaryProfessions": [
+        "writer",
+        "producer",
+        "miscellaneous"
+      ]
+    },
+    {
+      "id": "nm6768238",
+      "displayName": "Bobak Esfarjani"
+    }
+  ],
+  "stars": [
+    {
+      "id": "nm0204583",
+      "displayName": "Essie Davis",
+      "alternativeNames": [
+        "Essie Davies"
+      ],
+      "primaryImage": {
+        "url": "https://m.media-amazon.com/images/M/MV5BZjFhZWI0OTMtYzc1MS00OGY5LTg2Y2EtM2Q4ZjA4MDlmZmVmXkEyXkFqcGc@._V1_.jpg",
+        "width": 5170,
+        "height": 3447
+      },
+      "primaryProfessions": [
+        "actress",
+        "producer",
+        "soundtrack"
+      ]
+    },
+    {
+      "id": "nm3867299",
+      "displayName": "Alex Lawther",
+      "primaryImage": {
+        "url": "https://m.media-amazon.com/images/M/MV5BMDUyM2MyNWItMzk4ZS00ZmRmLTgzMDItYTExNjE1OWYxMzVlXkEyXkFqcGc@._V1_CR971,121,2396,3594_.jpg",
+        "width": 2396,
+        "height": 3594
+      }
+    },
+    {
+      "id": "nm5942765",
+      "displayName": "Moe Bar-El",
+      "primaryImage": {
+        "url": "https://m.media-amazon.com/images/M/MV5BOGViMzAzNGQtNmMwYi00NGE1LThlYzctYWQ2NjA5NDUyMmM0XkEyXkFqcGc@._V1_CR299,1,2981,4471_.jpg",
+        "width": 2981,
+        "height": 4471
+      }
+    },
+    {
+      "id": "nm6596215",
+      "displayName": "Jonathan Ajayi",
+      "primaryImage": {
+        "url": "https://m.media-amazon.com/images/M/MV5BZDFkZTYxYmMtOTUyMy00ZjQ3LWI5ZDYtYzMzOTEzNWY3N2YwXkEyXkFqcGc@._V1_.jpg",
+        "width": 3840,
+        "height": 5760
+      }
+    },
+    {
+      "id": "nm7584896",
+      "displayName": "Sydney Chandler",
+      "primaryImage": {
+        "url": "https://m.media-amazon.com/images/M/MV5BMTg1MGE5OGUtNzk3OC00YTdkLWFmZjUtNTEwNzQ1NjU5NGFmXkEyXkFqcGc@._V1_.jpg",
+        "width": 2160,
+        "height": 2700
+      },
+      "primaryProfessions": [
+        "actress",
+        "writer"
+      ]
+    },
+    {
+      "id": "nm8779346",
+      "displayName": "Samuel Blenkin",
+      "primaryImage": {
+        "url": "https://m.media-amazon.com/images/M/MV5BMzgxYWI5MDMtOGE4NC00M2RiLWI5NjQtZTg1ZmExYmFkNzc5XkEyXkFqcGc@._V1_.jpg",
+        "width": 3317,
+        "height": 3991
+      }
+    }
+  ],
+  "originCountries": [
+    {
+      "code": "US",
+      "name": "United States"
+    }
+  ],
+  "spokenLanguages": [
+    {
+      "code": "eng",
+      "name": "English"
+    }
+  ],
+  "interests": [
+    {
+      "id": "in0000112",
+      "name": "Horror"
+    },
+    {
+      "id": "in0000113",
+      "name": "Monster Horror",
+      "isSubgenre": true
+    },
+    {
+      "id": "in0000162",
+      "name": "Sci-Fi"
+    },
+    {
+      "id": "in0000186",
+      "name": "Thriller"
+    }
+  ]
+}
