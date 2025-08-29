@@ -15,11 +15,11 @@ dependencies = [
   "qdrant-client[fastembed-gpu]>=1.12.1",
   "rapidfuzz>=3.13.0",
   "scikit-learn>=1.7.1",
+  "httpx>=0.27.0",
 ]
 
-# [project.scripts]
-# mcp-plex = "mcp-plex.server:main"
-# load-data = "mcp-plex.loader:main"
+[project.scripts]
+load-data = "mcp_plex.loader:main"
 
 [[tool.uv.index]]
 url = "https://aiinfra.pkgs.visualstudio.com/PublicPackages/_packaging/onnxruntime-cuda-12/pypi/simple/"
