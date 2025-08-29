@@ -4,11 +4,14 @@ from __future__ import annotations
 import asyncio
 import json
 import os
+import sys
 from pathlib import Path
 from typing import List, Optional
 
 import click
 import httpx
+from fastembed import SparseTextEmbedding, TextEmbedding
+from qdrant_client import QdrantClient, models
 
 from .types import (
     AggregatedItem,
@@ -20,6 +23,7 @@ from .types import (
     TMDBMovie,
     TMDBShow,
     PlexGuid,
+    PlexPerson,
 )
 
 try:  # Only import plexapi when available; the sample data mode does not require it.
@@ -43,7 +47,9 @@ async def _fetch_imdb(client: httpx.AsyncClient, imdb_id: str) -> Optional[IMDbT
 async def _fetch_tmdb_movie(
     client: httpx.AsyncClient, tmdb_id: str, api_key: str
 ) -> Optional[TMDBMovie]:
-    url = f"https://api.themoviedb.org/3/movie/{tmdb_id}?api_key={api_key}"
+    url = (
+        f"https://api.themoviedb.org/3/movie/{tmdb_id}?api_key={api_key}&append_to_response=reviews"
+    )
     resp = await client.get(url)
     if resp.is_success:
         return TMDBMovie.model_validate(resp.json())
@@ -53,7 +59,9 @@ async def _fetch_tmdb_movie(
 async def _fetch_tmdb_show(
     client: httpx.AsyncClient, tmdb_id: str, api_key: str
 ) -> Optional[TMDBShow]:
-    url = f"https://api.themoviedb.org/3/tv/{tmdb_id}?api_key={api_key}"
+    url = (
+        f"https://api.themoviedb.org/3/tv/{tmdb_id}?api_key={api_key}&append_to_response=reviews"
+    )
     resp = await client.get(url)
     if resp.is_success:
         return TMDBShow.model_validate(resp.json())
@@ -90,6 +98,23 @@ def _build_plex_item(item: PlexPartialObject) -> PlexItem:
     """Convert a Plex object into the internal :class:`PlexItem`."""
 
     guids = [PlexGuid(id=g.id) for g in getattr(item, "guids", [])]
+    directors = [
+        PlexPerson(id=getattr(d, "id", 0), tag=str(getattr(d, "tag", "")), thumb=getattr(d, "thumb", None))
+        for d in getattr(item, "directors", []) or []
+    ]
+    writers = [
+        PlexPerson(id=getattr(w, "id", 0), tag=str(getattr(w, "tag", "")), thumb=getattr(w, "thumb", None))
+        for w in getattr(item, "writers", []) or []
+    ]
+    actors = [
+        PlexPerson(
+            id=getattr(a, "id", 0),
+            tag=str(getattr(a, "tag", "")),
+            thumb=getattr(a, "thumb", None),
+            role=getattr(a, "role", None),
+        )
+        for a in getattr(item, "actors", []) or getattr(item, "roles", []) or []
+    ]
     return PlexItem(
         rating_key=str(getattr(item, "ratingKey", "")),
         guid=str(getattr(item, "guid", "")),
@@ -98,6 +123,13 @@ def _build_plex_item(item: PlexPartialObject) -> PlexItem:
         summary=getattr(item, "summary", None),
         year=getattr(item, "year", None),
         guids=guids,
+        thumb=getattr(item, "thumb", None),
+        art=getattr(item, "art", None),
+        tagline=getattr(item, "tagline", None),
+        content_rating=getattr(item, "contentRating", None),
+        directors=directors,
+        writers=writers,
+        actors=actors,
     )
 
 
@@ -159,6 +191,27 @@ def _load_from_sample(sample_dir: Path) -> List[AggregatedItem]:
         summary=movie_data.get("summary"),
         year=movie_data.get("year"),
         guids=[PlexGuid(id=g["id"]) for g in movie_data.get("Guid", [])],
+        thumb=movie_data.get("thumb"),
+        art=movie_data.get("art"),
+        tagline=movie_data.get("tagline"),
+        content_rating=movie_data.get("contentRating"),
+        directors=[
+            PlexPerson(id=d.get("id", 0), tag=d.get("tag", ""), thumb=d.get("thumb"))
+            for d in movie_data.get("Director", [])
+        ],
+        writers=[
+            PlexPerson(id=w.get("id", 0), tag=w.get("tag", ""), thumb=w.get("thumb"))
+            for w in movie_data.get("Writer", [])
+        ],
+        actors=[
+            PlexPerson(
+                id=a.get("id", 0),
+                tag=a.get("tag", ""),
+                role=a.get("role"),
+                thumb=a.get("thumb"),
+            )
+            for a in movie_data.get("Role", [])
+        ],
     )
     with (movie_dir / "imdb.json").open("r", encoding="utf-8") as f:
         imdb_movie = IMDbTitle.model_validate(json.load(f))
@@ -177,6 +230,27 @@ def _load_from_sample(sample_dir: Path) -> List[AggregatedItem]:
         summary=episode_data.get("summary"),
         year=episode_data.get("year"),
         guids=[PlexGuid(id=g["id"]) for g in episode_data.get("Guid", [])],
+        thumb=episode_data.get("thumb"),
+        art=episode_data.get("art"),
+        tagline=episode_data.get("tagline"),
+        content_rating=episode_data.get("contentRating"),
+        directors=[
+            PlexPerson(id=d.get("id", 0), tag=d.get("tag", ""), thumb=d.get("thumb"))
+            for d in episode_data.get("Director", [])
+        ],
+        writers=[
+            PlexPerson(id=w.get("id", 0), tag=w.get("tag", ""), thumb=w.get("thumb"))
+            for w in episode_data.get("Writer", [])
+        ],
+        actors=[
+            PlexPerson(
+                id=a.get("id", 0),
+                tag=a.get("tag", ""),
+                role=a.get("role"),
+                thumb=a.get("thumb"),
+            )
+            for a in episode_data.get("Role", [])
+        ],
     )
     with (episode_dir / "imdb.tv.json").open("r", encoding="utf-8") as f:
         imdb_episode = IMDbTitle.model_validate(json.load(f))
@@ -192,6 +266,8 @@ async def run(
     plex_token: Optional[str],
     tmdb_api_key: Optional[str],
     sample_dir: Optional[Path],
+    qdrant_url: Optional[str],
+    qdrant_api_key: Optional[str],
 ) -> None:
     """Core execution logic for the CLI."""
 
@@ -208,8 +284,59 @@ async def run(
         server = PlexServer(plex_url, plex_token)
         items = await _load_from_plex(server, tmdb_api_key)
 
-    json.dump([item.model_dump() for item in items], fp=os.sys.stdout, indent=2)
-    os.sys.stdout.write("\n")
+    # Embed and store in Qdrant
+    texts: List[str] = []
+    for item in items:
+        parts = [
+            item.plex.title,
+            item.plex.summary or "",
+            item.tmdb.overview if item.tmdb and hasattr(item.tmdb, "overview") else "",
+            item.imdb.plot if item.imdb else "",
+            " ".join(p.tag for p in item.plex.directors),
+            " ".join(p.tag for p in item.plex.writers),
+            " ".join(p.tag for p in item.plex.actors),
+        ]
+        if item.tmdb and hasattr(item.tmdb, "reviews"):
+            parts.extend(r.get("content", "") for r in getattr(item.tmdb, "reviews", []))
+        texts.append("\n".join(p for p in parts if p))
+
+    dense_model = TextEmbedding("BAAI/bge-small-en-v1.5")
+    sparse_model = SparseTextEmbedding("Qdrant/bm42-all-minilm-l6-v2-attentions")
+
+    dense_vectors = list(dense_model.embed(texts))
+    sparse_vectors = list(sparse_model.passage_embed(texts))
+
+    client = QdrantClient(qdrant_url or ":memory:", api_key=qdrant_api_key)
+    client.recreate_collection(
+        collection_name="media-items",
+        vectors_config={
+            "dense": models.VectorParams(
+                size=dense_model.embedding_size, distance=models.Distance.COSINE
+            )
+        },
+        sparse_vectors_config={"sparse": models.SparseVectorParams()},
+    )
+
+    points = []
+    for idx, (item, dense, sparse) in enumerate(zip(items, dense_vectors, sparse_vectors)):
+        sv = models.SparseVector(
+            indices=sparse.indices.tolist(), values=sparse.values.tolist()
+        )
+        points.append(
+            models.Record(
+                id=int(item.plex.rating_key)
+                if item.plex.rating_key.isdigit()
+                else item.plex.rating_key,
+                payload={"data": item.model_dump(), "search_text": texts[idx]},
+                vector={"dense": dense, "sparse": sv},
+            )
+        )
+
+    if points:
+        client.upsert(collection_name="media-items", points=points)
+
+    json.dump([item.model_dump() for item in items], fp=sys.stdout, indent=2)
+    sys.stdout.write("\n")
 
 
 @click.command()
@@ -217,15 +344,21 @@ async def run(
 @click.option("--plex-token", envvar="PLEX_TOKEN", help="Plex API token")
 @click.option("--tmdb-api-key", envvar="TMDB_API_KEY", help="TMDb API key")
 @click.option("--sample-dir", type=click.Path(path_type=Path))
+@click.option("--qdrant-url", envvar="QDRANT_URL", help="Qdrant URL or path")
+@click.option("--qdrant-api-key", envvar="QDRANT_API_KEY", help="Qdrant API key")
 def main(
     plex_url: Optional[str],
     plex_token: Optional[str],
     tmdb_api_key: Optional[str],
     sample_dir: Optional[Path],
+    qdrant_url: Optional[str],
+    qdrant_api_key: Optional[str],
 ) -> None:
     """Entry-point for the ``load-data`` script."""
 
-    asyncio.run(run(plex_url, plex_token, tmdb_api_key, sample_dir))
+    asyncio.run(
+        run(plex_url, plex_token, tmdb_api_key, sample_dir, qdrant_url, qdrant_api_key)
+    )
 
 
 if __name__ == "__main__":  # pragma: no cover - manual execution
