@@ -137,40 +137,57 @@ def _build_plex_item(item: PlexPartialObject) -> PlexItem:
 async def _load_from_plex(server: PlexServer, tmdb_api_key: str) -> List[AggregatedItem]:
     """Load items from a live Plex server."""
 
+    async def _augment_movie(client: httpx.AsyncClient, movie: PlexPartialObject) -> AggregatedItem:
+        ids = _extract_external_ids(movie)
+        imdb_task = (
+            _fetch_imdb(client, ids.imdb) if ids.imdb else asyncio.sleep(0, result=None)
+        )
+        tmdb_task = (
+            _fetch_tmdb_movie(client, ids.tmdb, tmdb_api_key)
+            if ids.tmdb
+            else asyncio.sleep(0, result=None)
+        )
+        imdb, tmdb = await asyncio.gather(imdb_task, tmdb_task)
+        return AggregatedItem(plex=_build_plex_item(movie), imdb=imdb, tmdb=tmdb)
+
+    async def _augment_episode(
+        client: httpx.AsyncClient,
+        episode: PlexPartialObject,
+        show_tmdb: Optional[TMDBShow],
+    ) -> AggregatedItem:
+        ids = _extract_external_ids(episode)
+        imdb_task = (
+            _fetch_imdb(client, ids.imdb) if ids.imdb else asyncio.sleep(0, result=None)
+        )
+        tmdb_task = (
+            _fetch_tmdb_episode(client, ids.tmdb, tmdb_api_key)
+            if ids.tmdb
+            else asyncio.sleep(0, result=None)
+        )
+        imdb, tmdb_episode = await asyncio.gather(imdb_task, tmdb_task)
+        tmdb: Optional[TMDBItem] = tmdb_episode or show_tmdb
+        return AggregatedItem(plex=_build_plex_item(episode), imdb=imdb, tmdb=tmdb)
+
     results: List[AggregatedItem] = []
     async with httpx.AsyncClient(timeout=30) as client:
-        # Movies
         movie_section = server.library.section("Movies")
-        for movie in movie_section.all():
-            ids = _extract_external_ids(movie)
-            imdb = await _fetch_imdb(client, ids.imdb) if ids.imdb else None
-            tmdb = (
-                await _fetch_tmdb_movie(client, ids.tmdb, tmdb_api_key)
-                if ids.tmdb
-                else None
-            )
-            results.append(
-                AggregatedItem(plex=_build_plex_item(movie), imdb=imdb, tmdb=tmdb)
-            )
+        movie_tasks = [
+            _augment_movie(client, movie) for movie in movie_section.all()
+        ]
+        if movie_tasks:
+            results.extend(await asyncio.gather(*movie_tasks))
 
-        # TV Shows -> episodes
         show_section = server.library.section("TV Shows")
         for show in show_section.all():
             show_ids = _extract_external_ids(show)
             show_tmdb: Optional[TMDBShow] = None
             if show_ids.tmdb:
                 show_tmdb = await _fetch_tmdb_show(client, show_ids.tmdb, tmdb_api_key)
-            for episode in show.episodes():
-                ids = _extract_external_ids(episode)
-                imdb = await _fetch_imdb(client, ids.imdb) if ids.imdb else None
-                tmdb: Optional[TMDBItem] = None
-                if ids.tmdb:
-                    tmdb = await _fetch_tmdb_episode(client, ids.tmdb, tmdb_api_key)
-                if tmdb is None and show_tmdb is not None:
-                    tmdb = show_tmdb
-                results.append(
-                    AggregatedItem(plex=_build_plex_item(episode), imdb=imdb, tmdb=tmdb)
-                )
+            episode_tasks = [
+                _augment_episode(client, episode, show_tmdb) for episode in show.episodes()
+            ]
+            if episode_tasks:
+                results.extend(await asyncio.gather(*episode_tasks))
     return results
 
 
@@ -308,27 +325,85 @@ async def run(
     sparse_vectors = list(sparse_model.passage_embed(texts))
 
     client = AsyncQdrantClient(qdrant_url or ":memory:", api_key=qdrant_api_key)
-    await client.recreate_collection(
-        collection_name="media-items",
-        vectors_config={
-            "dense": models.VectorParams(
-                size=dense_model.embedding_size, distance=models.Distance.COSINE
+    collection_name = "media-items"
+    vectors_config = {
+        "dense": models.VectorParams(
+            size=dense_model.embedding_size, distance=models.Distance.COSINE
+        )
+    }
+    sparse_vectors_config = {"sparse": models.SparseVectorParams()}
+
+    created_collection = False
+    if await client.collection_exists(collection_name):
+        info = await client.get_collection(collection_name)
+        existing_size = info.config.params.vectors["dense"].size  # type: ignore[index]
+        if existing_size != dense_model.embedding_size:
+            await client.delete_collection(collection_name)
+            await client.create_collection(
+                collection_name=collection_name,
+                vectors_config=vectors_config,
+                sparse_vectors_config=sparse_vectors_config,
             )
-        },
-        sparse_vectors_config={"sparse": models.SparseVectorParams()},
-    )
+            created_collection = True
+    else:
+        await client.create_collection(
+            collection_name=collection_name,
+            vectors_config=vectors_config,
+            sparse_vectors_config=sparse_vectors_config,
+        )
+        created_collection = True
+
+    if created_collection:
+        await client.create_payload_index(
+            collection_name=collection_name,
+            field_name="search_text",
+            field_schema=models.TextIndexParams(
+                type=models.PayloadSchemaType.TEXT,
+                tokenizer=models.TokenizerType.WORD,
+                min_token_len=2,
+                lowercase=True,
+            ),
+        )
+        await client.create_payload_index(
+            collection_name=collection_name,
+            field_name="title",
+            field_schema=models.TextIndexParams(
+                type=models.PayloadSchemaType.TEXT,
+                tokenizer=models.TokenizerType.WORD,
+                min_token_len=2,
+                lowercase=True,
+            ),
+        )
+        await client.create_payload_index(
+            collection_name=collection_name,
+            field_name="type",
+            field_schema=models.PayloadSchemaType.KEYWORD,
+        )
+        await client.create_payload_index(
+            collection_name=collection_name,
+            field_name="year",
+            field_schema=models.PayloadSchemaType.INTEGER,
+        )
 
     points = []
     for idx, (item, dense, sparse) in enumerate(zip(items, dense_vectors, sparse_vectors)):
         sv = models.SparseVector(
             indices=sparse.indices.tolist(), values=sparse.values.tolist()
         )
+        payload = {
+            "data": item.model_dump(),
+            "search_text": texts[idx],
+            "title": item.plex.title,
+            "type": item.plex.type,
+        }
+        if item.plex.year is not None:
+            payload["year"] = item.plex.year
         points.append(
             models.Record(
                 id=int(item.plex.rating_key)
                 if item.plex.rating_key.isdigit()
                 else item.plex.rating_key,
-                payload={"data": item.model_dump(), "search_text": texts[idx]},
+                payload=payload,
                 vector={"dense": dense, "sparse": sv},
             )
         )
