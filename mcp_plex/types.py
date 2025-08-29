@@ -14,8 +14,21 @@ class IMDbRating(BaseModel):
     voteCount: Optional[int] = None
 
 
+class IMDbImage(BaseModel):
+    """Simplified representation of an IMDb image."""
+
+    url: str
+
+
+class IMDbName(BaseModel):
+    """Minimal IMDb name record."""
+
+    id: str
+    displayName: str
+
+
 class IMDbTitle(BaseModel):
-    """Subset of an IMDb title record."""
+    """Subset of an IMDb title record with people and artwork."""
 
     id: str
     type: str
@@ -25,6 +38,10 @@ class IMDbTitle(BaseModel):
     genres: List[str] = Field(default_factory=list)
     rating: Optional[IMDbRating] = None
     plot: Optional[str] = None
+    primaryImage: Optional[IMDbImage] = None
+    directors: List[IMDbName] = Field(default_factory=list)
+    writers: List[IMDbName] = Field(default_factory=list)
+    stars: List[IMDbName] = Field(default_factory=list)
 
 
 class TMDBGenre(BaseModel):
@@ -39,6 +56,17 @@ class TMDBMovie(BaseModel):
     release_date: Optional[str] = None
     imdb_id: Optional[str] = None
     genres: List[TMDBGenre] = Field(default_factory=list)
+    poster_path: Optional[str] = None
+    backdrop_path: Optional[str] = None
+    tagline: Optional[str] = None
+    reviews: List[dict] = Field(default_factory=list)
+
+    @classmethod
+    def model_validate(cls, data):  # type: ignore[override]
+        if isinstance(data, dict) and isinstance(data.get("reviews"), dict):
+            data = data.copy()
+            data["reviews"] = data["reviews"].get("results", [])
+        return super().model_validate(data)
 
 
 class TMDBShow(BaseModel):
@@ -48,6 +76,17 @@ class TMDBShow(BaseModel):
     first_air_date: Optional[str] = None
     last_air_date: Optional[str] = None
     genres: List[TMDBGenre] = Field(default_factory=list)
+    poster_path: Optional[str] = None
+    backdrop_path: Optional[str] = None
+    tagline: Optional[str] = None
+    reviews: List[dict] = Field(default_factory=list)
+
+    @classmethod
+    def model_validate(cls, data):  # type: ignore[override]
+        if isinstance(data, dict) and isinstance(data.get("reviews"), dict):
+            data = data.copy()
+            data["reviews"] = data["reviews"].get("results", [])
+        return super().model_validate(data)
 
 
 class TMDBEpisode(BaseModel):
@@ -66,6 +105,15 @@ class PlexGuid(BaseModel):
     id: str
 
 
+class PlexPerson(BaseModel):
+    """Representation of a person in Plex metadata."""
+
+    id: int
+    tag: str
+    thumb: Optional[str] = None
+    role: Optional[str] = None
+
+
 class PlexItem(BaseModel):
     rating_key: str
     guid: str
@@ -74,6 +122,13 @@ class PlexItem(BaseModel):
     summary: Optional[str] = None
     year: Optional[int] = None
     guids: List[PlexGuid] = Field(default_factory=list)
+    thumb: Optional[str] = None
+    art: Optional[str] = None
+    tagline: Optional[str] = None
+    content_rating: Optional[str] = None
+    directors: List[PlexPerson] = Field(default_factory=list)
+    writers: List[PlexPerson] = Field(default_factory=list)
+    actors: List[PlexPerson] = Field(default_factory=list)
 
 
 class AggregatedItem(BaseModel):
@@ -92,12 +147,15 @@ class ExternalIDs:
 __all__ = [
     "IMDbRating",
     "IMDbTitle",
+    "IMDbImage",
+    "IMDbName",
     "TMDBGenre",
     "TMDBMovie",
     "TMDBShow",
     "TMDBEpisode",
     "TMDBItem",
     "PlexGuid",
+    "PlexPerson",
     "PlexItem",
     "AggregatedItem",
     "ExternalIDs",
