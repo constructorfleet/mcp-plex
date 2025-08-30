@@ -3,7 +3,6 @@ from __future__ import annotations
 
 import asyncio
 import json
-import os
 import sys
 from pathlib import Path
 from typing import List, Optional
@@ -422,6 +421,20 @@ async def run(
 @click.option("--sample-dir", type=click.Path(path_type=Path))
 @click.option("--qdrant-url", envvar="QDRANT_URL", help="Qdrant URL or path")
 @click.option("--qdrant-api-key", envvar="QDRANT_API_KEY", help="Qdrant API key")
+@click.option(
+    "--continuous",
+    is_flag=True,
+    help="Continuously run the loader",
+    show_default=True,
+    default=False,
+)
+@click.option(
+    "--delay",
+    type=float,
+    default=300.0,
+    show_default=True,
+    help="Delay between runs in seconds when using --continuous",
+)
 def main(
     plex_url: Optional[str],
     plex_token: Optional[str],
@@ -429,12 +442,25 @@ def main(
     sample_dir: Optional[Path],
     qdrant_url: Optional[str],
     qdrant_api_key: Optional[str],
+    continuous: bool,
+    delay: float,
 ) -> None:
     """Entry-point for the ``load-data`` script."""
 
-    asyncio.run(
-        run(plex_url, plex_token, tmdb_api_key, sample_dir, qdrant_url, qdrant_api_key)
-    )
+    while True:
+        asyncio.run(
+            run(
+                plex_url,
+                plex_token,
+                tmdb_api_key,
+                sample_dir,
+                qdrant_url,
+                qdrant_api_key,
+            )
+        )
+        if not continuous:
+            break
+        asyncio.sleep(delay)
 
 
 if __name__ == "__main__":  # pragma: no cover - manual execution
