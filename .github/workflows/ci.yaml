@@ -2,6 +2,7 @@ name: Test and Lint
 
 permissions:
   contents: write
+  pull-requests: write
 
 on:
   push:
@@ -13,7 +14,7 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
-      - uses: astral-sh/setup-uv@v2
+      - uses: astral-sh/setup-uv@v6
         with:
           python-version: '3.12'
       - run: uv sync --no-dev
@@ -28,8 +29,8 @@ jobs:
         id: coverage
         uses: MishaKav/pytest-coverage-comment@main
         with:
-          pytest-coverage-path: ./pytest-coverage.txt
-          junitxml-path: ./pytest.xml
+          pytest-coverage-path: pytest-coverage.txt
+          junitxml-path: pytest.xml
           hide-comment: true
 
       - name: Update README
