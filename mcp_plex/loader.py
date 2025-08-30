@@ -4,7 +4,6 @@ from __future__ import annotations
 import asyncio
 import json
 import sys
-import time
 from pathlib import Path
 from typing import List, Optional
 
@@ -461,7 +460,7 @@ def main(
         )
         if not continuous:
             break
-        time.sleep(delay)
+        asyncio.sleep(delay)
 
 
 if __name__ == "__main__":  # pragma: no cover - manual execution
