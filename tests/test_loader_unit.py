@@ -1,4 +1,7 @@
 import types
+import asyncio
+import httpx
+
 from pathlib import Path
 
 from mcp_plex.loader import (
@@ -50,10 +53,6 @@ def test_build_plex_item_handles_full_metadata():
     assert item.rating_key == "1"
     assert item.directors[0].tag == "Director"
     assert item.actors[0].role == "Role"
-
-
-import asyncio
-import httpx
 
 
 def test_fetch_functions_success_and_failure():
