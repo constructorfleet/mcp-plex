@@ -24,14 +24,31 @@ def test_cli_continuous_respects_delay(monkeypatch):
 
     runner = CliRunner()
     with pytest.raises(RuntimeError, match="stop"):
-        runner.invoke(loader.main, ["--continuous", "--delay", "7.5"], catch_exceptions=False)
+        runner.invoke(
+            loader.main,
+            ["--continuous", "--delay", "7.5"],
+            catch_exceptions=False,
+            env={
+                "PLEX_URL": "http://localhost",
+                "PLEX_TOKEN": "token",
+                "TMDB_API_KEY": "key",
+            },
+        )
 
     assert actions == ["run", ("sleep", 7.5), "run"]
 
 
 def test_cli_invalid_delay_value():
     runner = CliRunner()
-    result = runner.invoke(loader.main, ["--delay", "not-a-number"])
+    result = runner.invoke(
+        loader.main,
+        ["--delay", "not-a-number"],
+        env={
+            "PLEX_URL": "http://localhost",
+            "PLEX_TOKEN": "token",
+            "TMDB_API_KEY": "key",
+        },
+    )
     assert result.exit_code != 0
     assert "Invalid value for '--delay'" in result.output
 
