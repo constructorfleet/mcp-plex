@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 import os
+import json
 from typing import Any, Annotated
 
 from fastmcp.server import FastMCP
@@ -55,6 +56,14 @@ async def _find_records(identifier: str, limit: int = 5) -> list[models.Record]:
         with_payload=True,
     )
     return points
+
+
+async def _get_media_data(identifier: str) -> dict[str, Any]:
+    """Return the first matching media record's payload."""
+    records = await _find_records(identifier, limit=1)
+    if not records:
+        raise ValueError("Media item not found")
+    return records[0].payload["data"]
 
 
 @server.tool("get-media")
@@ -142,6 +151,42 @@ async def recommend_media(
         with_payload=True,
     )
     return [r.payload["data"] for r in recs]
+
+
+@server.resource("resource://media-item/{identifier}")
+async def media_item(
+    identifier: Annotated[
+        str,
+        Field(
+            description="Rating key, IMDb/TMDb ID, or media title",
+            examples=["49915", "tt8367814", "The Gentlemen"],
+        ),
+    ],
+) -> str:
+    """Return full metadata for the given media identifier."""
+    data = await _get_media_data(identifier)
+    return json.dumps(data)
+
+
+@server.resource("resource://media-ids/{identifier}")
+async def media_ids(
+    identifier: Annotated[
+        str,
+        Field(
+            description="Rating key, IMDb/TMDb ID, or media title",
+            examples=["49915", "tt8367814", "The Gentlemen"],
+        ),
+    ],
+) -> str:
+    """Return external identifiers for the given media item."""
+    data = await _get_media_data(identifier)
+    ids = {
+        "rating_key": data.get("plex", {}).get("rating_key"),
+        "imdb": data.get("imdb", {}).get("id"),
+        "tmdb": data.get("tmdb", {}).get("id"),
+        "title": data.get("plex", {}).get("title"),
+    }
+    return json.dumps(ids)
 
 
 @server.resource("resource://media-poster/{identifier}")

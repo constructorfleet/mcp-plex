@@ -16,11 +16,14 @@ from mcp_plex.loader import (
 
 
 def test_extract_external_ids():
-    guid_objs = [types.SimpleNamespace(id="imdb://tt123"), types.SimpleNamespace(id="tmdb://456")]
+    guid_objs = [
+        types.SimpleNamespace(id="imdb://tt0133093"),
+        types.SimpleNamespace(id="tmdb://603"),
+    ]
     item = types.SimpleNamespace(guids=guid_objs)
     ids = _extract_external_ids(item)
-    assert ids.imdb == "tt123"
-    assert ids.tmdb == "456"
+    assert ids.imdb == "tt0133093"
+    assert ids.tmdb == "603"
 
 
 def test_load_from_sample_returns_items():
@@ -31,28 +34,31 @@ def test_load_from_sample_returns_items():
 
 
 def test_build_plex_item_handles_full_metadata():
-    guid_objs = [types.SimpleNamespace(id="imdb://tt123"), types.SimpleNamespace(id="tmdb://456")]
+    guid_objs = [
+        types.SimpleNamespace(id="imdb://tt0133093"),
+        types.SimpleNamespace(id="tmdb://603"),
+    ]
     raw = types.SimpleNamespace(
-        ratingKey="1",
-        guid="guid",
+        ratingKey="603",
+        guid="plex://movie/603",
         type="movie",
-        title="Title",
-        summary="Summary",
-        year=2024,
+        title="The Matrix",
+        summary="A hacker discovers the nature of his reality.",
+        year=1999,
         guids=guid_objs,
-        thumb="thumb.jpg",
-        art="art.jpg",
-        tagline="Tagline",
-        contentRating="PG",
-        directors=[types.SimpleNamespace(id=1, tag="Director", thumb="d.jpg")],
-        writers=[types.SimpleNamespace(id=2, tag="Writer", thumb="w.jpg")],
-        actors=[types.SimpleNamespace(id=3, tag="Actor", thumb="a.jpg", role="Role")],
+        thumb="matrix.jpg",
+        art="matrix_art.jpg",
+        tagline="Welcome to the Real World",
+        contentRating="R",
+        directors=[types.SimpleNamespace(id=1, tag="Lana Wachowski", thumb="lana.jpg")],
+        writers=[types.SimpleNamespace(id=2, tag="Lilly Wachowski", thumb="lilly.jpg")],
+        actors=[types.SimpleNamespace(id=3, tag="Keanu Reeves", thumb="neo.jpg", role="Neo")],
     )
 
     item = _build_plex_item(raw)
-    assert item.rating_key == "1"
-    assert item.directors[0].tag == "Director"
-    assert item.actors[0].role == "Role"
+    assert item.rating_key == "603"
+    assert item.directors[0].tag == "Lana Wachowski"
+    assert item.actors[0].role == "Neo"
 
 
 def test_fetch_functions_success_and_failure():

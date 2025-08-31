@@ -3,6 +3,7 @@ import asyncio
 from pathlib import Path
 import importlib
 import types
+import json
 import pytest
 
 from mcp_plex import loader
@@ -158,6 +159,17 @@ def test_server_tools(tmp_path, monkeypatch):
 
     art = asyncio.run(server.media_background.fn(identifier=movie_id))
     assert isinstance(art, str) and "art" in art
+
+    item = json.loads(asyncio.run(server.media_item.fn(identifier=movie_id)))
+    assert item["plex"]["rating_key"] == movie_id
+
+    ids = json.loads(asyncio.run(server.media_ids.fn(identifier=movie_id)))
+    assert ids["imdb"] == "tt8367814"
+
+    with pytest.raises(ValueError):
+        asyncio.run(server.media_item.fn(identifier="0"))
+    with pytest.raises(ValueError):
+        asyncio.run(server.media_ids.fn(identifier="0"))
 
     with pytest.raises(ValueError):
         asyncio.run(server.media_poster.fn(identifier="0"))
