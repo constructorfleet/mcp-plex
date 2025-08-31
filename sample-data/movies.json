@@ -1,0 +1,1772 @@
+{
+  "MediaContainer": {
+    "size": 10,
+    "totalSize": 2371,
+    "offset": 1680,
+    "allowSync": true,
+    "art": "/:/resources/movie-fanart.jpg",
+    "content": "secondary",
+    "identifier": "com.plexapp.plugins.library",
+    "librarySectionID": 1,
+    "librarySectionTitle": "Movies",
+    "librarySectionUUID": "602f9c9e-2313-432b-b461-68dbeb429b6b",
+    "mediaTagPrefix": "/system/bundle/media/flags/",
+    "mediaTagVersion": 1754902275,
+    "thumb": "/:/resources/movie.png",
+    "title1": "Movies",
+    "title2": "All Movies",
+    "viewGroup": "movie",
+    "Meta": {
+      "Type": [
+        {
+          "key": "/library/sections/1/all?type=1",
+          "type": "movie",
+          "title": "Movies",
+          "active": true,
+          "Filter": [
+            {
+              "filter": "genre",
+              "filterType": "string",
+              "key": "/library/sections/1/genre",
+              "title": "Genre",
+              "type": "filter"
+            },
+            {
+              "filter": "year",
+              "filterType": "integer",
+              "key": "/library/sections/1/year",
+              "title": "Year",
+              "type": "filter"
+            },
+            {
+              "filter": "decade",
+              "filterType": "integer",
+              "key": "/library/sections/1/decade",
+              "title": "Decade",
+              "type": "filter"
+            },
+            {
+              "filter": "contentRating",
+              "filterType": "string",
+              "key": "/library/sections/1/contentRating",
+              "title": "Content Rating",
+              "type": "filter"
+            },
+            {
+              "filter": "collection",
+              "filterType": "string",
+              "key": "/library/sections/1/collection",
+              "title": "Collection",
+              "type": "filter"
+            },
+            {
+              "filter": "director",
+              "filterType": "string",
+              "key": "/library/sections/1/director",
+              "title": "Director",
+              "type": "filter"
+            },
+            {
+              "filter": "actor",
+              "filterType": "string",
+              "key": "/library/sections/1/actor",
+              "title": "Actor",
+              "type": "filter"
+            },
+            {
+              "filter": "writer",
+              "filterType": "string",
+              "key": "/library/sections/1/writer",
+              "title": "Writer",
+              "type": "filter"
+            },
+            {
+              "filter": "producer",
+              "filterType": "string",
+              "key": "/library/sections/1/producer",
+              "title": "Producer",
+              "type": "filter"
+            },
+            {
+              "filter": "country",
+              "filterType": "string",
+              "key": "/library/sections/1/country",
+              "title": "Country",
+              "type": "filter"
+            },
+            {
+              "filter": "studio",
+              "filterType": "string",
+              "key": "/library/sections/1/studio",
+              "title": "Studio",
+              "type": "filter"
+            },
+            {
+              "filter": "resolution",
+              "filterType": "string",
+              "key": "/library/sections/1/resolution",
+              "title": "Resolution",
+              "type": "filter"
+            },
+            {
+              "filter": "hdr",
+              "filterType": "boolean",
+              "key": "/library/sections/1/hdr",
+              "title": "HDR",
+              "type": "filter"
+            },
+            {
+              "filter": "dovi",
+              "filterType": "boolean",
+              "key": "/library/sections/1/dovi",
+              "title": "DOVI",
+              "type": "filter"
+            },
+            {
+              "filter": "unwatched",
+              "filterType": "boolean",
+              "key": "/library/sections/1/unwatched",
+              "title": "Unwatched",
+              "type": "filter"
+            },
+            {
+              "filter": "inProgress",
+              "filterType": "boolean",
+              "key": "/library/sections/1/inProgress",
+              "title": "In Progress",
+              "type": "filter"
+            },
+            {
+              "filter": "unmatched",
+              "filterType": "boolean",
+              "key": "/library/sections/1/unmatched",
+              "title": "Unmatched",
+              "type": "filter"
+            },
+            {
+              "filter": "audioLanguage",
+              "filterType": "string",
+              "key": "/library/sections/1/audioLanguage",
+              "title": "Audio Language",
+              "type": "filter"
+            },
+            {
+              "filter": "subtitleLanguage",
+              "filterType": "string",
+              "key": "/library/sections/1/subtitleLanguage",
+              "title": "Subtitle Language",
+              "type": "filter"
+            },
+            {
+              "filter": "editionTitle",
+              "filterType": "string",
+              "key": "/library/sections/1/editionTitle",
+              "title": "Edition",
+              "type": "filter"
+            },
+            {
+              "filter": "label",
+              "filterType": "string",
+              "key": "/library/sections/1/label",
+              "title": "Labels",
+              "type": "filter"
+            },
+            {
+              "filter": "location",
+              "filterType": "string",
+              "key": "/library/sections/1/location",
+              "title": "Folder Location",
+              "type": "filter"
+            },
+            {
+              "filter": "duplicate",
+              "filterType": "boolean",
+              "key": "/library/sections/1/duplicate",
+              "title": "Duplicates",
+              "type": "filter",
+              "advanced": true
+            }
+          ],
+          "Sort": [
+            {
+              "active": true,
+              "activeDirection": "asc",
+              "default": "asc",
+              "defaultDirection": "asc",
+              "descKey": "titleSort:desc",
+              "firstCharacterKey": "/library/sections/1/firstCharacter",
+              "key": "titleSort",
+              "title": "Title"
+            },
+            {
+              "defaultDirection": "desc",
+              "descKey": "year:desc",
+              "key": "year",
+              "title": "Year"
+            },
+            {
+              "defaultDirection": "desc",
+              "descKey": "originallyAvailableAt:desc",
+              "key": "originallyAvailableAt",
+              "title": "Release Date"
+            },
+            {
+              "defaultDirection": "desc",
+              "descKey": "rating:desc",
+              "key": "rating",
+              "title": "Critic Rating"
+            },
+            {
+              "defaultDirection": "desc",
+              "descKey": "audienceRating:desc",
+              "key": "audienceRating",
+              "title": "Audience Rating"
+            },
+            {
+              "defaultDirection": "desc",
+              "descKey": "userRating:desc",
+              "key": "userRating",
+              "title": "Rating"
+            },
+            {
+              "defaultDirection": "desc",
+              "descKey": "contentRating:desc",
+              "key": "contentRating",
+              "title": "Content Rating"
+            },
+            {
+              "defaultDirection": "desc",
+              "descKey": "duration:desc",
+              "key": "duration",
+              "title": "Duration"
+            },
+            {
+              "defaultDirection": "desc",
+              "descKey": "viewOffset:desc",
+              "key": "viewOffset",
+              "title": "Progress"
+            },
+            {
+              "defaultDirection": "desc",
+              "descKey": "viewCount:desc",
+              "key": "viewCount",
+              "title": "Plays"
+            },
+            {
+              "defaultDirection": "desc",
+              "descKey": "addedAt:desc",
+              "key": "addedAt",
+              "title": "Date Added"
+            },
+            {
+              "defaultDirection": "desc",
+              "descKey": "lastViewedAt:desc",
+              "key": "lastViewedAt",
+              "title": "Date Viewed"
+            },
+            {
+              "defaultDirection": "asc",
+              "descKey": "mediaHeight:desc",
+              "key": "mediaHeight",
+              "title": "Resolution"
+            },
+            {
+              "defaultDirection": "desc",
+              "descKey": "mediaBitrate:desc",
+              "key": "mediaBitrate",
+              "title": "Bitrate"
+            },
+            {
+              "defaultDirection": "desc",
+              "descKey": "random:desc",
+              "key": "random",
+              "title": "Randomly"
+            }
+          ],
+          "Field": [
+            {
+              "key": "title",
+              "title": "Title",
+              "type": "string"
+            },
+            {
+              "key": "studio",
+              "title": "Studio",
+              "type": "string"
+            },
+            {
+              "key": "userRating",
+              "subType": "rating",
+              "title": "Rating",
+              "type": "integer"
+            },
+            {
+              "key": "contentRating",
+              "title": "Content Rating",
+              "type": "tag"
+            },
+            {
+              "key": "year",
+              "subType": "year",
+              "title": "Year",
+              "type": "integer"
+            },
+            {
+              "key": "decade",
+              "subType": "decade",
+              "title": "Decade",
+              "type": "integer"
+            },
+            {
+              "key": "originallyAvailableAt",
+              "title": "Release Date",
+              "type": "date"
+            },
+            {
+              "key": "duration",
+              "subType": "duration",
+              "title": "Duration",
+              "type": "integer"
+            },
+            {
+              "key": "unmatched",
+              "title": "Unmatched",
+              "type": "boolean"
+            },
+            {
+              "key": "duplicate",
+              "title": "Duplicate",
+              "type": "boolean"
+            },
+            {
+              "key": "genre",
+              "title": "Genre",
+              "type": "tag"
+            },
+            {
+              "key": "collection",
+              "title": "Collection",
+              "type": "tag"
+            },
+            {
+              "key": "director",
+              "title": "Director",
+              "type": "tag"
+            },
+            {
+              "key": "writer",
+              "title": "Writer",
+              "type": "tag"
+            },
+            {
+              "key": "producer",
+              "title": "Producer",
+              "type": "tag"
+            },
+            {
+              "key": "actor",
+              "title": "Actor",
+              "type": "tag"
+            },
+            {
+              "key": "country",
+              "title": "Country",
+              "type": "tag"
+            },
+            {
+              "key": "addedAt",
+              "title": "Date Added",
+              "type": "date"
+            },
+            {
+              "key": "viewCount",
+              "title": "Plays",
+              "type": "integer"
+            },
+            {
+              "key": "lastViewedAt",
+              "title": "Last Watched",
+              "type": "date"
+            },
+            {
+              "key": "unwatched",
+              "title": "Unwatched",
+              "type": "boolean"
+            },
+            {
+              "key": "resolution",
+              "title": "Resolution",
+              "type": "resolution"
+            },
+            {
+              "key": "hdr",
+              "subType": "hdr",
+              "title": "HDR",
+              "type": "boolean"
+            },
+            {
+              "key": "dovi",
+              "subType": "dovi",
+              "title": "DOVI",
+              "type": "boolean"
+            },
+            {
+              "key": "mediaSize",
+              "subType": "fileSize",
+              "title": "File Size",
+              "type": "integer"
+            },
+            {
+              "key": "mediaBitrate",
+              "subType": "bitrate",
+              "title": "Bitrate",
+              "type": "integer"
+            },
+            {
+              "key": "subtitleLanguage",
+              "title": "Subtitle Language",
+              "type": "subtitleLanguage"
+            },
+            {
+              "key": "audioLanguage",
+              "title": "Audio Language",
+              "type": "audioLanguage"
+            },
+            {
+              "key": "inProgress",
+              "title": "In Progress",
+              "type": "boolean"
+            },
+            {
+              "key": "trash",
+              "title": "Trash",
+              "type": "boolean"
+            },
+            {
+              "key": "location",
+              "title": "Folder Location",
+              "type": "tag"
+            },
+            {
+              "key": "editionTitle",
+              "title": "Edition",
+              "type": "string"
+            },
+            {
+              "key": "label",
+              "title": "Label",
+              "type": "tag"
+            }
+          ]
+        },
+        {
+          "key": "/library/sections/1/folder",
+          "type": "folder",
+          "title": "Folders",
+          "active": false
+        }
+      ],
+      "FieldType": [
+        {
+          "type": "tag",
+          "Operator": [
+            {
+              "key": "=",
+              "title": "is"
+            },
+            {
+              "key": "!=",
+              "title": "is not"
+            }
+          ]
+        },
+        {
+          "type": "integer",
+          "Operator": [
+            {
+              "key": "=",
+              "title": "is"
+            },
+            {
+              "key": "!=",
+              "title": "is not"
+            },
+            {
+              "key": ">>=",
+              "title": "is greater than"
+            },
+            {
+              "key": "<<=",
+              "title": "is less than"
+            }
+          ]
+        },
+        {
+          "type": "string",
+          "Operator": [
+            {
+              "key": "=",
+              "title": "contains"
+            },
+            {
+              "key": "!=",
+              "title": "does not contain"
+            },
+            {
+              "key": "==",
+              "title": "is"
+            },
+            {
+              "key": "!==",
+              "title": "is not"
+            },
+            {
+              "key": "<=",
+              "title": "begins with"
+            },
+            {
+              "key": ">=",
+              "title": "ends with"
+            }
+          ]
+        },
+        {
+          "type": "boolean",
+          "Operator": [
+            {
+              "key": "=",
+              "title": "is true"
+            },
+            {
+              "key": "!=",
+              "title": "is false"
+            }
+          ]
+        },
+        {
+          "type": "date",
+          "Operator": [
+            {
+              "key": "<<=",
+              "title": "is before"
+            },
+            {
+              "key": ">>=",
+              "title": "is after"
+            }
+          ]
+        },
+        {
+          "type": "subtitleLanguage",
+          "Operator": [
+            {
+              "key": "=",
+              "title": "is"
+            },
+            {
+              "key": "!=",
+              "title": "is not"
+            }
+          ]
+        },
+        {
+          "type": "audioLanguage",
+          "Operator": [
+            {
+              "key": "=",
+              "title": "is"
+            },
+            {
+              "key": "!=",
+              "title": "is not"
+            }
+          ]
+        },
+        {
+          "type": "resolution",
+          "Operator": [
+            {
+              "key": "=",
+              "title": "is"
+            }
+          ]
+        }
+      ]
+    },
+    "Metadata": [
+      {
+        "ratingKey": "9484",
+        "key": "/library/metadata/9484",
+        "guid": "plex://movie/5d77686deb5d26001f1eaf9d",
+        "slug": "priest",
+        "studio": "Michael De Luca Productions",
+        "type": "movie",
+        "title": "Priest",
+        "contentRating": "PG-13",
+        "summary": "In an alternate world, humanity and vampires have warred for centuries. After the last Vampire War, the veteran Warrior Priest lives in obscurity with other humans inside one of the Church's walled cities. When the Priest's niece is kidnapped by vampires, the Priest breaks his vows to hunt them down. He is accompanied by the niece's boyfriend, who is a wasteland sheriff, and a former Warrior Priestess.",
+        "rating": 1.5,
+        "audienceRating": 4.6,
+        "viewCount": 1,
+        "lastViewedAt": 1746097570,
+        "year": 2011,
+        "tagline": "The war is eternal. His mission is just the beginning.",
+        "thumb": "/library/metadata/9484/thumb/1754675495",
+        "art": "/library/metadata/9484/art/1754675495",
+        "duration": 5247408,
+        "originallyAvailableAt": "2011-05-05",
+        "addedAt": 1639481889,
+        "updatedAt": 1754675495,
+        "audienceRatingImage": "rottentomatoes://image.rating.spilled",
+        "chapterSource": "media",
+        "primaryExtraKey": "/library/metadata/9524",
+        "ratingImage": "rottentomatoes://image.rating.rotten",
+        "Media": [
+          {
+            "id": 22684,
+            "duration": 5247408,
+            "bitrate": 4663,
+            "width": 1920,
+            "height": 1080,
+            "aspectRatio": 1.78,
+            "audioChannels": 6,
+            "audioCodec": "dca-ma",
+            "videoCodec": "hevc",
+            "videoResolution": "1080",
+            "container": "mkv",
+            "videoFrameRate": "24p",
+            "audioProfile": "ma",
+            "videoProfile": "main",
+            "hasVoiceActivity": false,
+            "Part": [
+              {
+                "id": 22684,
+                "key": "/library/parts/22684/1736654033/file.mkv",
+                "duration": 5247408,
+                "file": "/movies/Priest (2011)/Priest (2011) Remux-1080p Proper.mkv",
+                "size": 3063183631,
+                "audioProfile": "ma",
+                "container": "mkv",
+                "indexes": "sd",
+                "videoProfile": "main"
+              }
+            ]
+          }
+        ],
+        "Image": [
+          {
+            "alt": "Priest",
+            "type": "coverPoster",
+            "url": "/library/metadata/9484/thumb/1754675495"
+          },
+          {
+            "alt": "Priest",
+            "type": "background",
+            "url": "/library/metadata/9484/art/1754675495"
+          },
+          {
+            "alt": "Priest",
+            "type": "clearLogo",
+            "url": "/library/metadata/9484/clearLogo/1754675495"
+          }
+        ],
+        "UltraBlurColors": {
+          "topLeft": "10323f",
+          "topRight": "1c455b",
+          "bottomRight": "040f1c",
+          "bottomLeft": "2e6386"
+        },
+        "Genre": [
+          {
+            "tag": "Action"
+          },
+          {
+            "tag": "Fantasy"
+          }
+        ],
+        "Country": [
+          {
+            "tag": "United States of America"
+          }
+        ],
+        "Director": [
+          {
+            "tag": "Scott Stewart"
+          }
+        ],
+        "Writer": [
+          {
+            "tag": "Min-Woo Hyung"
+          }
+        ],
+        "Role": [
+          {
+            "tag": "Paul Bettany"
+          },
+          {
+            "tag": "Karl Urban"
+          },
+          {
+            "tag": "Lily Collins"
+          }
+        ]
+      },
+      {
+        "ratingKey": "41587",
+        "key": "/library/metadata/41587",
+        "guid": "plex://movie/5d776a7ffb0d55001f547d2e",
+        "slug": "the-prince",
+        "studio": "EFO Films",
+        "type": "movie",
+        "title": "The Prince",
+        "titleSort": "Prince",
+        "contentRating": "R",
+        "contentRatingAge": 17,
+        "summary": "When his daughter is kidnapped, a retired assassin is drawn back into the life he gave up. To rescue her, he must confront his former rival.",
+        "audienceRating": 2.3,
+        "viewCount": 1,
+        "lastViewedAt": 1673114438,
+        "year": 2014,
+        "tagline": "Mercy is for the Weak",
+        "thumb": "/library/metadata/41587/thumb/1755273205",
+        "art": "/library/metadata/41587/art/1755273205",
+        "duration": 5440643,
+        "originallyAvailableAt": "2014-08-22",
+        "addedAt": 1704865508,
+        "updatedAt": 1755273205,
+        "audienceRatingImage": "rottentomatoes://image.rating.spilled",
+        "chapterSource": "media",
+        "primaryExtraKey": "/library/metadata/41623",
+        "Media": [
+          {
+            "id": 71279,
+            "duration": 5440643,
+            "bitrate": 4406,
+            "width": 1920,
+            "height": 1080,
+            "aspectRatio": 1.78,
+            "audioChannels": 6,
+            "audioCodec": "truehd",
+            "videoCodec": "hevc",
+            "videoResolution": "1080",
+            "container": "mkv",
+            "videoFrameRate": "24p",
+            "videoProfile": "main",
+            "hasVoiceActivity": false,
+            "Part": [
+              {
+                "id": 71279,
+                "key": "/library/parts/71279/1736669501/file.mkv",
+                "duration": 5440643,
+                "file": "/movies/The Prince (2014)/The Prince (2014).mkv",
+                "size": 3042788629,
+                "container": "mkv",
+                "indexes": "sd",
+                "videoProfile": "main"
+              }
+            ]
+          }
+        ],
+        "Image": [
+          {
+            "alt": "The Prince",
+            "type": "coverPoster",
+            "url": "/library/metadata/41587/thumb/1755273205"
+          },
+          {
+            "alt": "The Prince",
+            "type": "background",
+            "url": "/library/metadata/41587/art/1755273205"
+          },
+          {
+            "alt": "The Prince",
+            "type": "clearLogo",
+            "url": "/library/metadata/41587/clearLogo/1755273205"
+          }
+        ],
+        "UltraBlurColors": {
+          "topLeft": "4b1e1a",
+          "topRight": "0d102b",
+          "bottomRight": "050319",
+          "bottomLeft": "07081c"
+        },
+        "Genre": [
+          {
+            "tag": "Thriller"
+          },
+          {
+            "tag": "Action"
+          }
+        ],
+        "Country": [
+          {
+            "tag": "Republic of Korea"
+          },
+          {
+            "tag": "United States of America"
+          }
+        ],
+        "Director": [
+          {
+            "tag": "Brian A. Miller"
+          }
+        ],
+        "Writer": [
+          {
+            "tag": "Andre Fabrizio"
+          },
+          {
+            "tag": "Jeremy Passmore"
+          }
+        ],
+        "Role": [
+          {
+            "tag": "Bruce Willis"
+          },
+          {
+            "tag": "Jason Patric"
+          },
+          {
+            "tag": "John Cusack"
+          }
+        ]
+      },
+      {
+        "ratingKey": "9485",
+        "key": "/library/metadata/9485",
+        "guid": "plex://movie/5d776833f59e580021898854",
+        "slug": "prince-of-persia-the-sands-of-time",
+        "studio": "Walt Disney Pictures",
+        "type": "movie",
+        "title": "Prince of Persia: The Sands of Time",
+        "contentRating": "PG-13",
+        "summary": "Set in the mystical lands of Persia, a rogue prince and a mysterious princess race against dark forces to safeguard an ancient dagger capable of releasing the Sands of Time -- a gift from the gods that can reverse time and allow its possessor to rule the world.",
+        "rating": 3.7,
+        "audienceRating": 5.8,
+        "viewCount": 1,
+        "lastViewedAt": 1625597761,
+        "year": 2010,
+        "tagline": "Defy the Future",
+        "thumb": "/library/metadata/9485/thumb/1754675682",
+        "art": "/library/metadata/9485/art/1754675682",
+        "duration": 6953529,
+        "originallyAvailableAt": "2010-05-19",
+        "addedAt": 1639483100,
+        "updatedAt": 1754675682,
+        "audienceRatingImage": "rottentomatoes://image.rating.spilled",
+        "chapterSource": "media",
+        "primaryExtraKey": "/library/metadata/9551",
+        "ratingImage": "rottentomatoes://image.rating.rotten",
+        "Media": [
+          {
+            "id": 22685,
+            "duration": 6953529,
+            "bitrate": 7691,
+            "width": 1920,
+            "height": 1080,
+            "aspectRatio": 1.78,
+            "audioChannels": 6,
+            "audioCodec": "dca-ma",
+            "videoCodec": "hevc",
+            "videoResolution": "1080",
+            "container": "mkv",
+            "videoFrameRate": "24p",
+            "audioProfile": "ma",
+            "videoProfile": "main",
+            "hasVoiceActivity": false,
+            "Part": [
+              {
+                "id": 22685,
+                "key": "/library/parts/22685/1736654145/file.mkv",
+                "duration": 6953529,
+                "file": "/movies/Prince of Persia The Sands of Time (2010)/Prince of Persia The Sands of Time (2010) Remux-1080p.mkv",
+                "size": 6690876569,
+                "audioProfile": "ma",
+                "container": "mkv",
+                "indexes": "sd",
+                "videoProfile": "main"
+              }
+            ]
+          }
+        ],
+        "Image": [
+          {
+            "alt": "Prince of Persia: The Sands of Time",
+            "type": "coverPoster",
+            "url": "/library/metadata/9485/thumb/1754675682"
+          },
+          {
+            "alt": "Prince of Persia: The Sands of Time",
+            "type": "background",
+            "url": "/library/metadata/9485/art/1754675682"
+          },
+          {
+            "alt": "Prince of Persia: The Sands of Time",
+            "type": "clearLogo",
+            "url": "/library/metadata/9485/clearLogo/1754675682"
+          }
+        ],
+        "UltraBlurColors": {
+          "topLeft": "47220c",
+          "topRight": "2d6483",
+          "bottomRight": "2e6387",
+          "bottomLeft": "ab1e21"
+        },
+        "Genre": [
+          {
+            "tag": "Action"
+          },
+          {
+            "tag": "Adventure"
+          }
+        ],
+        "Country": [
+          {
+            "tag": "United States of America"
+          }
+        ],
+        "Director": [
+          {
+            "tag": "Mike Newell"
+          }
+        ],
+        "Writer": [
+          {
+            "tag": "Boaz Yakin"
+          },
+          {
+            "tag": "Doug Miro"
+          }
+        ],
+        "Role": [
+          {
+            "tag": "Jake Gyllenhaal"
+          },
+          {
+            "tag": "Gemma Arterton"
+          },
+          {
+            "tag": "Ben Kingsley"
+          }
+        ]
+      },
+      {
+        "ratingKey": "41554",
+        "key": "/library/metadata/41554",
+        "guid": "plex://movie/5f9d8a5af07efd002e11f181",
+        "slug": "the-princess-2022-1",
+        "studio": "20th Century Studios",
+        "type": "movie",
+        "title": "The Princess",
+        "titleSort": "Princess",
+        "contentRating": "R",
+        "contentRatingAge": 16,
+        "summary": "When a strong-willed princess refuses to wed the cruel sociopath, she is kidnapped and locked in a remote tower of her father’s castle. With her vindictive suitor intent on taking her father’s throne, the princess must save the kingdom.",
+        "rating": 6.2,
+        "audienceRating": 4.4,
+        "year": 2022,
+        "tagline": "Bow to no one.",
+        "thumb": "/library/metadata/41554/thumb/1755273202",
+        "art": "/library/metadata/41554/art/1755273202",
+        "duration": 5638240,
+        "originallyAvailableAt": "2022-06-01",
+        "addedAt": 1704865504,
+        "updatedAt": 1755273202,
+        "audienceRatingImage": "rottentomatoes://image.rating.spilled",
+        "chapterSource": "media",
+        "primaryExtraKey": "/library/metadata/41606",
+        "ratingImage": "rottentomatoes://image.rating.ripe",
+        "Media": [
+          {
+            "id": 71229,
+            "duration": 5638240,
+            "bitrate": 21715,
+            "width": 3840,
+            "height": 1920,
+            "aspectRatio": 1.85,
+            "audioChannels": 6,
+            "audioCodec": "flac",
+            "videoCodec": "hevc",
+            "videoResolution": "4k",
+            "container": "mkv",
+            "videoFrameRate": "24p",
+            "videoProfile": "main 10",
+            "hasVoiceActivity": false,
+            "Part": [
+              {
+                "id": 71229,
+                "key": "/library/parts/71229/1736669704/file.mkv",
+                "duration": 5638240,
+                "file": "/movies/The Princess (2022)/The Princess (2022) WEBDL-2160p.mkv",
+                "size": 15307513617,
+                "container": "mkv",
+                "indexes": "sd",
+                "videoProfile": "main 10"
+              }
+            ]
+          }
+        ],
+        "Image": [
+          {
+            "alt": "The Princess",
+            "type": "coverPoster",
+            "url": "/library/metadata/41554/thumb/1755273202"
+          },
+          {
+            "alt": "The Princess",
+            "type": "background",
+            "url": "/library/metadata/41554/art/1755273202"
+          },
+          {
+            "alt": "The Princess",
+            "type": "clearLogo",
+            "url": "/library/metadata/41554/clearLogo/1755273202"
+          }
+        ],
+        "UltraBlurColors": {
+          "topLeft": "0a2747",
+          "topRight": "203360",
+          "bottomRight": "233061",
+          "bottomLeft": "041c34"
+        },
+        "Genre": [
+          {
+            "tag": "Action"
+          },
+          {
+            "tag": "Drama"
+          }
+        ],
+        "Country": [
+          {
+            "tag": "United States of America"
+          }
+        ],
+        "Director": [
+          {
+            "tag": "Le Van Kiet"
+          }
+        ],
+        "Writer": [
+          {
+            "tag": "Jake Thornton"
+          },
+          {
+            "tag": "Ben Lustig "
+          }
+        ],
+        "Role": [
+          {
+            "tag": "Joey King"
+          },
+          {
+            "tag": "Dominic Cooper"
+          },
+          {
+            "tag": "Olga Kurylenko"
+          }
+        ]
+      },
+      {
+        "ratingKey": "41511",
+        "key": "/library/metadata/41511",
+        "guid": "plex://movie/5d77682b8718ba001e3127dd",
+        "slug": "the-princess-bride",
+        "studio": "The Princess Bride Ltd.",
+        "type": "movie",
+        "title": "The Princess Bride",
+        "titleSort": "Princess Bride",
+        "contentRating": "PG",
+        "contentRatingAge": 9,
+        "summary": "In this enchantingly cracked fairy tale, the beautiful Princess Buttercup and the dashing Westley must overcome staggering odds to find happiness amid six-fingered swordsmen, murderous princes, Sicilians and rodents of unusual size. But even death can't stop these true lovebirds from triumphing.",
+        "rating": 9.6,
+        "audienceRating": 9.4,
+        "viewCount": 2,
+        "lastViewedAt": 1713775835,
+        "year": 1987,
+        "tagline": "It's as real as the feelings you feel.",
+        "thumb": "/library/metadata/41511/thumb/1755273198",
+        "art": "/library/metadata/41511/art/1755273198",
+        "duration": 5906633,
+        "originallyAvailableAt": "1987-09-25",
+        "addedAt": 1704865494,
+        "updatedAt": 1755273198,
+        "audienceRatingImage": "rottentomatoes://image.rating.upright",
+        "chapterSource": "media",
+        "primaryExtraKey": "/library/metadata/41556",
+        "ratingImage": "rottentomatoes://image.rating.ripe",
+        "Media": [
+          {
+            "id": 71120,
+            "duration": 5906633,
+            "bitrate": 64998,
+            "width": 3840,
+            "height": 2160,
+            "aspectRatio": 1.78,
+            "audioChannels": 6,
+            "audioCodec": "dca-ma",
+            "videoCodec": "hevc",
+            "videoResolution": "4k",
+            "container": "mkv",
+            "videoFrameRate": "24p",
+            "audioProfile": "ma",
+            "videoProfile": "main 10",
+            "hasVoiceActivity": false,
+            "Part": [
+              {
+                "id": 71120,
+                "key": "/library/parts/71120/1736502385/file.mkv",
+                "duration": 5906633,
+                "file": "/movies/The Princess Bride (1987)/The Princess Bride (1987) Remux-2160p.mkv",
+                "size": 48000207071,
+                "audioProfile": "ma",
+                "container": "mkv",
+                "indexes": "sd",
+                "videoProfile": "main 10"
+              }
+            ]
+          }
+        ],
+        "Image": [
+          {
+            "alt": "The Princess Bride",
+            "type": "coverPoster",
+            "url": "/library/metadata/41511/thumb/1755273198"
+          },
+          {
+            "alt": "The Princess Bride",
+            "type": "background",
+            "url": "/library/metadata/41511/art/1755273198"
+          },
+          {
+            "alt": "The Princess Bride",
+            "type": "clearLogo",
+            "url": "/library/metadata/41511/clearLogo/1755273198"
+          }
+        ],
+        "UltraBlurColors": {
+          "topLeft": "123143",
+          "topRight": "226681",
+          "bottomRight": "193f52",
+          "bottomLeft": "225366"
+        },
+        "Genre": [
+          {
+            "tag": "Adventure"
+          },
+          {
+            "tag": "Action"
+          }
+        ],
+        "Country": [
+          {
+            "tag": "United States of America"
+          }
+        ],
+        "Director": [
+          {
+            "tag": "Rob Reiner"
+          }
+        ],
+        "Writer": [
+          {
+            "tag": "William Goldman"
+          }
+        ],
+        "Role": [
+          {
+            "tag": "Cary Elwes"
+          },
+          {
+            "tag": "Robin Wright"
+          },
+          {
+            "tag": "Mandy Patinkin"
+          }
+        ]
+      },
+      {
+        "ratingKey": "41549",
+        "key": "/library/metadata/41549",
+        "guid": "plex://movie/5d776834151a60001f24d6b6",
+        "slug": "the-principal",
+        "studio": "ML Delphi Premier Productions",
+        "type": "movie",
+        "title": "The Principal",
+        "titleSort": "Principal",
+        "contentRating": "R",
+        "summary": "Rick Latimer is a teacher who gets a job as the principal of a school with a very bad reputation. In fact, his transfer there is a kind of punishment because he beat up his wife's boyfriend. Rick finds himself in a school where drugs, knives, and guns are very usual things.",
+        "rating": 4.4,
+        "audienceRating": 5.1,
+        "year": 1987,
+        "tagline": "He's teaching the students at Brandel High two words... NO MORE.",
+        "thumb": "/library/metadata/41549/thumb/1752698060",
+        "art": "/library/metadata/41549/art/1752698060",
+        "duration": 6617023,
+        "originallyAvailableAt": "1987-09-18",
+        "addedAt": 1704865502,
+        "updatedAt": 1752698060,
+        "audienceRatingImage": "rottentomatoes://image.rating.spilled",
+        "chapterSource": "media",
+        "primaryExtraKey": "/library/metadata/41589",
+        "ratingImage": "rottentomatoes://image.rating.rotten",
+        "Media": [
+          {
+            "id": 129509,
+            "duration": 6617023,
+            "bitrate": 2215,
+            "width": 1920,
+            "height": 1080,
+            "aspectRatio": 1.78,
+            "audioChannels": 2,
+            "audioCodec": "flac",
+            "videoCodec": "hevc",
+            "videoResolution": "1080",
+            "container": "mkv",
+            "videoFrameRate": "24p",
+            "videoProfile": "main",
+            "hasVoiceActivity": false,
+            "Part": [
+              {
+                "id": 129509,
+                "key": "/library/parts/129509/1753211734/file.mkv",
+                "duration": 6617023,
+                "file": "/movies/The Principal (1987)/The.Principal.1987.1080p.BluRay.REMUX.AVC.FLAC.2.0-EPSiLON.mkv",
+                "size": 1833911590,
+                "container": "mkv",
+                "indexes": "sd",
+                "videoProfile": "main"
+              }
+            ]
+          }
+        ],
+        "Image": [
+          {
+            "alt": "The Principal",
+            "type": "coverPoster",
+            "url": "/library/metadata/41549/thumb/1752698060"
+          },
+          {
+            "alt": "The Principal",
+            "type": "background",
+            "url": "/library/metadata/41549/art/1752698060"
+          },
+          {
+            "alt": "The Principal",
+            "type": "clearLogo",
+            "url": "/library/metadata/41549/clearLogo/1752698060"
+          }
+        ],
+        "UltraBlurColors": {
+          "topLeft": "0b3147",
+          "topRight": "a8261f",
+          "bottomRight": "2a5380",
+          "bottomLeft": "9b3732"
+        },
+        "Genre": [
+          {
+            "tag": "Action"
+          },
+          {
+            "tag": "Adventure"
+          }
+        ],
+        "Country": [
+          {
+            "tag": "United States of America"
+          }
+        ],
+        "Director": [
+          {
+            "tag": "Christopher Cain"
+          }
+        ],
+        "Writer": [
+          {
+            "tag": "Frank Deese"
+          }
+        ],
+        "Role": [
+          {
+            "tag": "Jim Belushi"
+          },
+          {
+            "tag": "Louis Gossett Jr."
+          },
+          {
+            "tag": "Rae Dawn Chong"
+          }
+        ]
+      },
+      {
+        "ratingKey": "9486",
+        "key": "/library/metadata/9486",
+        "guid": "plex://movie/5d7769b57a53e9001e6ee30a",
+        "slug": "prisoners",
+        "studio": "Alcon Entertainment",
+        "type": "movie",
+        "title": "Prisoners",
+        "contentRating": "R",
+        "summary": "Keller Dover is facing a parent’s worst nightmare: his young daughter and her friend have gone missing. Heading the investigation, Detective Loki arrests the only suspect – the driver of an RV on which the girls had been playing – but a lack of evidence forces his release. As pressure mounts, Loki’s team pursues multiple leads while a frantic Dover decides he has no choice but to take matters into his own hands.",
+        "rating": 8.1,
+        "audienceRating": 8.7,
+        "year": 2013,
+        "tagline": "Every moment matters.",
+        "thumb": "/library/metadata/9486/thumb/1743850847",
+        "art": "/library/metadata/9486/art/1743850847",
+        "duration": 9192351,
+        "originallyAvailableAt": "2013-09-19",
+        "addedAt": 1681709618,
+        "updatedAt": 1743850847,
+        "audienceRatingImage": "rottentomatoes://image.rating.upright",
+        "chapterSource": "media",
+        "primaryExtraKey": "/library/metadata/9528",
+        "ratingImage": "rottentomatoes://image.rating.ripe",
+        "Media": [
+          {
+            "id": 22686,
+            "duration": 9192351,
+            "bitrate": 4215,
+            "width": 1920,
+            "height": 1080,
+            "aspectRatio": 1.78,
+            "audioChannels": 6,
+            "audioCodec": "dca-ma",
+            "videoCodec": "hevc",
+            "videoResolution": "1080",
+            "container": "mkv",
+            "videoFrameRate": "24p",
+            "audioProfile": "ma",
+            "videoProfile": "main",
+            "hasVoiceActivity": true,
+            "Part": [
+              {
+                "id": 22686,
+                "key": "/library/parts/22686/1746492841/file.mkv",
+                "duration": 9192351,
+                "file": "/movies/Prisoners (2013)/Prisoners (2013).mkv",
+                "size": 4851230201,
+                "audioProfile": "ma",
+                "container": "mkv",
+                "indexes": "sd",
+                "videoProfile": "main"
+              }
+            ]
+          }
+        ],
+        "Image": [
+          {
+            "alt": "Prisoners",
+            "type": "coverPoster",
+            "url": "/library/metadata/9486/thumb/1743850847"
+          },
+          {
+            "alt": "Prisoners",
+            "type": "background",
+            "url": "/library/metadata/9486/art/1743850847"
+          }
+        ],
+        "UltraBlurColors": {
+          "topLeft": "0c0d0f",
+          "topRight": "08182c",
+          "bottomRight": "303036",
+          "bottomLeft": "07070b"
+        },
+        "Genre": [
+          {
+            "tag": "Drama"
+          },
+          {
+            "tag": "Thriller"
+          }
+        ],
+        "Country": [
+          {
+            "tag": "United States of America"
+          }
+        ],
+        "Director": [
+          {
+            "tag": "Denis Villeneuve"
+          }
+        ],
+        "Writer": [
+          {
+            "tag": "Aaron Guzikowski"
+          }
+        ],
+        "Role": [
+          {
+            "tag": "Hugh Jackman"
+          },
+          {
+            "tag": "Jake Gyllenhaal"
+          },
+          {
+            "tag": "Terrence Howard"
+          }
+        ]
+      },
+      {
+        "ratingKey": "9490",
+        "key": "/library/metadata/9490",
+        "guid": "plex://movie/5d77704c96b655001fe92cd8",
+        "slug": "prisoners-of-the-ghostland",
+        "studio": "Eleven Arts Studios",
+        "type": "movie",
+        "title": "Prisoners of the Ghostland",
+        "contentRating": "Not Rated",
+        "summary": "Set in the treacherous frontier city of Samurai Town where a ruthless bank robber is sprung from jail by wealthy warlord The Governor, whose adopted granddaughter Bernice has gone missing. The Governor offers the prisoner his freedom in exchange for retrieving the runaway. Strapped into a leather suit that will self-destruct within three days, the bandit sets off on a journey to find the young woman and his own path to redemption.",
+        "rating": 6.2,
+        "audienceRating": 5,
+        "viewCount": 1,
+        "lastViewedAt": 1639452387,
+        "year": 2021,
+        "tagline": "The granddaughter of the world's greatest leader is a hostage in the most dangerous place on Earth. Now only the deadliest man alive can save her.",
+        "thumb": "/library/metadata/9490/thumb/1751292015",
+        "art": "/library/metadata/9490/art/1751292015",
+        "duration": 6151144,
+        "originallyAvailableAt": "2021-08-31",
+        "addedAt": 1640882508,
+        "updatedAt": 1751292015,
+        "audienceRatingImage": "rottentomatoes://image.rating.spilled",
+        "chapterSource": "media",
+        "primaryExtraKey": "/library/metadata/9549",
+        "ratingImage": "rottentomatoes://image.rating.ripe",
+        "Media": [
+          {
+            "id": 119269,
+            "duration": 6151144,
+            "bitrate": 61738,
+            "width": 3840,
+            "height": 2160,
+            "aspectRatio": 1.78,
+            "audioChannels": 6,
+            "audioCodec": "dca-ma",
+            "videoCodec": "hevc",
+            "videoResolution": "4k",
+            "container": "mkv",
+            "videoFrameRate": "24p",
+            "audioProfile": "ma",
+            "videoProfile": "main 10",
+            "hasVoiceActivity": true,
+            "Part": [
+              {
+                "id": 119269,
+                "key": "/library/parts/119269/1746990111/file.mkv",
+                "duration": 6151144,
+                "file": "/movies/Prisoners of the Ghostland (2021)/Prisoners of the Ghostland (2021) Remux-2160p Proper.mkv",
+                "size": 47469999836,
+                "audioProfile": "ma",
+                "container": "mkv",
+                "indexes": "sd",
+                "videoProfile": "main 10"
+              }
+            ]
+          }
+        ],
+        "Image": [
+          {
+            "alt": "Prisoners of the Ghostland",
+            "type": "coverPoster",
+            "url": "/library/metadata/9490/thumb/1751292015"
+          },
+          {
+            "alt": "Prisoners of the Ghostland",
+            "type": "background",
+            "url": "/library/metadata/9490/art/1751292015"
+          },
+          {
+            "alt": "Prisoners of the Ghostland",
+            "type": "clearLogo",
+            "url": "/library/metadata/9490/clearLogo/1751292015"
+          }
+        ],
+        "UltraBlurColors": {
+          "topLeft": "5c0204",
+          "topRight": "811717",
+          "bottomRight": "8e1616",
+          "bottomLeft": "5a0f13"
+        },
+        "Genre": [
+          {
+            "tag": "Thriller"
+          },
+          {
+            "tag": "Action"
+          }
+        ],
+        "Country": [
+          {
+            "tag": "Japan"
+          },
+          {
+            "tag": "United States of America"
+          }
+        ],
+        "Director": [
+          {
+            "tag": "Sion Sono"
+          }
+        ],
+        "Writer": [
+          {
+            "tag": "Aaron Hendry"
+          },
+          {
+            "tag": "Reza Sixo Safai"
+          }
+        ],
+        "Role": [
+          {
+            "tag": "Nicolas Cage"
+          },
+          {
+            "tag": "Sofia Boutella"
+          },
+          {
+            "tag": "Nick Cassavetes"
+          }
+        ]
+      },
+      {
+        "ratingKey": "37382",
+        "key": "/library/metadata/37382",
+        "guid": "plex://movie/5d776a81ad5437001f77fb24",
+        "slug": "prisoners-of-the-sun",
+        "studio": "ME Completion",
+        "type": "movie",
+        "title": "Prisoners of the Sun",
+        "contentRating": "Not Rated",
+        "summary": "A young American archaeological apprentice is drawn into a perilous expedition deep beneath the timeless sands of Egypt. Escaping death traps and ancient monsters, the expedition discovers a secret older than history, and a danger beyond imagination. The \"sleepers\" have awoken, the gods have arisen, and the countdown to the end of the world has begun.",
+        "audienceRating": 1.6,
+        "year": 2013,
+        "tagline": "An ancient pyramid. A present threat. A mystery unchained after 5,000 years",
+        "thumb": "/library/metadata/37382/thumb/1756305166",
+        "art": "/library/metadata/37382/art/1756305166",
+        "duration": 5269140,
+        "originallyAvailableAt": "2013-12-20",
+        "addedAt": 1698037935,
+        "updatedAt": 1756305166,
+        "audienceRatingImage": "rottentomatoes://image.rating.spilled",
+        "chapterSource": "media",
+        "primaryExtraKey": "/library/metadata/37383",
+        "Media": [
+          {
+            "id": 61899,
+            "duration": 5269140,
+            "bitrate": 4296,
+            "width": 1920,
+            "height": 1080,
+            "aspectRatio": 1.78,
+            "audioChannels": 6,
+            "audioCodec": "dca-ma",
+            "videoCodec": "hevc",
+            "videoResolution": "1080",
+            "container": "mkv",
+            "videoFrameRate": "24p",
+            "audioProfile": "ma",
+            "videoProfile": "main",
+            "hasVoiceActivity": false,
+            "Part": [
+              {
+                "id": 61899,
+                "key": "/library/parts/61899/1736676848/file.mkv",
+                "duration": 5269140,
+                "file": "/movies/Prisoners of the Sun (2013)/Prisoners of the Sun (2013).mkv",
+                "size": 2833933411,
+                "audioProfile": "ma",
+                "container": "mkv",
+                "indexes": "sd",
+                "videoProfile": "main"
+              }
+            ]
+          }
+        ],
+        "Image": [
+          {
+            "alt": "Prisoners of the Sun",
+            "type": "coverPoster",
+            "url": "/library/metadata/37382/thumb/1756305166"
+          },
+          {
+            "alt": "Prisoners of the Sun",
+            "type": "background",
+            "url": "/library/metadata/37382/art/1756305166"
+          },
+          {
+            "alt": "Prisoners of the Sun",
+            "type": "clearLogo",
+            "url": "/library/metadata/37382/clearLogo/1756305166"
+          }
+        ],
+        "UltraBlurColors": {
+          "topLeft": "4c1a27",
+          "topRight": "1c1a1f",
+          "bottomRight": "19171c",
+          "bottomLeft": "463a40"
+        },
+        "Genre": [
+          {
+            "tag": "Action"
+          },
+          {
+            "tag": "Adventure"
+          }
+        ],
+        "Country": [
+          {
+            "tag": "United States of America"
+          },
+          {
+            "tag": "Germany"
+          }
+        ],
+        "Director": [
+          {
+            "tag": "Roger Christian"
+          }
+        ],
+        "Writer": [
+          {
+            "tag": "Peter Atkins"
+          },
+          {
+            "tag": "Anthony Hickox"
+          }
+        ],
+        "Role": [
+          {
+            "tag": "John Rhys-Davies"
+          },
+          {
+            "tag": "David Charvet"
+          },
+          {
+            "tag": "Carmen Chaplin"
+          }
+        ]
+      },
+      {
+        "ratingKey": "41514",
+        "key": "/library/metadata/41514",
+        "guid": "plex://movie/5d9f3569dfd12800208a1257",
+        "slug": "the-producers-1968",
+        "studio": "Crossbow Productions",
+        "type": "movie",
+        "title": "The Producers",
+        "titleSort": "Producers",
+        "contentRating": "PG",
+        "contentRatingAge": 13,
+        "summary": "Down-on-his-luck theatrical producer Max Bialystock is forced to romance rich old ladies to finance his efforts. When timid accountant Leo Bloom reviews Max's accounting books, the two hit upon a way to make a fortune by producing a sure-fire flop. The play which is to be their gold mine? \"Springtime for Hitler.\"",
+        "rating": 9.1,
+        "audienceRating": 8.5,
+        "viewCount": 1,
+        "lastViewedAt": 1664480848,
+        "year": 1968,
+        "tagline": "Hollywood Never Faced a Zanier Zero Hour!",
+        "thumb": "/library/metadata/41514/thumb/1755273200",
+        "art": "/library/metadata/41514/art/1755273200",
+        "duration": 5370932,
+        "originallyAvailableAt": "1968-11-10",
+        "addedAt": 1704865495,
+        "updatedAt": 1755273200,
+        "audienceRatingImage": "rottentomatoes://image.rating.upright",
+        "chapterSource": "media",
+        "primaryExtraKey": "/library/metadata/41574",
+        "ratingImage": "rottentomatoes://image.rating.ripe",
+        "Media": [
+          {
+            "id": 71123,
+            "duration": 5370932,
+            "bitrate": 7106,
+            "width": 1920,
+            "height": 1080,
+            "aspectRatio": 1.78,
+            "audioChannels": 6,
+            "audioCodec": "dca-ma",
+            "videoCodec": "hevc",
+            "videoResolution": "1080",
+            "container": "mkv",
+            "videoFrameRate": "24p",
+            "audioProfile": "ma",
+            "videoProfile": "main",
+            "hasVoiceActivity": false,
+            "Part": [
+              {
+                "id": 71123,
+                "key": "/library/parts/71123/1736669721/file.mkv",
+                "duration": 5370932,
+                "file": "/movies/The Producers (1967)/The Producers (1967) Remux-1080p.mkv",
+                "size": 4775488431,
+                "audioProfile": "ma",
+                "container": "mkv",
+                "indexes": "sd",
+                "videoProfile": "main"
+              }
+            ]
+          }
+        ],
+        "Image": [
+          {
+            "alt": "The Producers",
+            "type": "coverPoster",
+            "url": "/library/metadata/41514/thumb/1755273200"
+          },
+          {
+            "alt": "The Producers",
+            "type": "background",
+            "url": "/library/metadata/41514/art/1755273200"
+          },
+          {
+            "alt": "The Producers",
+            "type": "clearLogo",
+            "url": "/library/metadata/41514/clearLogo/1755273200"
+          }
+        ],
+        "UltraBlurColors": {
+          "topLeft": "1e060a",
+          "topRight": "32140d",
+          "bottomRight": "1f0709",
+          "bottomLeft": "421a15"
+        },
+        "Genre": [
+          {
+            "tag": "Comedy"
+          },
+          {
+            "tag": "Music"
+          }
+        ],
+        "Country": [
+          {
+            "tag": "United States of America"
+          }
+        ],
+        "Director": [
+          {
+            "tag": "Mel Brooks"
+          }
+        ],
+        "Writer": [
+          {
+            "tag": "Herbert Hartig"
+          },
+          {
+            "tag": "Mel Brooks"
+          }
+        ],
+        "Role": [
+          {
+            "tag": "Zero Mostel"
+          },
+          {
+            "tag": "Gene Wilder"
+          },
+          {
+            "tag": "Dick Shawn"
+          }
+        ]
+      }
+    ]
+  }
+}
