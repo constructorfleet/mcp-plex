@@ -14,6 +14,7 @@
 ## Testing Practices
 - Use realistic (or as realistic as possible) data in tests; avoid meaningless placeholder values.
 - Always test both positive and negative logical paths.
+- Do **not** use `# pragma: no cover`; add tests to exercise code paths instead.
 
 ## Efficiency and Search
 - Use `rg` (ripgrep) for recursive search.

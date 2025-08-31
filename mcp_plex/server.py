@@ -13,6 +13,11 @@ from qdrant_client import models
 from fastembed import TextEmbedding, SparseTextEmbedding
 from pydantic import Field
 
+try:
+    from sentence_transformers import CrossEncoder
+except Exception:
+    CrossEncoder = None
+
 # Environment configuration for Qdrant
 _QDRANT_URL = os.getenv("QDRANT_URL", ":memory:")
 _QDRANT_API_KEY = os.getenv("QDRANT_API_KEY")
@@ -21,6 +26,14 @@ _QDRANT_API_KEY = os.getenv("QDRANT_API_KEY")
 _client = AsyncQdrantClient(_QDRANT_URL, api_key=_QDRANT_API_KEY)
 _dense_model = TextEmbedding("BAAI/bge-small-en-v1.5")
 _sparse_model = SparseTextEmbedding("Qdrant/bm42-all-minilm-l6-v2-attentions")
+
+_USE_RERANKER = os.getenv("USE_RERANKER", "1") == "1"
+_reranker = None
+if _USE_RERANKER and CrossEncoder is not None:
+    try:
+        _reranker = CrossEncoder("cross-encoder/ms-marco-MiniLM-L-6-v2")
+    except Exception:
+        _reranker = None
 
 server = FastMCP()
 
@@ -138,18 +151,19 @@ async def search_media(
 ) -> list[dict[str, Any]]:
     """Hybrid similarity search across media items using dense and sparse vectors."""
     dense_task = asyncio.to_thread(lambda: list(_dense_model.embed([query]))[0])
-    sparse_task = asyncio.to_thread(lambda: _sparse_model.query_embed(query))
+    sparse_task = asyncio.to_thread(lambda: next(_sparse_model.query_embed(query)))
     dense_vec, sparse_vec = await asyncio.gather(dense_task, sparse_task)
     named_dense = models.NamedVector(name="dense", vector=dense_vec)
     sv = models.SparseVector(
         indices=sparse_vec.indices.tolist(), values=sparse_vec.values.tolist()
     )
     named_sparse = models.NamedSparseVector(name="sparse", vector=sv)
+    candidate_limit = limit * 3 if _reranker is not None else limit
     hits = await _client.search(
         collection_name="media-items",
         query_vector=named_dense,
         query_sparse_vector=named_sparse,
-        limit=limit * 3,
+        limit=candidate_limit,
         with_payload=True,
     )
 
@@ -168,6 +182,24 @@ async def search_media(
     prefetch_task = asyncio.gather(*[_prefetch(h) for h in hits[:limit]])
 
     def _rerank(hits: list[models.ScoredPoint]) -> list[models.ScoredPoint]:
+        if _reranker is None:
+            return hits
+        docs: list[str] = []
+        for h in hits:
+            data = h.payload["data"]
+            parts = [
+                data.get("title"),
+                data.get("summary"),
+                data.get("plex", {}).get("title"),
+                data.get("plex", {}).get("summary"),
+                data.get("tmdb", {}).get("overview"),
+            ]
+            docs.append(" ".join(p for p in parts if p))
+        pairs = [(query, d) for d in docs]
+        scores = _reranker.predict(pairs)
+        for h, s in zip(hits, scores):
+            h.score = float(s)
+        hits.sort(key=lambda h: h.score, reverse=True)
         return hits
 
     reranked = await asyncio.to_thread(_rerank, hits)
@@ -290,5 +322,5 @@ async def media_background(
     return art
 
 
-if __name__ == "__main__":  # pragma: no cover
+if __name__ == "__main__":
     server.run()
