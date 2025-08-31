@@ -1,8 +1,10 @@
 """FastMCP server exposing Plex metadata tools."""
 from __future__ import annotations
 
+import asyncio
 import os
 import json
+from collections import OrderedDict
 from typing import Any, Annotated
 
 from fastmcp.server import FastMCP
@@ -21,6 +23,27 @@ _dense_model = TextEmbedding("BAAI/bge-small-en-v1.5")
 _sparse_model = SparseTextEmbedding("Qdrant/bm42-all-minilm-l6-v2-attentions")
 
 server = FastMCP()
+
+
+_CACHE_SIZE = 128
+_payload_cache: OrderedDict[str, dict[str, Any]] = OrderedDict()
+_poster_cache: OrderedDict[str, str] = OrderedDict()
+_background_cache: OrderedDict[str, str] = OrderedDict()
+
+
+def _cache_set(cache: OrderedDict, key: str, value: Any) -> None:
+    if key in cache:
+        cache.move_to_end(key)
+    cache[key] = value
+    while len(cache) > _CACHE_SIZE:
+        cache.popitem(last=False)
+
+
+def _cache_get(cache: OrderedDict, key: str) -> Any | None:
+    if key in cache:
+        cache.move_to_end(key)
+        return cache[key]
+    return None
 
 
 async def _find_records(identifier: str, limit: int = 5) -> list[models.Record]:
@@ -60,10 +83,23 @@ async def _find_records(identifier: str, limit: int = 5) -> list[models.Record]:
 
 async def _get_media_data(identifier: str) -> dict[str, Any]:
     """Return the first matching media record's payload."""
+    cached = _cache_get(_payload_cache, identifier)
+    if cached is not None:
+        return cached
     records = await _find_records(identifier, limit=1)
     if not records:
         raise ValueError("Media item not found")
-    return records[0].payload["data"]
+    data = records[0].payload["data"]
+    rating_key = str(data.get("plex", {}).get("rating_key"))
+    if rating_key:
+        _cache_set(_payload_cache, rating_key, data)
+        thumb = data.get("plex", {}).get("thumb")
+        if thumb:
+            _cache_set(_poster_cache, rating_key, thumb)
+        art = data.get("plex", {}).get("art")
+        if art:
+            _cache_set(_background_cache, rating_key, art)
+    return data
 
 
 @server.tool("get-media")
@@ -101,8 +137,9 @@ async def search_media(
     ] = 5,
 ) -> list[dict[str, Any]]:
     """Hybrid similarity search across media items using dense and sparse vectors."""
-    dense_vec = list(_dense_model.embed([query]))[0]
-    sparse_vec = _sparse_model.query_embed(query)
+    dense_task = asyncio.to_thread(lambda: list(_dense_model.embed([query]))[0])
+    sparse_task = asyncio.to_thread(lambda: _sparse_model.query_embed(query))
+    dense_vec, sparse_vec = await asyncio.gather(dense_task, sparse_task)
     named_dense = models.NamedVector(name="dense", vector=dense_vec)
     sv = models.SparseVector(
         indices=sparse_vec.indices.tolist(), values=sparse_vec.values.tolist()
@@ -112,10 +149,30 @@ async def search_media(
         collection_name="media-items",
         query_vector=named_dense,
         query_sparse_vector=named_sparse,
-        limit=limit,
+        limit=limit * 3,
         with_payload=True,
     )
-    return [h.payload["data"] for h in hits]
+
+    async def _prefetch(hit: models.ScoredPoint) -> None:
+        data = hit.payload["data"]
+        rating_key = str(data.get("plex", {}).get("rating_key"))
+        if rating_key:
+            _cache_set(_payload_cache, rating_key, data)
+            thumb = data.get("plex", {}).get("thumb")
+            if thumb:
+                _cache_set(_poster_cache, rating_key, thumb)
+            art = data.get("plex", {}).get("art")
+            if art:
+                _cache_set(_background_cache, rating_key, art)
+
+    prefetch_task = asyncio.gather(*[_prefetch(h) for h in hits[:limit]])
+
+    def _rerank(hits: list[models.ScoredPoint]) -> list[models.ScoredPoint]:
+        return hits
+
+    reranked = await asyncio.to_thread(_rerank, hits)
+    await prefetch_task
+    return [h.payload["data"] for h in reranked[:limit]]
 
 
 @server.tool("recommend-media")
@@ -200,12 +257,14 @@ async def media_poster(
     ],
 ) -> str:
     """Return the poster image URL for the given media identifier."""
-    records = await _find_records(identifier, limit=1)
-    if not records:
-        raise ValueError("Media item not found")
-    thumb = records[0].payload["data"].get("plex", {}).get("thumb")
+    cached = _cache_get(_poster_cache, identifier)
+    if cached:
+        return cached
+    data = await _get_media_data(identifier)
+    thumb = data.get("plex", {}).get("thumb")
     if not thumb:
         raise ValueError("Poster not available")
+    _cache_set(_poster_cache, str(data.get("plex", {}).get("rating_key")), thumb)
     return thumb
 
 
@@ -220,12 +279,14 @@ async def media_background(
     ],
 ) -> str:
     """Return the background art URL for the given media identifier."""
-    records = await _find_records(identifier, limit=1)
-    if not records:
-        raise ValueError("Media item not found")
-    art = records[0].payload["data"].get("plex", {}).get("art")
+    cached = _cache_get(_background_cache, identifier)
+    if cached:
+        return cached
+    data = await _get_media_data(identifier)
+    art = data.get("plex", {}).get("art")
     if not art:
         raise ValueError("Background not available")
+    _cache_set(_background_cache, str(data.get("plex", {}).get("rating_key")), art)
     return art
 
 
