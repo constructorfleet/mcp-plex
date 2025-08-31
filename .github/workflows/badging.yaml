@@ -23,46 +23,69 @@ jobs:
       - run: uv sync --no-dev
       - run: uv pip install pytest pytest-cov 'genbadge[all]'
 
+      # Nuke any stale coverage DB if runner cache decides to be "helpful"
+      - name: Clean old coverage
+        run: |
+          uv run python - <<'PY'
+          import os
+          for f in (".coverage", "coverage.xml"):
+              try: os.remove(f)
+              except FileNotFoundError: pass
+          PY
+
       - name: Test w/ coverage (XML for genbadge)
         run: |
+          # Force coverage to ONLY track mcp_plex and emit XML at a known path
           uv run pytest \
             --cov=mcp_plex \
-            --cov-report=xml \
-            --cov-report=term
+            --cov-report=xml:coverage.xml \
+            --cov-report=term-missing:skip-covered
 
-      - name: Make SVG badge
+      - name: Sanity-check XML line-rate (should match your badge)
         run: |
-          uv run genbadge coverage -i coverage.xml -o coverage.svg
+          uv run python - <<'PY'
+          import xml.etree.ElementTree as ET
+          tree = ET.parse("coverage.xml")
+          root = tree.getroot()
+          rate = float(root.attrib.get("line-rate", "0")) * 100
+          print(f"XML line-rate: {rate:.2f}%")
+          assert rate >= 0, "coverage.xml missing line-rate"
+          PY
 
-      - name: Publish to orphan "coveragebadges" (single-commit branch, idempotent)
+      - name: Make SVG badge (from coverage.xml)
+        run: |
+          uv run genbadge coverage -i "$GITHUB_WORKSPACE/coverage.xml" -o "$GITHUB_WORKSPACE/coverage.svg"
+
+      - name: Publish to orphan "coveragebadges" (idempotent, no-op safe)
         run: |
           set -euxo pipefail
           git config user.name  "github-actions[bot]"
           git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
 
-          # make sure we know about remote heads
           git fetch --prune origin
 
-          # Prepare a clean worktree for the badge branch
+          # If remote branch exists, check it out into a worktree; else create it orphaned.
           if git ls-remote --exit-code --heads origin coveragebadges >/dev/null 2>&1; then
-            # Remote branch exists -> add worktree checked out to that branch
             git worktree add /tmp/coveragebadges coveragebadges || true
           else
-            # No remote branch yet -> create a detached worktree and orphan the branch there
             git worktree add --detach /tmp/coveragebadges || true
             ( cd /tmp/coveragebadges && git checkout --orphan coveragebadges )
           fi
 
           cd /tmp/coveragebadges
 
-          # Start from a blank tree each run
+          # Start clean each run
           rm -rf ./* .git/index || true
 
-          # Drop only the badge (add more files if you must)
+          # Copy the freshly generated badge
           cp -f "$GITHUB_WORKSPACE/coverage.svg" ./coverage.svg
 
+          # Commit only if something actually changed (don’t die on no-op)
           git add -A
-          git commit -m "chore: update coverage badge"
+          if git diff --cached --quiet; then
+            echo "No changes to badge; skipping commit/push."
+            exit 0
+          fi
 
-          # Always replace the remote branch with this single commit
+          git commit -m "chore: update coverage badge"
           git push -f origin HEAD:coveragebadges

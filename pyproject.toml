@@ -29,3 +29,10 @@ load-data = "mcp_plex.loader:main"
 
 [[tool.uv.index]]
 url = "https://aiinfra.pkgs.visualstudio.com/PublicPackages/_packaging/onnxruntime-cuda-12/pypi/simple/"
+
+[tool.coverage.run]
+source = ["mcp_plex"]
+relative_files = true
+
+[tool.coverage.report]
+omit = ["tests/*"]
