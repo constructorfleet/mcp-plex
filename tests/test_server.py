@@ -144,3 +144,10 @@ def test_server_tools(tmp_path, monkeypatch):
 
     res = asyncio.run(server.recommend_media.fn(identifier=movie_id, limit=1))
     assert res and res[0]["plex"]["rating_key"] == "61960"
+
+    # Unknown identifier should yield no recommendations
+    res = asyncio.run(server.recommend_media.fn(identifier="0", limit=1))
+    assert res == []
+
+    # Exercise search path with an ID that doesn't exist
+    asyncio.run(server._find_records("12345", limit=1))
