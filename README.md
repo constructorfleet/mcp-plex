@@ -1,5 +1,5 @@
-![coverage](https://raw.githubusercontent.com/constructorfleet/mcp-plex/coverage-badges/coverage.svg)
-![tests](https://raw.githubusercontent.com/constructorfleet/mcp-plex/coverage-badges/tests.svg)
+![coverage](https://raw.githubusercontent.com/constructorfleet/mcp-plex/coveragebadges/coverage.svg)
+![tests](https://raw.githubusercontent.com/constructorfleet/mcp-plex/coveragebadges/tests.svg)
 
 # mcp-plex
 
