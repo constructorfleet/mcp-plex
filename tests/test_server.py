@@ -3,6 +3,7 @@ import asyncio
 from pathlib import Path
 import importlib
 import types
+import pytest
 
 from mcp_plex import loader
 from qdrant_client import models
@@ -151,3 +152,15 @@ def test_server_tools(tmp_path, monkeypatch):
 
     # Exercise search path with an ID that doesn't exist
     asyncio.run(server._find_records("12345", limit=1))
+
+    poster = asyncio.run(server.media_poster.fn(identifier=movie_id))
+    assert isinstance(poster, str) and "thumb" in poster
+
+    art = asyncio.run(server.media_background.fn(identifier=movie_id))
+    assert isinstance(art, str) and "art" in art
+
+    with pytest.raises(ValueError):
+        asyncio.run(server.media_poster.fn(identifier="0"))
+
+    with pytest.raises(ValueError):
+        asyncio.run(server.media_background.fn(identifier="0"))

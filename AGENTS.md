@@ -8,8 +8,12 @@
   ```
 
 ## Checks
-- Run linting with `uv run ruff .`.
+- Run linting with `uv run ruff check .`.
 - Run the test suite with `uv run pytest` and ensure it passes before committing.
+
+## Efficiency and Search
+- Use `rg` (ripgrep) for recursive search.
+- Avoid `ls -R` and `grep -R` as they generate excessive output.
 
 ## Git Commit Guidelines
 - Commit messages must follow [Conventional Commit](https://www.conventionalcommits.org/) standards.
