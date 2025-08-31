@@ -415,24 +415,61 @@ async def run(
 
 
 @click.command()
-@click.option("--plex-url", envvar="PLEX_URL", help="Plex base URL")
-@click.option("--plex-token", envvar="PLEX_TOKEN", help="Plex API token")
-@click.option("--tmdb-api-key", envvar="TMDB_API_KEY", help="TMDb API key")
-@click.option("--sample-dir", type=click.Path(path_type=Path))
-@click.option("--qdrant-url", envvar="QDRANT_URL", help="Qdrant URL or path")
-@click.option("--qdrant-api-key", envvar="QDRANT_API_KEY", help="Qdrant API key")
+@click.option(
+    "--plex-url",
+    envvar="PLEX_URL",
+    show_envvar=True,
+    required=True,
+    help="Plex base URL",
+)
+@click.option(
+    "--plex-token",
+    envvar="PLEX_TOKEN",
+    show_envvar=True,
+    required=True,
+    help="Plex API token",
+)
+@click.option(
+    "--tmdb-api-key",
+    envvar="TMDB_API_KEY",
+    show_envvar=True,
+    required=True,
+    help="TMDb API key",
+)
+@click.option(
+    "--sample-dir",
+    type=click.Path(path_type=Path),
+    required=False,
+    help="Directory containing sample data instead of live Plex access",
+)
+@click.option(
+    "--qdrant-url",
+    envvar="QDRANT_URL",
+    show_envvar=True,
+    required=False,
+    help="Qdrant URL or path",
+)
+@click.option(
+    "--qdrant-api-key",
+    envvar="QDRANT_API_KEY",
+    show_envvar=True,
+    required=False,
+    help="Qdrant API key",
+)
 @click.option(
     "--continuous",
     is_flag=True,
     help="Continuously run the loader",
     show_default=True,
     default=False,
+    required=False,
 )
 @click.option(
     "--delay",
     type=float,
     default=300.0,
     show_default=True,
+    required=False,
     help="Delay between runs in seconds when using --continuous",
 )
 def main(
