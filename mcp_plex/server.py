@@ -18,6 +18,11 @@ try:
 except Exception:
     CrossEncoder = None
 
+try:
+    from sentence_transformers import CrossEncoder
+except Exception:
+    CrossEncoder = None
+
 # Environment configuration for Qdrant
 _QDRANT_URL = os.getenv("QDRANT_URL", ":memory:")
 _QDRANT_API_KEY = os.getenv("QDRANT_API_KEY")
