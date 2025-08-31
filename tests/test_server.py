@@ -5,6 +5,7 @@ import importlib
 import types
 import json
 import time
+import sys
 import pytest
 
 from mcp_plex import loader
@@ -51,6 +52,24 @@ class DummySparseEmbedding:
     def query_embed(self, text):
         time.sleep(0.1)
         return DummySparseVector([0], [1.0])
+
+
+class DummyReranker:
+    def __init__(self, model: str):
+        pass
+
+    def predict(self, pairs):
+        scores = []
+        for _, doc in pairs:
+            if "Gentlemen" in doc:
+                scores.append(10)
+            elif "C" in doc:
+                scores.append(2)
+            elif "B" in doc:
+                scores.append(1)
+            else:
+                scores.append(0)
+        return scores
 
 
 class DummyQdrantClient:
@@ -100,7 +119,13 @@ class DummyQdrantClient:
         return records[:limit], None
 
     async def search(self, collection_name: str, query_vector, query_sparse_vector=None, limit: int = 5, with_payload=False, **kwargs):
-        return list(self.store.values())[:limit]
+        records = list(self.store.values())[:limit]
+        return [
+            models.ScoredPoint(
+                id=r.id, version=1, score=0.0, payload=r.payload, vector=None
+            )
+            for r in records
+        ]
 
     async def recommend(self, collection_name: str, positive, limit: int = 5, with_payload=False, **kwargs):
         return [r for r in self.store.values() if r.id not in positive][:limit]
@@ -128,6 +153,10 @@ def test_server_tools(tmp_path, monkeypatch):
     monkeypatch.setattr(fastembed, "TextEmbedding", DummyTextEmbedding)
     monkeypatch.setattr(fastembed, "SparseTextEmbedding", DummySparseEmbedding)
     monkeypatch.setattr(async_qdrant_client, "AsyncQdrantClient", DummyQdrantClient)
+    monkeypatch.setenv("USE_RERANKER", "1")
+    st_module = types.ModuleType("sentence_transformers")
+    st_module.CrossEncoder = DummyReranker
+    monkeypatch.setitem(sys.modules, "sentence_transformers", st_module)
 
     asyncio.run(_setup_db(tmp_path))
     server = importlib.reload(importlib.import_module("mcp_plex.server"))
@@ -173,6 +202,21 @@ def test_server_tools(tmp_path, monkeypatch):
     finally:
         server._client.retrieve = orig_retrieve
         server._client.scroll = orig_scroll
+
+    # Reranking should reorder results based on cross-encoder scores
+    orig_search = server._client.search
+    async def fake_search(*args, **kwargs):
+        return [
+            models.ScoredPoint(id=1, version=1, score=0.0, payload={"data": {"title": "A"}}, vector=None),
+            models.ScoredPoint(id=2, version=1, score=0.0, payload={"data": {"title": "B"}}, vector=None),
+            models.ScoredPoint(id=3, version=1, score=0.0, payload={"data": {"title": "C"}}, vector=None),
+        ]
+    server._client.search = fake_search
+    try:
+        res = asyncio.run(server.search_media.fn(query="test", limit=2))
+        assert [i["title"] for i in res] == ["C", "B"]
+    finally:
+        server._client.search = orig_search
 
     res = asyncio.run(server.recommend_media.fn(identifier=movie_id, limit=1))
     assert res and res[0]["plex"]["rating_key"] == "61960"
