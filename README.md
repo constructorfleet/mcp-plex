@@ -4,9 +4,9 @@
 
 # mcp-plex
 
-`mcp-plex` is a [Model Context Protocol](https://github.com/modelcontextprotocol) server and data
-loader for Plex. It ingests Plex metadata into [Qdrant](https://qdrant.tech/) and exposes
-search and recommendation tools that LLM agents can call.
+`mcp-plex` turns your Plex library into a searchable vector database that LLM agents can query.
+It ingests Plex metadata into [Qdrant](https://qdrant.tech/) and exposes search and recommendation
+tools through the [Model Context Protocol](https://github.com/modelcontextprotocol).
 
 ## Features
 - Load Plex libraries into a Qdrant vector database.
@@ -34,9 +34,13 @@ uv run load-data --continuous --delay 600
 ```
 
 ### Run the MCP Server
-Start the FastMCP server to expose Plex tools:
+Start the FastMCP server over stdio (default):
 ```bash
 uv run python -m mcp_plex.server
+```
+Expose the server over SSE on port 8000:
+```bash
+uv run python -m mcp_plex.server --transport sse --bind 0.0.0.0 --port 8000 --mount /mcp
 ```
 
 ## Docker
@@ -49,6 +53,22 @@ docker run --rm --gpus all mcp-plex --sample-dir /data
 ```
 Use `--continuous` and `--delay` flags with `docker run` to keep the loader
 running in a loop.
+
+## Docker Compose
+The included `docker-compose.yml` launches both Qdrant and the MCP server.
+
+1. Set `PLEX_URL`, `PLEX_TOKEN`, and `TMDB_API_KEY` in your environment (or a `.env` file).
+2. Start the services:
+   ```bash
+   docker compose up --build
+   ```
+3. (Optional) Load sample data into Qdrant:
+   ```bash
+   docker compose run --rm mcp-plex uv run load-data --sample-dir sample-data
+   ```
+
+The server will connect to the `qdrant` service at `http://qdrant:6333` and
+expose an SSE endpoint at `http://localhost:8000/mcp`.
 
 ## Development
 Run linting and tests through `uv`:
