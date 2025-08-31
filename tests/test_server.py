@@ -4,6 +4,7 @@ from pathlib import Path
 import importlib
 import types
 import json
+import time
 import pytest
 
 from mcp_plex import loader
@@ -20,6 +21,7 @@ class DummyTextEmbedding:
 
     def embed(self, texts):
         for _ in texts:
+            time.sleep(0.1)
             yield [0.1, 0.2, 0.3]
 
 
@@ -47,6 +49,7 @@ class DummySparseEmbedding:
             yield DummySparseVector([i], [1.0])
 
     def query_embed(self, text):
+        time.sleep(0.1)
         return DummySparseVector([0], [1.0])
 
 
@@ -139,10 +142,37 @@ def test_server_tools(tmp_path, monkeypatch):
     res = asyncio.run(server.get_media.fn(identifier="The Gentlemen"))
     assert res and res[0]["plex"]["rating_key"] == movie_id
 
+    start = time.perf_counter()
     res = asyncio.run(
         server.search_media.fn(query="Matthew McConaughey crime movie", limit=1)
     )
+    elapsed = time.perf_counter() - start
+    assert elapsed < 0.2
     assert res and res[0]["plex"]["title"] == "The Gentlemen"
+
+    # Prefetched payloads should allow resource access without hitting the client
+    orig_retrieve, orig_scroll = server._client.retrieve, server._client.scroll
+
+    async def fail(*args, **kwargs):  # pragma: no cover
+        raise AssertionError("client called")
+
+    server._client.retrieve = fail
+    server._client.scroll = fail
+    try:
+        poster = asyncio.run(server.media_poster.fn(identifier=movie_id))
+        assert isinstance(poster, str) and "thumb" in poster
+
+        art = asyncio.run(server.media_background.fn(identifier=movie_id))
+        assert isinstance(art, str) and "art" in art
+
+        item = json.loads(asyncio.run(server.media_item.fn(identifier=movie_id)))
+        assert item["plex"]["rating_key"] == movie_id
+
+        ids = json.loads(asyncio.run(server.media_ids.fn(identifier=movie_id)))
+        assert ids["imdb"] == "tt8367814"
+    finally:
+        server._client.retrieve = orig_retrieve
+        server._client.scroll = orig_scroll
 
     res = asyncio.run(server.recommend_media.fn(identifier=movie_id, limit=1))
     assert res and res[0]["plex"]["rating_key"] == "61960"
@@ -153,18 +183,6 @@ def test_server_tools(tmp_path, monkeypatch):
 
     # Exercise search path with an ID that doesn't exist
     asyncio.run(server._find_records("12345", limit=1))
-
-    poster = asyncio.run(server.media_poster.fn(identifier=movie_id))
-    assert isinstance(poster, str) and "thumb" in poster
-
-    art = asyncio.run(server.media_background.fn(identifier=movie_id))
-    assert isinstance(art, str) and "art" in art
-
-    item = json.loads(asyncio.run(server.media_item.fn(identifier=movie_id)))
-    assert item["plex"]["rating_key"] == movie_id
-
-    ids = json.loads(asyncio.run(server.media_ids.fn(identifier=movie_id)))
-    assert ids["imdb"] == "tt8367814"
 
     with pytest.raises(ValueError):
         asyncio.run(server.media_item.fn(identifier="0"))
