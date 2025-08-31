@@ -37,9 +37,11 @@ jobs:
         run: |
           # Force coverage to ONLY track mcp_plex and emit XML at a known path
           uv run pytest \
+            --junitxml=pytest.xml \
             --cov=mcp_plex \
+            --cov-report=term-missing:skip-covered \
             --cov-report=xml:coverage.xml \
-            --cov-report=term-missing:skip-covered
+            | tee pytest-coverage.txt
 
       - name: Sanity-check XML line-rate (should match your badge)
         run: |
@@ -55,6 +57,10 @@ jobs:
       - name: Make SVG badge (from coverage.xml)
         run: |
           uv run genbadge coverage -i "$GITHUB_WORKSPACE/coverage.xml" -o "$GITHUB_WORKSPACE/coverage.svg"
+
+      - name: Make SVG badge (from coverage.xml)
+        run: |
+          uv run genbadge tests -i "$GITHUB_WORKSPACE/pytest.xml" -o "$GITHUB_WORKSPACE/tests.svg"
 
       - name: Publish to orphan "coveragebadges" (idempotent, no-op safe)
         run: |
@@ -79,6 +85,7 @@ jobs:
 
           # Copy the freshly generated badge
           cp -f "$GITHUB_WORKSPACE/coverage.svg" ./coverage.svg
+          cp -f "$GITHUB_WORKSPACE/tests.svg" ./tests.svg
 
           # Commit only if something actually changed (don’t die on no-op)
           git add -A
