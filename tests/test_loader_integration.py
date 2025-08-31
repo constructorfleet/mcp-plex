@@ -64,6 +64,27 @@ class DummyQdrantClient:
         self.upserted.extend(points)
 
 
+class TrackingQdrantClient(DummyQdrantClient):
+    """Qdrant client that starts with a mismatched collection size."""
+
+    def __init__(self, url: str, api_key: str | None = None):
+        super().__init__(url, api_key)
+        # Pre-create a collection with the wrong vector size to force recreation
+        wrong_params = SimpleNamespace(
+            vectors={
+                "dense": models.VectorParams(size=99, distance=models.Distance.COSINE)
+            }
+        )
+        self.collections["media-items"] = SimpleNamespace(
+            config=SimpleNamespace(params=wrong_params)
+        )
+        self.deleted = False
+
+    async def delete_collection(self, name: str):
+        self.deleted = True
+        await super().delete_collection(name)
+
+
 async def _run_loader(sample_dir: Path):
     await loader.run(None, None, None, sample_dir, None, None)
 
@@ -79,3 +100,19 @@ def test_run_writes_points(monkeypatch):
     assert len(client.upserted) == 2
     payloads = [p.payload for p in client.upserted]
     assert all("title" in p and "type" in p for p in payloads)
+
+
+def test_run_recreates_mismatched_collection(monkeypatch):
+    monkeypatch.setattr(loader, "TextEmbedding", DummyTextEmbedding)
+    monkeypatch.setattr(loader, "SparseTextEmbedding", DummySparseEmbedding)
+    monkeypatch.setattr(loader, "AsyncQdrantClient", TrackingQdrantClient)
+    sample_dir = Path(__file__).resolve().parents[1] / "sample-data"
+    asyncio.run(_run_loader(sample_dir))
+    client = TrackingQdrantClient.instance
+    assert client is not None
+    # The pre-created collection should have been deleted and recreated
+    assert client.deleted is True
+    assert (
+        client.collections["media-items"].config.params.vectors["dense"].size
+        == 3
+    )
