@@ -484,6 +484,7 @@ async def load_media(
         )
         if not continuous:
             break
+
         await asyncio.sleep(delay)
 
 
