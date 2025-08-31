@@ -10,25 +10,25 @@ from typing import List, Optional
 import click
 import httpx
 from fastembed import SparseTextEmbedding, TextEmbedding
-from qdrant_client.async_qdrant_client import AsyncQdrantClient
 from qdrant_client import models
+from qdrant_client.async_qdrant_client import AsyncQdrantClient
 
 from .types import (
     AggregatedItem,
     ExternalIDs,
     IMDbTitle,
+    PlexGuid,
     PlexItem,
+    PlexPerson,
     TMDBEpisode,
     TMDBItem,
     TMDBMovie,
     TMDBShow,
-    PlexGuid,
-    PlexPerson,
 )
 
 try:  # Only import plexapi when available; the sample data mode does not require it.
-    from plexapi.server import PlexServer
     from plexapi.base import PlexPartialObject
+    from plexapi.server import PlexServer
 except Exception:
     PlexServer = None  # type: ignore[assignment]
     PlexPartialObject = object  # type: ignore[assignment]

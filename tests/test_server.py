@@ -1,15 +1,16 @@
-from typing import Any
 import asyncio
-from pathlib import Path
 import importlib
-import types
 import json
-import time
 import sys
+import time
+import types
+from pathlib import Path
+from typing import Any
+
 import pytest
+from qdrant_client import models
 
 from mcp_plex import loader
-from qdrant_client import models
 
 
 class DummyTextEmbedding:
@@ -51,7 +52,7 @@ class DummySparseEmbedding:
 
     def query_embed(self, text):
         time.sleep(0.1)
-        return DummySparseVector([0], [1.0])
+        yield DummySparseVector([0], [1.0])
 
 
 class DummyReranker:

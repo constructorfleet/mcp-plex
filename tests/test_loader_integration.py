@@ -2,8 +2,9 @@ import asyncio
 from pathlib import Path
 from types import SimpleNamespace
 
-from mcp_plex import loader
 from qdrant_client import models
+
+from mcp_plex import loader
 
 
 class DummyTextEmbedding:

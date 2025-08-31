@@ -2,16 +2,21 @@
 from __future__ import annotations
 
 import asyncio
-import os
 import json
+import os
 from collections import OrderedDict
-from typing import Any, Annotated
+from typing import Annotated, Any
 
+from fastembed import SparseTextEmbedding, TextEmbedding
 from fastmcp.server import FastMCP
-from qdrant_client.async_qdrant_client import AsyncQdrantClient
-from qdrant_client import models
-from fastembed import TextEmbedding, SparseTextEmbedding
 from pydantic import Field
+from qdrant_client import models
+from qdrant_client.async_qdrant_client import AsyncQdrantClient
+
+try:
+    from sentence_transformers import CrossEncoder
+except Exception:
+    CrossEncoder = None
 
 try:
     from sentence_transformers import CrossEncoder
@@ -151,7 +156,7 @@ async def search_media(
 ) -> list[dict[str, Any]]:
     """Hybrid similarity search across media items using dense and sparse vectors."""
     dense_task = asyncio.to_thread(lambda: list(_dense_model.embed([query]))[0])
-    sparse_task = asyncio.to_thread(lambda: _sparse_model.query_embed(query))
+    sparse_task = asyncio.to_thread(lambda: next(_sparse_model.query_embed(query)))
     dense_vec, sparse_vec = await asyncio.gather(dense_task, sparse_task)
     named_dense = models.NamedVector(name="dense", vector=dense_vec)
     sv = models.SparseVector(
