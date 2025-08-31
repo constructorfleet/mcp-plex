@@ -7,7 +7,6 @@ import types
 from pathlib import Path
 from typing import Any
 
-import sys
 import pytest
 from qdrant_client import models
 
@@ -54,24 +53,6 @@ class DummySparseEmbedding:
     def query_embed(self, text):
         time.sleep(0.1)
         yield DummySparseVector([0], [1.0])
-
-
-class DummyReranker:
-    def __init__(self, model: str):
-        pass
-
-    def predict(self, pairs):
-        scores = []
-        for _, doc in pairs:
-            if "Gentlemen" in doc:
-                scores.append(10)
-            elif "C" in doc:
-                scores.append(2)
-            elif "B" in doc:
-                scores.append(1)
-            else:
-                scores.append(0)
-        return scores
 
 
 class DummyReranker:
