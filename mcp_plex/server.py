@@ -1,6 +1,7 @@
 """FastMCP server exposing Plex metadata tools."""
 from __future__ import annotations
 
+import argparse
 import asyncio
 import json
 import os
@@ -327,5 +328,34 @@ async def media_background(
     return art
 
 
+def main(argv: list[str] | None = None) -> None:
+    """CLI entrypoint for running the MCP server."""
+    parser = argparse.ArgumentParser(description="Run the MCP server")
+    parser.add_argument("--bind", help="Host address to bind to")
+    parser.add_argument("--port", type=int, help="Port to listen on")
+    parser.add_argument(
+        "--transport",
+        choices=["stdio", "sse", "streamable-http"],
+        default="stdio",
+        help="Transport protocol to use",
+    )
+    parser.add_argument("--mount", help="Mount path for HTTP transports")
+    args = parser.parse_args(argv)
+
+    if args.transport != "stdio":
+        if not args.bind or not args.port:
+            parser.error("--bind and --port are required when transport is not stdio")
+    if args.transport == "stdio" and args.mount:
+        parser.error("--mount is not allowed when transport is stdio")
+
+    run_kwargs: dict[str, Any] = {}
+    if args.transport != "stdio":
+        run_kwargs.update({"host": args.bind, "port": args.port})
+        if args.mount:
+            run_kwargs["path"] = args.mount
+
+    server.run(transport=args.transport, **run_kwargs)
+
+
 if __name__ == "__main__":
-    server.run()
+    main()

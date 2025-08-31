@@ -26,6 +26,13 @@ def test_extract_external_ids():
     assert ids.tmdb == "603"
 
 
+def test_extract_external_ids_missing_values():
+    item = types.SimpleNamespace(guids=None)
+    ids = _extract_external_ids(item)
+    assert ids.imdb is None
+    assert ids.tmdb is None
+
+
 def test_load_from_sample_returns_items():
     sample_dir = Path(__file__).resolve().parents[1] / "sample-data"
     items = _load_from_sample(sample_dir)
@@ -59,6 +66,14 @@ def test_build_plex_item_handles_full_metadata():
     assert item.rating_key == "603"
     assert item.directors[0].tag == "Lana Wachowski"
     assert item.actors[0].role == "Neo"
+
+
+def test_build_plex_item_missing_metadata_defaults():
+    raw = types.SimpleNamespace(ratingKey="1", guid="g", type="movie", title="T")
+    item = _build_plex_item(raw)
+    assert item.directors == []
+    assert item.writers == []
+    assert item.actors == []
 
 
 def test_fetch_functions_success_and_failure():
