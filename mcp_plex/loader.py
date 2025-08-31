@@ -285,6 +285,11 @@ async def run(
     sample_dir: Optional[Path],
     qdrant_url: Optional[str],
     qdrant_api_key: Optional[str],
+    qdrant_host: Optional[str] = None,
+    qdrant_port: int = 6333,
+    qdrant_grpc_port: int = 6334,
+    qdrant_https: bool = False,
+    qdrant_prefer_grpc: bool = False,
 ) -> None:
     """Core execution logic for the CLI."""
 
@@ -323,7 +328,17 @@ async def run(
     dense_vectors = list(dense_model.embed(texts))
     sparse_vectors = list(sparse_model.passage_embed(texts))
 
-    client = AsyncQdrantClient(qdrant_url or ":memory:", api_key=qdrant_api_key)
+    if qdrant_url is None and qdrant_host is None:
+        qdrant_url = ":memory:"
+    client = AsyncQdrantClient(
+        location=qdrant_url,
+        api_key=qdrant_api_key,
+        host=qdrant_host,
+        port=qdrant_port,
+        grpc_port=qdrant_grpc_port,
+        https=qdrant_https,
+        prefer_grpc=qdrant_prefer_grpc,
+    )
     collection_name = "media-items"
     vectors_config = {
         "dense": models.VectorParams(
@@ -457,6 +472,47 @@ async def run(
     help="Qdrant API key",
 )
 @click.option(
+    "--qdrant-host",
+    envvar="QDRANT_HOST",
+    show_envvar=True,
+    required=False,
+    help="Qdrant host",
+)
+@click.option(
+    "--qdrant-port",
+    envvar="QDRANT_PORT",
+    show_envvar=True,
+    type=int,
+    default=6333,
+    show_default=True,
+    required=False,
+    help="Qdrant HTTP port",
+)
+@click.option(
+    "--qdrant-grpc-port",
+    envvar="QDRANT_GRPC_PORT",
+    show_envvar=True,
+    type=int,
+    default=6334,
+    show_default=True,
+    required=False,
+    help="Qdrant gRPC port",
+)
+@click.option(
+    "--qdrant-https/--no-qdrant-https",
+    envvar="QDRANT_HTTPS",
+    show_envvar=True,
+    default=False,
+    help="Use HTTPS when connecting to Qdrant",
+)
+@click.option(
+    "--qdrant-prefer-grpc/--no-qdrant-prefer-grpc",
+    envvar="QDRANT_PREFER_GRPC",
+    show_envvar=True,
+    default=False,
+    help="Prefer gRPC when connecting to Qdrant",
+)
+@click.option(
     "--continuous",
     is_flag=True,
     help="Continuously run the loader",
@@ -479,6 +535,11 @@ def main(
     sample_dir: Optional[Path],
     qdrant_url: Optional[str],
     qdrant_api_key: Optional[str],
+    qdrant_host: Optional[str],
+    qdrant_port: int,
+    qdrant_grpc_port: int,
+    qdrant_https: bool,
+    qdrant_prefer_grpc: bool,
     continuous: bool,
     delay: float,
 ) -> None:
@@ -492,6 +553,11 @@ def main(
             sample_dir,
             qdrant_url,
             qdrant_api_key,
+            qdrant_host,
+            qdrant_port,
+            qdrant_grpc_port,
+            qdrant_https,
+            qdrant_prefer_grpc,
             continuous,
             delay,
         )
@@ -505,6 +571,11 @@ async def load_media(
     sample_dir: Optional[Path],
     qdrant_url: Optional[str],
     qdrant_api_key: Optional[str],
+    qdrant_host: Optional[str],
+    qdrant_port: int,
+    qdrant_grpc_port: int,
+    qdrant_https: bool,
+    qdrant_prefer_grpc: bool,
     continuous: bool,
     delay: float,
 ) -> None:
@@ -518,6 +589,11 @@ async def load_media(
             sample_dir,
             qdrant_url,
             qdrant_api_key,
+            qdrant_host,
+            qdrant_port,
+            qdrant_grpc_port,
+            qdrant_https,
+            qdrant_prefer_grpc,
         )
         if not continuous:
             break

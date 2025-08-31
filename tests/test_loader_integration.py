@@ -39,9 +39,10 @@ class DummySparseEmbedding:
 class DummyQdrantClient:
     instance = None
 
-    def __init__(self, url: str, api_key: str | None = None):
+    def __init__(self, url: str | None = None, api_key: str | None = None, **kwargs):
         self.collections = {}
         self.upserted = []
+        self.kwargs = kwargs
         DummyQdrantClient.instance = self
 
     async def collection_exists(self, name: str) -> bool:
@@ -68,8 +69,8 @@ class DummyQdrantClient:
 class TrackingQdrantClient(DummyQdrantClient):
     """Qdrant client that starts with a mismatched collection size."""
 
-    def __init__(self, url: str, api_key: str | None = None):
-        super().__init__(url, api_key)
+    def __init__(self, url: str | None = None, api_key: str | None = None, **kwargs):
+        super().__init__(url, api_key, **kwargs)
         # Pre-create a collection with the wrong vector size to force recreation
         wrong_params = SimpleNamespace(
             vectors={
@@ -117,3 +118,38 @@ def test_run_recreates_mismatched_collection(monkeypatch):
         client.collections["media-items"].config.params.vectors["dense"].size
         == 3
     )
+
+
+def test_run_uses_connection_options(monkeypatch):
+    monkeypatch.setattr(loader, "TextEmbedding", DummyTextEmbedding)
+    monkeypatch.setattr(loader, "SparseTextEmbedding", DummySparseEmbedding)
+
+    captured = {}
+
+    class CaptureClient(DummyQdrantClient):
+        def __init__(self, url: str | None = None, api_key: str | None = None, **kwargs):
+            super().__init__(url, api_key, **kwargs)
+            captured.update(kwargs)
+
+    monkeypatch.setattr(loader, "AsyncQdrantClient", CaptureClient)
+    sample_dir = Path(__file__).resolve().parents[1] / "sample-data"
+    asyncio.run(
+        loader.run(
+            None,
+            None,
+            None,
+            sample_dir,
+            None,
+            None,
+            qdrant_host="example",
+            qdrant_port=1111,
+            qdrant_grpc_port=2222,
+            qdrant_https=True,
+            qdrant_prefer_grpc=True,
+        )
+    )
+    assert captured["host"] == "example"
+    assert captured["port"] == 1111
+    assert captured["grpc_port"] == 2222
+    assert captured["https"] is True
+    assert captured["prefer_grpc"] is True

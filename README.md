@@ -70,6 +70,16 @@ The included `docker-compose.yml` launches both Qdrant and the MCP server.
 The server will connect to the `qdrant` service at `http://qdrant:6333` and
 expose an SSE endpoint at `http://localhost:8000/mcp`.
 
+### Qdrant Configuration
+
+Connection settings can be provided via environment variables:
+
+- `QDRANT_URL` – full URL or SQLite path.
+- `QDRANT_HOST`/`QDRANT_PORT` – HTTP host and port.
+- `QDRANT_GRPC_PORT` – gRPC port.
+- `QDRANT_HTTPS` – set to `1` to enable HTTPS.
+- `QDRANT_PREFER_GRPC` – set to `1` to prefer gRPC.
+
 ## Development
 Run linting and tests through `uv`:
 ```bash

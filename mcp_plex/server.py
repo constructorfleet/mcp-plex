@@ -25,11 +25,28 @@ except Exception:
     CrossEncoder = None
 
 # Environment configuration for Qdrant
-_QDRANT_URL = os.getenv("QDRANT_URL", ":memory:")
+_QDRANT_URL = os.getenv("QDRANT_URL")
 _QDRANT_API_KEY = os.getenv("QDRANT_API_KEY")
+_QDRANT_HOST = os.getenv("QDRANT_HOST")
+_QDRANT_PORT = int(os.getenv("QDRANT_PORT", "6333"))
+_QDRANT_GRPC_PORT = int(os.getenv("QDRANT_GRPC_PORT", "6334"))
+_QDRANT_PREFER_GRPC = os.getenv("QDRANT_PREFER_GRPC", "0") == "1"
+_https_env = os.getenv("QDRANT_HTTPS")
+_QDRANT_HTTPS = None if _https_env is None else _https_env == "1"
+
+if _QDRANT_URL is None and _QDRANT_HOST is None:
+    _QDRANT_URL = ":memory:"
 
 # Instantiate global client and embedding models
-_client = AsyncQdrantClient(_QDRANT_URL, api_key=_QDRANT_API_KEY)
+_client = AsyncQdrantClient(
+    location=_QDRANT_URL,
+    api_key=_QDRANT_API_KEY,
+    host=_QDRANT_HOST,
+    port=_QDRANT_PORT,
+    grpc_port=_QDRANT_GRPC_PORT,
+    prefer_grpc=_QDRANT_PREFER_GRPC,
+    https=_QDRANT_HTTPS,
+)
 _dense_model = TextEmbedding("BAAI/bge-small-en-v1.5")
 _sparse_model = SparseTextEmbedding("Qdrant/bm42-all-minilm-l6-v2-attentions")
 
