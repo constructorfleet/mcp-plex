@@ -27,9 +27,9 @@ from .types import (
 )
 
 try:  # Only import plexapi when available; the sample data mode does not require it.
-    from plexapi.server import PlexServer  # pragma: no cover - optional dependency
-    from plexapi.base import PlexPartialObject  # pragma: no cover - optional dependency
-except Exception:  # pragma: no cover - plexapi may not be installed in tests
+    from plexapi.server import PlexServer
+    from plexapi.base import PlexPartialObject
+except Exception:
     PlexServer = None  # type: ignore[assignment]
     PlexPartialObject = object  # type: ignore[assignment]
 
@@ -133,7 +133,7 @@ def _build_plex_item(item: PlexPartialObject) -> PlexItem:
     )
 
 
-async def _load_from_plex(server: PlexServer, tmdb_api_key: str) -> List[AggregatedItem]:  # pragma: no cover - requires live Plex server
+async def _load_from_plex(server: PlexServer, tmdb_api_key: str) -> List[AggregatedItem]:
     """Load items from a live Plex server."""
 
     async def _augment_movie(client: httpx.AsyncClient, movie: PlexPartialObject) -> AggregatedItem:
@@ -292,14 +292,14 @@ async def run(
     if sample_dir is not None:
         items = _load_from_sample(sample_dir)
     else:
-        if PlexServer is None:  # pragma: no cover - requires plexapi
+        if PlexServer is None:
             raise RuntimeError("plexapi is required for live loading")
-        if not plex_url or not plex_token:  # pragma: no cover - validated externally
+        if not plex_url or not plex_token:
             raise RuntimeError("PLEX_URL and PLEX_TOKEN must be provided")
-        if not tmdb_api_key:  # pragma: no cover - validated externally
+        if not tmdb_api_key:
             raise RuntimeError("TMDB_API_KEY must be provided")
-        server = PlexServer(plex_url, plex_token)  # pragma: no cover - requires plexapi
-        items = await _load_from_plex(server, tmdb_api_key)  # pragma: no cover - requires plexapi
+        server = PlexServer(plex_url, plex_token)
+        items = await _load_from_plex(server, tmdb_api_key)
 
     # Embed and store in Qdrant
     texts: List[str] = []
@@ -336,7 +336,7 @@ async def run(
     if await client.collection_exists(collection_name):
         info = await client.get_collection(collection_name)
         existing_size = info.config.params.vectors["dense"].size  # type: ignore[index]
-        if existing_size != dense_model.embedding_size:  # pragma: no cover - size mismatch rarely tested
+        if existing_size != dense_model.embedding_size:
             await client.delete_collection(collection_name)
             await client.create_collection(
                 collection_name=collection_name,
@@ -444,10 +444,10 @@ def main(
     qdrant_api_key: Optional[str],
     continuous: bool,
     delay: float,
-) -> None:  # pragma: no cover - CLI wrapper
+) -> None:
     """Entry-point for the ``load-data`` script."""
 
-    while True:  # pragma: no cover - interactive loop
+    while True:
         asyncio.run(
             run(
                 plex_url,
@@ -463,5 +463,5 @@ def main(
         asyncio.sleep(delay)
 
 
-if __name__ == "__main__":  # pragma: no cover - manual execution
+if __name__ == "__main__":
     main()

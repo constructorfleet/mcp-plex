@@ -30,7 +30,7 @@ async def _find_records(identifier: str, limit: int = 5) -> list[models.Record]:
         recs = await _client.retrieve("media-items", ids=[record_id], with_payload=True)
         if recs:
             return recs
-    except Exception:  # pragma: no cover - Qdrant retrieval failures fall back to search
+    except Exception:
         pass
 
     should = [
