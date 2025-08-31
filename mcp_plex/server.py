@@ -2,16 +2,16 @@
 from __future__ import annotations
 
 import asyncio
-import os
 import json
+import os
 from collections import OrderedDict
-from typing import Any, Annotated
+from typing import Annotated, Any
 
+from fastembed import SparseTextEmbedding, TextEmbedding
 from fastmcp.server import FastMCP
-from qdrant_client.async_qdrant_client import AsyncQdrantClient
-from qdrant_client import models
-from fastembed import TextEmbedding, SparseTextEmbedding
 from pydantic import Field
+from qdrant_client import models
+from qdrant_client.async_qdrant_client import AsyncQdrantClient
 
 try:
     from sentence_transformers import CrossEncoder

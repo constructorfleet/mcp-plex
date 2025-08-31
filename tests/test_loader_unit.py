@@ -1,17 +1,17 @@
-import types
 import asyncio
-import httpx
-
+import types
 from pathlib import Path
 
+import httpx
+
 from mcp_plex.loader import (
-    _extract_external_ids,
-    _load_from_sample,
     _build_plex_item,
+    _extract_external_ids,
     _fetch_imdb,
+    _fetch_tmdb_episode,
     _fetch_tmdb_movie,
     _fetch_tmdb_show,
-    _fetch_tmdb_episode,
+    _load_from_sample,
 )
 
 
