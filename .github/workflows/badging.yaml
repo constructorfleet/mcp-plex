@@ -1,0 +1,55 @@
+name: Coverage Badge (main)
+
+on:
+  push:
+    branches: [main]
+
+permissions:
+  contents: write
+
+jobs:
+  badge:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - uses: astral-sh/setup-uv@v6
+        with:
+          python-version: '3.12'
+
+      - run: uv sync --no-dev
+      - run: uv pip install pytest pytest-cov 'genbadge[all]'
+
+      - name: Test w/ coverage (XML for genbadge)
+        run: |
+          uv run pytest \
+            --cov=mcp_plex \
+            --cov-report=xml \
+            --cov-report=term
+
+      - name: Make SVG badge
+        run: |
+          uv run genbadge coverage -i coverage.xml -o coverage.svg
+
+      - name: Publish to orphan "coveragebadges" (single-commit branch)
+        run: |
+          set -euxo pipefail
+          git config user.name  "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+
+          # fresh worktree to avoid polluting current checkout
+          git worktree add /tmp/coveragebadges || true
+          cd /tmp/coveragebadges
+
+          # start a brand-new orphan and blow away index & files
+          git checkout --orphan coveragebadges
+          rm -rf ./* .git/index || true
+
+          # drop only the badge
+          cp -f "$GITHUB_WORKSPACE/coverage.svg" ./coverage.svg
+
+          git add coverage.svg
+          git commit -m "chore: update coverage badge"
+          git push -f origin HEAD:coveragebadges

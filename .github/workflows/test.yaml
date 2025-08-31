@@ -1,45 +1,39 @@
-name: Lint and Test
-
-permissions:
-  contents: write
-  checks: write
-  pull-requests: write
+name: Lint and Test (PR)
 
 on:
-  push:
-    branches: [main]
   pull_request:
+
+permissions:
+  contents: read
+  checks: write
+  pull-requests: write
 
 jobs:
   test:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
+
       - uses: astral-sh/setup-uv@v6
         with:
           python-version: '3.12'
+
       - run: uv sync --no-dev
       - run: uv pip install pytest ruff pytest-cov
-      - name: Run ruff linting
+
+      - name: Ruff
         run: uv run ruff check .
-      - name: Run tests with coverage
+
+      - name: Pytest + coverage
         run: |
-          uv run pytest --junitxml=pytest.xml --cov-report=term-missing:skip-covered --cov=mcp_plex tests/ | tee pytest-coverage.txt
+          uv run pytest \
+            --junitxml=pytest.xml \
+            --cov-report=term-missing:skip-covered \
+            --cov=mcp_plex tests/ | tee pytest-coverage.txt
 
       - name: Coverage comment
-        id: coverage
         uses: MishaKav/pytest-coverage-comment@main
         with:
           pytest-coverage-path: pytest-coverage.txt
           junitxml-path: pytest.xml
-          hide-comment: true
-
-      - name: Update README
-        run: |
-          sed -i '/<!-- Pytest Coverage Comment:Begin -->/,/<!-- Pytest Coverage Comment:End -->/c\<!-- Pytest Coverage Comment:Begin -->\n${{ steps.coverage.outputs.coverageHtml }}\n<!-- Pytest Coverage Comment:End -->' ./README.md
-
-      - name: Commit changes
-        uses: stefanzweifel/git-auto-commit-action@v5
-        with:
-          commit_message: 'docs: update coverage badge [skip ci]'
-          file_pattern: README.md
+          hide-comment: false   # yes, actually post a comment
