@@ -447,20 +447,44 @@ def main(
 ) -> None:
     """Entry-point for the ``load-data`` script."""
 
+    asyncio.run(
+        load_media(
+            plex_url,
+            plex_token,
+            tmdb_api_key,
+            sample_dir,
+            qdrant_url,
+            qdrant_api_key,
+            continuous,
+            delay,
+        )
+    )
+
+
+async def load_media(
+    plex_url: Optional[str],
+    plex_token: Optional[str],
+    tmdb_api_key: Optional[str],
+    sample_dir: Optional[Path],
+    qdrant_url: Optional[str],
+    qdrant_api_key: Optional[str],
+    continuous: bool,
+    delay: float,
+) -> None:
+    """Orchestrate one or more runs of :func:`run`."""
+
     while True:
-        asyncio.run(
-            run(
-                plex_url,
-                plex_token,
-                tmdb_api_key,
-                sample_dir,
-                qdrant_url,
-                qdrant_api_key,
-            )
+        await run(
+            plex_url,
+            plex_token,
+            tmdb_api_key,
+            sample_dir,
+            qdrant_url,
+            qdrant_api_key,
         )
         if not continuous:
             break
-        asyncio.sleep(delay)
+        await asyncio.sleep(delay)
 
 
 if __name__ == "__main__":
