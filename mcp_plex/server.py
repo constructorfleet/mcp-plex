@@ -2,7 +2,7 @@
 from __future__ import annotations
 
 import os
-from typing import Any, List, Annotated
+from typing import Any, Annotated
 
 from fastmcp.server import FastMCP
 from qdrant_client.async_qdrant_client import AsyncQdrantClient
@@ -22,7 +22,7 @@ _sparse_model = SparseTextEmbedding("Qdrant/bm42-all-minilm-l6-v2-attentions")
 server = FastMCP()
 
 
-async def _find_records(identifier: str, limit: int = 5) -> List[models.Record]:
+async def _find_records(identifier: str, limit: int = 5) -> list[models.Record]:
     """Locate records matching an identifier or title."""
     # First, try direct ID lookup
     try:
@@ -30,7 +30,7 @@ async def _find_records(identifier: str, limit: int = 5) -> List[models.Record]:
         recs = await _client.retrieve("media-items", ids=[record_id], with_payload=True)
         if recs:
             return recs
-    except Exception:
+    except Exception:  # pragma: no cover - Qdrant retrieval failures fall back to search
         pass
 
     should = [
@@ -66,7 +66,7 @@ async def get_media(
             examples=["49915", "tt8367814", "The Gentlemen"],
         ),
     ]
-) -> List[dict[str, Any]]:
+) -> list[dict[str, Any]]:
     """Retrieve media items by rating key, IMDb/TMDb ID or title."""
     records = await _find_records(identifier, limit=10)
     return [r.payload["data"] for r in records]
@@ -90,7 +90,7 @@ async def search_media(
             examples=[5],
         ),
     ] = 5,
-) -> List[dict[str, Any]]:
+) -> list[dict[str, Any]]:
     """Hybrid similarity search across media items using dense and sparse vectors."""
     dense_vec = list(_dense_model.embed([query]))[0]
     sparse_vec = _sparse_model.query_embed(query)
@@ -127,7 +127,7 @@ async def recommend_media(
             examples=[5],
         ),
     ] = 5,
-) -> List[dict[str, Any]]:
+) -> list[dict[str, Any]]:
     """Recommend similar media items based on a reference identifier."""
     record = None
     records = await _find_records(identifier, limit=1)
