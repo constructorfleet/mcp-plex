@@ -144,6 +144,32 @@ async def _setup_db(tmp_path: Path) -> str:
     return "dummy"
 
 
+def test_qdrant_env_config(monkeypatch):
+    from qdrant_client import async_qdrant_client
+
+    captured = {}
+
+    class CaptureClient:
+        def __init__(self, *args, **kwargs):
+            captured.update(kwargs)
+
+    monkeypatch.setattr(async_qdrant_client, "AsyncQdrantClient", CaptureClient)
+    monkeypatch.setenv("QDRANT_HOST", "example.com")
+    monkeypatch.setenv("QDRANT_PORT", "1234")
+    monkeypatch.setenv("QDRANT_GRPC_PORT", "5678")
+    monkeypatch.setenv("QDRANT_PREFER_GRPC", "1")
+    monkeypatch.setenv("QDRANT_HTTPS", "1")
+    import importlib
+    import mcp_plex.server as server
+    importlib.reload(server)
+
+    assert captured["host"] == "example.com"
+    assert captured["port"] == 1234
+    assert captured["grpc_port"] == 5678
+    assert captured["prefer_grpc"] is True
+    assert captured["https"] is True
+
+
 def test_server_tools(tmp_path, monkeypatch):
     # Patch embeddings and Qdrant client to use dummy implementations
     monkeypatch.setattr(loader, "TextEmbedding", DummyTextEmbedding)
