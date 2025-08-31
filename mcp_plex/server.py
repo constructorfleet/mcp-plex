@@ -15,7 +15,7 @@ from pydantic import Field
 
 try:
     from sentence_transformers import CrossEncoder
-except Exception:  # pragma: no cover - optional dependency
+except Exception:
     CrossEncoder = None
 
 # Environment configuration for Qdrant
@@ -29,10 +29,10 @@ _sparse_model = SparseTextEmbedding("Qdrant/bm42-all-minilm-l6-v2-attentions")
 
 _USE_RERANKER = os.getenv("USE_RERANKER", "1") == "1"
 _reranker = None
-if _USE_RERANKER and CrossEncoder is not None:  # pragma: no cover - heavy model
+if _USE_RERANKER and CrossEncoder is not None:
     try:
         _reranker = CrossEncoder("cross-encoder/ms-marco-MiniLM-L-6-v2")
-    except Exception:  # pragma: no cover - download/init failure
+    except Exception:
         _reranker = None
 
 server = FastMCP()
@@ -158,11 +158,12 @@ async def search_media(
         indices=sparse_vec.indices.tolist(), values=sparse_vec.values.tolist()
     )
     named_sparse = models.NamedSparseVector(name="sparse", vector=sv)
+    candidate_limit = limit * 3 if _reranker is not None else limit
     hits = await _client.search(
         collection_name="media-items",
         query_vector=named_dense,
         query_sparse_vector=named_sparse,
-        limit=limit * 3,
+        limit=candidate_limit,
         with_payload=True,
     )
 
@@ -321,5 +322,5 @@ async def media_background(
     return art
 
 
-if __name__ == "__main__":  # pragma: no cover
+if __name__ == "__main__":
     server.run()

@@ -171,6 +171,13 @@ def test_server_tools(tmp_path, monkeypatch):
     res = asyncio.run(server.get_media.fn(identifier="The Gentlemen"))
     assert res and res[0]["plex"]["rating_key"] == movie_id
 
+    poster = asyncio.run(server.media_poster.fn(identifier=movie_id))
+    assert isinstance(poster, str) and "thumb" in poster
+    art = asyncio.run(server.media_background.fn(identifier=movie_id))
+    assert isinstance(art, str) and "art" in art
+    item = json.loads(asyncio.run(server.media_item.fn(identifier=movie_id)))
+    assert item["plex"]["rating_key"] == movie_id
+
     start = time.perf_counter()
     res = asyncio.run(
         server.search_media.fn(query="Matthew McConaughey crime movie", limit=1)
@@ -179,12 +186,16 @@ def test_server_tools(tmp_path, monkeypatch):
     assert elapsed < 0.2
     assert res and res[0]["plex"]["title"] == "The Gentlemen"
 
-    # Prefetched payloads should allow resource access without hitting the client
+    # _find_records should handle client retrieval errors gracefully
     orig_retrieve, orig_scroll = server._client.retrieve, server._client.scroll
-
-    async def fail(*args, **kwargs):  # pragma: no cover
+    async def fail(*args, **kwargs):
         raise AssertionError("client called")
 
+    server._client.retrieve = fail
+    asyncio.run(server._find_records("12345", limit=1))
+    server._client.retrieve = orig_retrieve
+
+    # Prefetched payloads should allow resource access without hitting the client
     server._client.retrieve = fail
     server._client.scroll = fail
     try:
@@ -202,6 +213,13 @@ def test_server_tools(tmp_path, monkeypatch):
     finally:
         server._client.retrieve = orig_retrieve
         server._client.scroll = orig_scroll
+
+    with pytest.raises(AssertionError):
+        asyncio.run(fail())
+
+    monkeypatch.setattr(server, "_CACHE_SIZE", 1)
+    server._cache_set(server._poster_cache, "a", "1")
+    server._cache_set(server._poster_cache, "b", "2")
 
     # Reranking should reorder results based on cross-encoder scores
     orig_search = server._client.search
@@ -238,3 +256,65 @@ def test_server_tools(tmp_path, monkeypatch):
 
     with pytest.raises(ValueError):
         asyncio.run(server.media_background.fn(identifier="0"))
+
+
+def _patch_dependencies(monkeypatch):
+    monkeypatch.setattr(loader, "TextEmbedding", DummyTextEmbedding)
+    monkeypatch.setattr(loader, "SparseTextEmbedding", DummySparseEmbedding)
+    monkeypatch.setattr(loader, "AsyncQdrantClient", DummyQdrantClient)
+    import fastembed
+    from qdrant_client import async_qdrant_client
+    monkeypatch.setattr(fastembed, "TextEmbedding", DummyTextEmbedding)
+    monkeypatch.setattr(fastembed, "SparseTextEmbedding", DummySparseEmbedding)
+    monkeypatch.setattr(async_qdrant_client, "AsyncQdrantClient", DummyQdrantClient)
+
+
+def test_reranker_import_failure(monkeypatch):
+    _patch_dependencies(monkeypatch)
+    monkeypatch.delitem(sys.modules, "sentence_transformers", raising=False)
+    import builtins
+    orig_import = builtins.__import__
+
+    def fake_import(name, *args, **kwargs):
+        if name == "sentence_transformers":
+            raise ImportError
+        return orig_import(name, *args, **kwargs)
+
+    monkeypatch.setattr(builtins, "__import__", fake_import)
+    monkeypatch.setenv("USE_RERANKER", "1")
+    server = importlib.reload(importlib.import_module("mcp_plex.server"))
+
+    async def fake_search(*args, **kwargs):
+        return [
+            models.ScoredPoint(id=1, version=1, score=0.0, payload={"data": {"title": "A", "plex": {"rating_key": 1}}}, vector=None),
+            models.ScoredPoint(id=2, version=1, score=0.0, payload={"data": {"title": "B", "plex": {"rating_key": 2}}}, vector=None),
+        ]
+
+    server._client.search = fake_search
+    res = asyncio.run(server.search_media.fn(query="test", limit=2))
+    assert [i["title"] for i in res] == ["A", "B"]
+
+
+def test_reranker_init_failure(monkeypatch):
+    _patch_dependencies(monkeypatch)
+    monkeypatch.setenv("USE_RERANKER", "1")
+    st_module = types.ModuleType("sentence_transformers")
+
+    class Broken:
+        def __init__(self, *args, **kwargs):
+            raise RuntimeError("boom")
+
+    st_module.CrossEncoder = Broken
+    monkeypatch.setitem(sys.modules, "sentence_transformers", st_module)
+    server = importlib.reload(importlib.import_module("mcp_plex.server"))
+    assert server._reranker is None
+
+    async def fake_search(*args, **kwargs):
+        return [
+            models.ScoredPoint(id=1, version=1, score=0.0, payload={"data": {"title": "A", "plex": {"rating_key": 1}}}, vector=None),
+            models.ScoredPoint(id=2, version=1, score=0.0, payload={"data": {"title": "B", "plex": {"rating_key": 2}}}, vector=None),
+        ]
+
+    server._client.search = fake_search
+    res = asyncio.run(server.search_media.fn(query="test", limit=2))
+    assert [i["title"] for i in res] == ["A", "B"]
