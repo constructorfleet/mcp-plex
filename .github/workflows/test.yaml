@@ -2,6 +2,7 @@ name: Lint and Test (PR)
 
 on:
   pull_request:
+  workflow_dispatch:
 
 permissions:
   contents: read
