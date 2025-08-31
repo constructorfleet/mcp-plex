@@ -4,6 +4,7 @@ from pathlib import Path
 import importlib
 import types
 import json
+import sys
 import pytest
 
 from mcp_plex import loader
@@ -48,6 +49,14 @@ class DummySparseEmbedding:
 
     def query_embed(self, text):
         return DummySparseVector([0], [1.0])
+
+
+class DummyCrossEncoder:
+    def __init__(self, model: str):
+        pass
+
+    def predict(self, pairs):
+        return [1.0 if q.lower() in d.lower() else 0.0 for q, d in pairs]
 
 
 class DummyQdrantClient:
@@ -125,6 +134,8 @@ def test_server_tools(tmp_path, monkeypatch):
     monkeypatch.setattr(fastembed, "TextEmbedding", DummyTextEmbedding)
     monkeypatch.setattr(fastembed, "SparseTextEmbedding", DummySparseEmbedding)
     monkeypatch.setattr(async_qdrant_client, "AsyncQdrantClient", DummyQdrantClient)
+    dummy_st = types.SimpleNamespace(CrossEncoder=DummyCrossEncoder)
+    monkeypatch.setitem(sys.modules, "sentence_transformers", dummy_st)
 
     asyncio.run(_setup_db(tmp_path))
     server = importlib.reload(importlib.import_module("mcp_plex.server"))
@@ -143,6 +154,14 @@ def test_server_tools(tmp_path, monkeypatch):
         server.search_media.fn(query="Matthew McConaughey crime movie", limit=1)
     )
     assert res and res[0]["plex"]["title"] == "The Gentlemen"
+
+    res = asyncio.run(server.search_media.fn(query="Observation", limit=1))
+    assert res and res[0]["plex"]["title"] == "The Gentlemen"
+
+    monkeypatch.setenv("ENABLE_RERANKER", "1")
+    server = importlib.reload(server)
+    res = asyncio.run(server.search_media.fn(query="Observation", limit=1))
+    assert res and res[0]["plex"]["title"] == "Observation"
 
     res = asyncio.run(server.recommend_media.fn(identifier=movie_id, limit=1))
     assert res and res[0]["plex"]["rating_key"] == "61960"

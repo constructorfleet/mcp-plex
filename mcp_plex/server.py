@@ -3,6 +3,7 @@ from __future__ import annotations
 
 import os
 import json
+import asyncio
 from typing import Any, Annotated
 
 from fastmcp.server import FastMCP
@@ -10,6 +11,11 @@ from qdrant_client.async_qdrant_client import AsyncQdrantClient
 from qdrant_client import models
 from fastembed import TextEmbedding, SparseTextEmbedding
 from pydantic import Field
+
+try:
+    from sentence_transformers import CrossEncoder
+except Exception:  # pragma: no cover - optional dependency
+    CrossEncoder = None  # type: ignore[assignment]
 
 # Environment configuration for Qdrant
 _QDRANT_URL = os.getenv("QDRANT_URL", ":memory:")
@@ -19,6 +25,13 @@ _QDRANT_API_KEY = os.getenv("QDRANT_API_KEY")
 _client = AsyncQdrantClient(_QDRANT_URL, api_key=_QDRANT_API_KEY)
 _dense_model = TextEmbedding("BAAI/bge-small-en-v1.5")
 _sparse_model = SparseTextEmbedding("Qdrant/bm42-all-minilm-l6-v2-attentions")
+
+_USE_RERANKER = os.getenv("ENABLE_RERANKER", "0").lower() in {"1", "true", "yes"}
+_reranker = (
+    CrossEncoder("cross-encoder/ms-marco-MiniLM-L-6-v2")
+    if _USE_RERANKER and CrossEncoder
+    else None
+)
 
 server = FastMCP()
 
@@ -108,14 +121,21 @@ async def search_media(
         indices=sparse_vec.indices.tolist(), values=sparse_vec.values.tolist()
     )
     named_sparse = models.NamedSparseVector(name="sparse", vector=sv)
+    search_limit = limit * 3 if _reranker else limit
     hits = await _client.search(
         collection_name="media-items",
         query_vector=named_dense,
         query_sparse_vector=named_sparse,
-        limit=limit,
+        limit=search_limit,
         with_payload=True,
     )
-    return [h.payload["data"] for h in hits]
+    if _reranker and hits:
+        texts = [h.payload.get("search_text", "") for h in hits]
+        pairs = [(query, t) for t in texts]
+        loop = asyncio.get_running_loop()
+        scores = await loop.run_in_executor(None, lambda: list(_reranker.predict(pairs)))
+        hits = [h for _, h in sorted(zip(scores, hits), key=lambda x: x[0], reverse=True)]
+    return [h.payload["data"] for h in hits[:limit]]
 
 
 @server.tool("recommend-media")
