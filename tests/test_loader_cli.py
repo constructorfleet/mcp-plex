@@ -1,0 +1,46 @@
+import asyncio
+from click.testing import CliRunner
+import pytest
+
+from mcp_plex import loader
+
+
+def test_cli_continuous_respects_delay(monkeypatch):
+    actions: list = []
+    run_calls = 0
+
+    async def fake_run(*args, **kwargs):
+        nonlocal run_calls
+        run_calls += 1
+        actions.append("run")
+        if run_calls >= 2:
+            raise RuntimeError("stop")
+
+    async def fake_sleep(seconds):
+        actions.append(("sleep", seconds))
+
+    monkeypatch.setattr(loader, "run", fake_run)
+    monkeypatch.setattr(asyncio, "sleep", fake_sleep)
+
+    runner = CliRunner()
+    with pytest.raises(RuntimeError, match="stop"):
+        runner.invoke(loader.main, ["--continuous", "--delay", "7.5"], catch_exceptions=False)
+
+    assert actions == ["run", ("sleep", 7.5), "run"]
+
+
+def test_cli_invalid_delay_value():
+    runner = CliRunner()
+    result = runner.invoke(loader.main, ["--delay", "not-a-number"])
+    assert result.exit_code != 0
+    assert "Invalid value for '--delay'" in result.output
+
+
+def test_run_requires_credentials(monkeypatch):
+    monkeypatch.setattr(loader, "PlexServer", object)
+
+    async def invoke():
+        await loader.run(None, None, "key", None, None, None)
+
+    with pytest.raises(RuntimeError, match="PLEX_URL and PLEX_TOKEN must be provided"):
+        asyncio.run(invoke())

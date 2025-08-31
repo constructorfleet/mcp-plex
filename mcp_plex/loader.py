@@ -460,7 +460,7 @@ def main(
         )
         if not continuous:
             break
-        asyncio.sleep(delay)
+        asyncio.run(asyncio.sleep(delay))
 
 
 if __name__ == "__main__":
