@@ -144,5 +144,45 @@ async def recommend_media(
     return [r.payload["data"] for r in recs]
 
 
+@server.resource("resource://media-poster/{identifier}")
+async def media_poster(
+    identifier: Annotated[
+        str,
+        Field(
+            description="Rating key, IMDb/TMDb ID, or media title",
+            examples=["49915", "tt8367814", "The Gentlemen"],
+        ),
+    ],
+) -> str:
+    """Return the poster image URL for the given media identifier."""
+    records = await _find_records(identifier, limit=1)
+    if not records:
+        raise ValueError("Media item not found")
+    thumb = records[0].payload["data"].get("plex", {}).get("thumb")
+    if not thumb:
+        raise ValueError("Poster not available")
+    return thumb
+
+
+@server.resource("resource://media-background/{identifier}")
+async def media_background(
+    identifier: Annotated[
+        str,
+        Field(
+            description="Rating key, IMDb/TMDb ID, or media title",
+            examples=["49915", "tt8367814", "The Gentlemen"],
+        ),
+    ],
+) -> str:
+    """Return the background art URL for the given media identifier."""
+    records = await _find_records(identifier, limit=1)
+    if not records:
+        raise ValueError("Media item not found")
+    art = records[0].payload["data"].get("plex", {}).get("art")
+    if not art:
+        raise ValueError("Background not available")
+    return art
+
+
 if __name__ == "__main__":  # pragma: no cover
     server.run()
