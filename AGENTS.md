@@ -11,6 +11,10 @@
 - Run linting with `uv run ruff check .`.
 - Run the test suite with `uv run pytest` and ensure it passes before committing.
 
+## Testing Practices
+- Use realistic (or as realistic as possible) data in tests; avoid meaningless placeholder values.
+- Always test both positive and negative logical paths.
+
 ## Efficiency and Search
 - Use `rg` (ripgrep) for recursive search.
 - Avoid `ls -R` and `grep -R` as they generate excessive output.
