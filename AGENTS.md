@@ -8,7 +8,7 @@
   ```
 
 ## Versioning
-- Bump the version in `pyproject.toml` for any user-facing change.
+- Always bump the version in `pyproject.toml` for any change.
 - Update `uv.lock` after version or dependency changes by running `uv lock`.
 
 ## Checks
