@@ -122,6 +122,7 @@ def _build_plex_item(item: PlexPartialObject) -> PlexItem:
         title=str(getattr(item, "title", "")),
         summary=getattr(item, "summary", None),
         year=getattr(item, "year", None),
+        added_at=getattr(item, "addedAt", None),
         guids=guids,
         thumb=getattr(item, "thumb", None),
         art=getattr(item, "art", None),
@@ -207,6 +208,7 @@ def _load_from_sample(sample_dir: Path) -> List[AggregatedItem]:
         title=movie_data.get("title", ""),
         summary=movie_data.get("summary"),
         year=movie_data.get("year"),
+        added_at=movie_data.get("addedAt"),
         guids=[PlexGuid(id=g["id"]) for g in movie_data.get("Guid", [])],
         thumb=movie_data.get("thumb"),
         art=movie_data.get("art"),
@@ -246,6 +248,7 @@ def _load_from_sample(sample_dir: Path) -> List[AggregatedItem]:
         title=episode_data.get("title", ""),
         summary=episode_data.get("summary"),
         year=episode_data.get("year"),
+        added_at=episode_data.get("addedAt"),
         guids=[PlexGuid(id=g["id"]) for g in episode_data.get("Guid", [])],
         thumb=episode_data.get("thumb"),
         art=episode_data.get("art"),
@@ -370,16 +373,6 @@ async def run(
     if created_collection:
         await client.create_payload_index(
             collection_name=collection_name,
-            field_name="search_text",
-            field_schema=models.TextIndexParams(
-                type=models.PayloadSchemaType.TEXT,
-                tokenizer=models.TokenizerType.WORD,
-                min_token_len=2,
-                lowercase=True,
-            ),
-        )
-        await client.create_payload_index(
-            collection_name=collection_name,
             field_name="title",
             field_schema=models.TextIndexParams(
                 type=models.PayloadSchemaType.TEXT,
@@ -398,6 +391,31 @@ async def run(
             field_name="year",
             field_schema=models.PayloadSchemaType.INTEGER,
         )
+        await client.create_payload_index(
+            collection_name=collection_name,
+            field_name="added_at",
+            field_schema=models.PayloadSchemaType.INTEGER,
+        )
+        await client.create_payload_index(
+            collection_name=collection_name,
+            field_name="actors",
+            field_schema=models.PayloadSchemaType.KEYWORD,
+        )
+        await client.create_payload_index(
+            collection_name=collection_name,
+            field_name="data.plex.rating_key",
+            field_schema=models.PayloadSchemaType.KEYWORD,
+        )
+        await client.create_payload_index(
+            collection_name=collection_name,
+            field_name="data.imdb.id",
+            field_schema=models.PayloadSchemaType.KEYWORD,
+        )
+        await client.create_payload_index(
+            collection_name=collection_name,
+            field_name="data.tmdb.id",
+            field_schema=models.PayloadSchemaType.INTEGER,
+        )
 
     points = []
     for idx, (item, dense, sparse) in enumerate(zip(items, dense_vectors, sparse_vectors)):
@@ -406,12 +424,15 @@ async def run(
         )
         payload = {
             "data": item.model_dump(),
-            "search_text": texts[idx],
             "title": item.plex.title,
             "type": item.plex.type,
         }
+        if item.plex.actors:
+            payload["actors"] = [p.tag for p in item.plex.actors]
         if item.plex.year is not None:
             payload["year"] = item.plex.year
+        if item.plex.added_at is not None:
+            payload["added_at"] = item.plex.added_at
         points.append(
             models.Record(
                 id=int(item.plex.rating_key)

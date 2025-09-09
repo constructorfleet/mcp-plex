@@ -1,5 +1,22 @@
 # AGENTS
 
+## Architecture
+- `mcp_plex/loader.py` ingests Plex, TMDb, and IMDb metadata, builds dense and sparse embeddings, and stores items in a Qdrant collection.
+- `mcp_plex/server.py` exposes retrieval and search tools via FastMCP backed by Qdrant.
+- `mcp_plex/types.py` defines the Pydantic models used across the project.
+- When making architectural design decisions, add a short note here describing the decision and its rationale.
+- Actor names are stored as a top-level payload field and indexed in Qdrant to enable actor and year-based filtering.
+
+## User Queries
+The project should handle natural-language searches and recommendations such as:
+- "What's that show that had the billionaire that invited the artist and the journalist and the musician to his house and ended up with an alien that breaks free from a meteor?"
+- "Find a horror movie similar to Schindler's List"
+- "Recommend an action comedy movie with Tom Holland"
+- "What new movies do I have?"
+- "Any new shows?"
+- "Find the newest movie with Tom Cruise"
+- "Suggest a movie from the 90's with Glenn Close"
+
 ## Dependency Management
 - Use [uv](https://github.com/astral-sh/uv) for all Python dependency management and command execution.
 - Install project and development dependencies with:

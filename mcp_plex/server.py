@@ -261,6 +261,125 @@ async def recommend_media(
     return [r.payload["data"] for r in recs]
 
 
+@server.tool("new-movies")
+async def new_movies(
+    limit: Annotated[
+        int,
+        Field(
+            description="Maximum number of newly added movies to return",
+            ge=1,
+            le=50,
+            examples=[5],
+        ),
+    ] = 5,
+) -> list[dict[str, Any]]:
+    """Return the most recently added movies."""
+    query = models.OrderByQuery(
+        order_by=models.OrderBy(key="added_at", direction=models.Direction.DESC)
+    )
+    flt = models.Filter(
+        must=[
+            models.FieldCondition(
+                key="type", match=models.MatchValue(value="movie")
+            )
+        ]
+    )
+    res = await _client.query_points(
+        collection_name="media-items",
+        query=query,
+        query_filter=flt,
+        limit=limit,
+        with_payload=True,
+    )
+    return [p.payload["data"] for p in res.points]
+
+
+@server.tool("new-shows")
+async def new_shows(
+    limit: Annotated[
+        int,
+        Field(
+            description="Maximum number of newly added episodes to return",
+            ge=1,
+            le=50,
+            examples=[5],
+        ),
+    ] = 5,
+) -> list[dict[str, Any]]:
+    """Return the most recently added TV episodes."""
+    query = models.OrderByQuery(
+        order_by=models.OrderBy(key="added_at", direction=models.Direction.DESC)
+    )
+    flt = models.Filter(
+        must=[
+            models.FieldCondition(
+                key="type", match=models.MatchValue(value="episode")
+            )
+        ]
+    )
+    res = await _client.query_points(
+        collection_name="media-items",
+        query=query,
+        query_filter=flt,
+        limit=limit,
+        with_payload=True,
+    )
+    return [p.payload["data"] for p in res.points]
+
+
+@server.tool("actor-movies")
+async def actor_movies(
+    actor: Annotated[
+        str,
+        Field(
+            description="Name of the actor to search for",
+            examples=["Tom Cruise"],
+        ),
+    ],
+    limit: Annotated[
+        int,
+        Field(
+            description="Maximum number of matching movies to return",
+            ge=1,
+            le=50,
+            examples=[5],
+        ),
+    ] = 5,
+    year_from: Annotated[
+        int | None,
+        Field(description="Minimum release year", examples=[1990]),
+    ] = None,
+    year_to: Annotated[
+        int | None,
+        Field(description="Maximum release year", examples=[1999]),
+    ] = None,
+) -> list[dict[str, Any]]:
+    """Return movies featuring the given actor, optionally filtered by release year."""
+    must = [
+        models.FieldCondition(key="type", match=models.MatchValue(value="movie")),
+        models.FieldCondition(key="actors", match=models.MatchValue(value=actor)),
+    ]
+    if year_from is not None or year_to is not None:
+        rng: dict[str, int] = {}
+        if year_from is not None:
+            rng["gte"] = year_from
+        if year_to is not None:
+            rng["lte"] = year_to
+        must.append(models.FieldCondition(key="year", range=models.Range(**rng)))
+    flt = models.Filter(must=must)
+    query = models.OrderByQuery(
+        order_by=models.OrderBy(key="year", direction=models.Direction.DESC)
+    )
+    res = await _client.query_points(
+        collection_name="media-items",
+        query=query,
+        query_filter=flt,
+        limit=limit,
+        with_payload=True,
+    )
+    return [p.payload["data"] for p in res.points]
+
+
 @server.resource("resource://media-item/{identifier}")
 async def media_item(
     identifier: Annotated[
