@@ -111,7 +111,7 @@ async def _find_records(identifier: str, limit: int = 5) -> list[models.Record]:
     points, _ = await _client.scroll(
         collection_name="media-items",
         limit=limit,
-        filter=flt,
+        scroll_filter=flt,
         with_payload=True,
     )
     return points
@@ -174,18 +174,13 @@ async def search_media(
 ) -> list[dict[str, Any]]:
     """Hybrid similarity search across media items using dense and sparse vectors."""
     dense_task = asyncio.to_thread(lambda: list(_dense_model.embed([query]))[0])
-    sparse_task = asyncio.to_thread(lambda: next(_sparse_model.query_embed(query)))
-    dense_vec, sparse_vec = await asyncio.gather(dense_task, sparse_task)
+    dense_vec = await dense_task
     named_dense = models.NamedVector(name="dense", vector=dense_vec)
-    sv = models.SparseVector(
-        indices=sparse_vec.indices.tolist(), values=sparse_vec.values.tolist()
-    )
-    named_sparse = models.NamedSparseVector(name="sparse", vector=sv)
     candidate_limit = limit * 3 if _reranker is not None else limit
     hits = await _client.search(
         collection_name="media-items",
         query_vector=named_dense,
-        query_sparse_vector=named_sparse,
+        query_filter=None,
         limit=candidate_limit,
         with_payload=True,
     )
@@ -261,6 +256,7 @@ async def recommend_media(
         positive=[record.id],
         limit=limit,
         with_payload=True,
+        using="dense",
     )
     return [r.payload["data"] for r in recs]
 
