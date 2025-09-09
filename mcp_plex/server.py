@@ -34,6 +34,12 @@ _QDRANT_PREFER_GRPC = os.getenv("QDRANT_PREFER_GRPC", "0") == "1"
 _https_env = os.getenv("QDRANT_HTTPS")
 _QDRANT_HTTPS = None if _https_env is None else _https_env == "1"
 
+# Embedding model configuration
+_DENSE_MODEL_NAME = os.getenv("DENSE_MODEL", "BAAI/bge-small-en-v1.5")
+_SPARSE_MODEL_NAME = os.getenv(
+    "SPARSE_MODEL", "Qdrant/bm42-all-minilm-l6-v2-attentions"
+)
+
 if _QDRANT_URL is None and _QDRANT_HOST is None:
     _QDRANT_URL = ":memory:"
 
@@ -47,8 +53,8 @@ _client = AsyncQdrantClient(
     prefer_grpc=_QDRANT_PREFER_GRPC,
     https=_QDRANT_HTTPS,
 )
-_dense_model = TextEmbedding("BAAI/bge-small-en-v1.5")
-_sparse_model = SparseTextEmbedding("Qdrant/bm42-all-minilm-l6-v2-attentions")
+_dense_model = TextEmbedding(_DENSE_MODEL_NAME)
+_sparse_model = SparseTextEmbedding(_SPARSE_MODEL_NAME)
 
 _USE_RERANKER = os.getenv("USE_RERANKER", "1") == "1"
 _reranker = None
@@ -472,6 +478,16 @@ def main(argv: list[str] | None = None) -> None:
         help="Transport protocol to use",
     )
     parser.add_argument("--mount", help="Mount path for HTTP transports")
+    parser.add_argument(
+        "--dense-model",
+        default=_DENSE_MODEL_NAME,
+        help="Dense embedding model name (env: DENSE_MODEL)",
+    )
+    parser.add_argument(
+        "--sparse-model",
+        default=_SPARSE_MODEL_NAME,
+        help="Sparse embedding model name (env: SPARSE_MODEL)",
+    )
     args = parser.parse_args(argv)
 
     if args.transport != "stdio":
@@ -485,6 +501,10 @@ def main(argv: list[str] | None = None) -> None:
         run_kwargs.update({"host": args.bind, "port": args.port})
         if args.mount:
             run_kwargs["path"] = args.mount
+
+    global _dense_model, _sparse_model
+    _dense_model = TextEmbedding(args.dense_model)
+    _sparse_model = SparseTextEmbedding(args.sparse_model)
 
     server.run(transport=args.transport, **run_kwargs)
 
