@@ -102,6 +102,34 @@ def test_server_tools(monkeypatch):
         asyncio.run(server.media_background.fn(identifier="0"))
 
 
+def test_new_media_tools(monkeypatch):
+    server = _load_server(monkeypatch)
+
+    movies = asyncio.run(server.new_movies.fn(limit=1))
+    assert movies and movies[0]["plex"]["type"] == "movie"
+    assert movies[0]["plex"]["added_at"] is not None
+
+    shows = asyncio.run(server.new_shows.fn(limit=1))
+    assert shows and shows[0]["plex"]["type"] == "episode"
+    assert shows[0]["plex"]["added_at"] is not None
+
+
+def test_actor_movies(monkeypatch):
+    server = _load_server(monkeypatch)
+
+    movies = asyncio.run(
+        server.actor_movies.fn(actor="Matthew McConaughey", limit=1)
+    )
+    assert movies and movies[0]["plex"]["title"] == "The Gentlemen"
+
+    none = asyncio.run(
+        server.actor_movies.fn(
+            actor="Matthew McConaughey", year_from=1990, year_to=1999
+        )
+    )
+    assert none == []
+
+
 def test_reranker_import_failure(monkeypatch):
     monkeypatch.setenv("USE_RERANKER", "1")
     orig_import = builtins.__import__

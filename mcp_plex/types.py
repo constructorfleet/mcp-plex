@@ -121,6 +121,7 @@ class PlexItem(BaseModel):
     title: str
     summary: Optional[str] = None
     year: Optional[int] = None
+    added_at: Optional[int] = None
     guids: List[PlexGuid] = Field(default_factory=list)
     thumb: Optional[str] = None
     art: Optional[str] = None
