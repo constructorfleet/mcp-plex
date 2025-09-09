@@ -36,11 +36,11 @@ uv run load-data --continuous --delay 600
 ### Run the MCP Server
 Start the FastMCP server over stdio (default):
 ```bash
-uv run python -m mcp_plex.server
+uv run mcp-server
 ```
 Expose the server over SSE on port 8000:
 ```bash
-uv run python -m mcp_plex.server --transport sse --bind 0.0.0.0 --port 8000 --mount /mcp
+uv run mcp-server --transport sse --bind 0.0.0.0 --port 8000 --mount /mcp
 ```
 
 ## Docker
@@ -64,7 +64,7 @@ The included `docker-compose.yml` launches both Qdrant and the MCP server.
    ```
 3. (Optional) Load sample data into Qdrant:
    ```bash
-   docker compose run --rm mcp-plex uv run load-data --sample-dir sample-data
+   docker compose run --rm loader load-data --sample-dir sample-data
    ```
 
 The server will connect to the `qdrant` service at `http://qdrant:6333` and

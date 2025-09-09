@@ -11,5 +11,5 @@ WORKDIR /app
 COPY pyproject.toml uv.lock ./
 RUN uv sync --no-dev
 COPY . .
-
-ENTRYPOINT ["uv", "run", "load-data"]
+ENTRYPOINT ["./entrypoint.sh"]
+CMD ["load-data"]
