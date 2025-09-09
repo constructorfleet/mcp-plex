@@ -7,6 +7,10 @@
   uv sync --extra dev
   ```
 
+## Versioning
+- Bump the version in `pyproject.toml` for any user-facing change.
+- Update `uv.lock` after version or dependency changes by running `uv lock`.
+
 ## Checks
 - Run linting with `uv run ruff check .`.
 - Run the test suite with `uv run pytest` and ensure it passes before committing.
