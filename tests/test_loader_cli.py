@@ -62,3 +62,55 @@ def test_run_requires_credentials(monkeypatch):
 
     with pytest.raises(RuntimeError, match="PLEX_URL and PLEX_TOKEN must be provided"):
         asyncio.run(invoke())
+
+
+def test_cli_model_overrides(monkeypatch):
+    captured: dict[str, str] = {}
+
+    async def fake_run(*args, **kwargs):
+        captured["dense"] = args[-2]
+        captured["sparse"] = args[-1]
+
+    monkeypatch.setattr(loader, "run", fake_run)
+
+    runner = CliRunner()
+    runner.invoke(
+        loader.main,
+        ["--dense-model", "foo", "--sparse-model", "bar"],
+        catch_exceptions=False,
+        env={
+            "PLEX_URL": "http://localhost",
+            "PLEX_TOKEN": "token",
+            "TMDB_API_KEY": "key",
+        },
+    )
+
+    assert captured["dense"] == "foo"
+    assert captured["sparse"] == "bar"
+
+
+def test_cli_model_env(monkeypatch):
+    captured: dict[str, str] = {}
+
+    async def fake_run(*args, **kwargs):
+        captured["dense"] = args[-2]
+        captured["sparse"] = args[-1]
+
+    monkeypatch.setattr(loader, "run", fake_run)
+
+    runner = CliRunner()
+    runner.invoke(
+        loader.main,
+        [],
+        catch_exceptions=False,
+        env={
+            "PLEX_URL": "http://localhost",
+            "PLEX_TOKEN": "token",
+            "TMDB_API_KEY": "key",
+            "DENSE_MODEL": "foo",
+            "SPARSE_MODEL": "bar",
+        },
+    )
+
+    assert captured["dense"] == "foo"
+    assert captured["sparse"] == "bar"

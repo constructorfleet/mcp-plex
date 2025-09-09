@@ -43,6 +43,18 @@ Expose the server over SSE on port 8000:
 uv run mcp-server --transport sse --bind 0.0.0.0 --port 8000 --mount /mcp
 ```
 
+### Embedding Models
+
+Both the loader and server default to `BAAI/bge-small-en-v1.5` for dense
+embeddings and `Qdrant/bm42-all-minilm-l6-v2-attentions` for sparse embeddings.
+Override these by setting `DENSE_MODEL`/`SPARSE_MODEL` environment variables or
+using `--dense-model`/`--sparse-model` CLI options:
+
+```bash
+uv run load-data --dense-model my-dense --sparse-model my-sparse
+uv run mcp-server --dense-model my-dense --sparse-model my-sparse
+```
+
 ## Docker
 A Dockerfile builds a GPU-enabled image based on
 `nvidia/cuda:12.4.1-cudnn-devel-ubuntu22.04` using `uv` for dependency

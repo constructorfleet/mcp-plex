@@ -293,6 +293,8 @@ async def run(
     qdrant_grpc_port: int = 6334,
     qdrant_https: bool = False,
     qdrant_prefer_grpc: bool = False,
+    dense_model_name: str = "BAAI/bge-small-en-v1.5",
+    sparse_model_name: str = "Qdrant/bm42-all-minilm-l6-v2-attentions",
 ) -> None:
     """Core execution logic for the CLI."""
 
@@ -325,8 +327,8 @@ async def run(
             parts.extend(r.get("content", "") for r in getattr(item.tmdb, "reviews", []))
         texts.append("\n".join(p for p in parts if p))
 
-    dense_model = TextEmbedding("BAAI/bge-small-en-v1.5")
-    sparse_model = SparseTextEmbedding("Qdrant/bm42-all-minilm-l6-v2-attentions")
+    dense_model = TextEmbedding(dense_model_name)
+    sparse_model = SparseTextEmbedding(sparse_model_name)
 
     dense_vectors = list(dense_model.embed(texts))
     sparse_vectors = list(sparse_model.passage_embed(texts))
@@ -534,6 +536,22 @@ async def run(
     help="Prefer gRPC when connecting to Qdrant",
 )
 @click.option(
+    "--dense-model",
+    envvar="DENSE_MODEL",
+    show_envvar=True,
+    default="BAAI/bge-small-en-v1.5",
+    show_default=True,
+    help="Dense embedding model name",
+)
+@click.option(
+    "--sparse-model",
+    envvar="SPARSE_MODEL",
+    show_envvar=True,
+    default="Qdrant/bm42-all-minilm-l6-v2-attentions",
+    show_default=True,
+    help="Sparse embedding model name",
+)
+@click.option(
     "--continuous",
     is_flag=True,
     help="Continuously run the loader",
@@ -561,6 +579,8 @@ def main(
     qdrant_grpc_port: int,
     qdrant_https: bool,
     qdrant_prefer_grpc: bool,
+    dense_model: str,
+    sparse_model: str,
     continuous: bool,
     delay: float,
 ) -> None:
@@ -579,6 +599,8 @@ def main(
             qdrant_grpc_port,
             qdrant_https,
             qdrant_prefer_grpc,
+            dense_model,
+            sparse_model,
             continuous,
             delay,
         )
@@ -597,6 +619,8 @@ async def load_media(
     qdrant_grpc_port: int,
     qdrant_https: bool,
     qdrant_prefer_grpc: bool,
+    dense_model_name: str,
+    sparse_model_name: str,
     continuous: bool,
     delay: float,
 ) -> None:
@@ -615,6 +639,8 @@ async def load_media(
             qdrant_grpc_port,
             qdrant_https,
             qdrant_prefer_grpc,
+            dense_model_name,
+            sparse_model_name,
         )
         if not continuous:
             break
