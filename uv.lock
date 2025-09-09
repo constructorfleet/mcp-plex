@@ -801,7 +801,7 @@ wheels = [
 
 [[package]]
 name = "mcp-plex"
-version = "0.4.6"
+version = "0.25.0"
 source = { editable = "." }
 dependencies = [
     { name = "fastmcp" },
