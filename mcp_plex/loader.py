@@ -310,11 +310,8 @@ async def run(
         server = PlexServer(plex_url, plex_token)
         items = await _load_from_plex(server, tmdb_api_key)
 
-    # Assemble batch for Qdrant with server-side embeddings
-    ids: List[int | str] = []
-    payloads: List[dict] = []
-    dense_docs: List[models.Document] = []
-    sparse_docs: List[models.Document] = []
+    # Assemble points with server-side embeddings
+    points: List[models.PointStruct] = []
     for item in items:
         parts = [
             item.plex.title,
@@ -339,14 +336,21 @@ async def run(
             payload["year"] = item.plex.year
         if item.plex.added_at is not None:
             payload["added_at"] = item.plex.added_at
-        ids.append(
+        point_id: int | str = (
             int(item.plex.rating_key)
             if item.plex.rating_key.isdigit()
             else item.plex.rating_key
         )
-        payloads.append(payload)
-        dense_docs.append(models.Document(text=text, model=dense_model_name))
-        sparse_docs.append(models.Document(text=text, model=sparse_model_name))
+        points.append(
+            models.PointStruct(
+                id=point_id,
+                vector={
+                    "dense": models.Document(text=text, model=dense_model_name),
+                    "sparse": models.Document(text=text, model=sparse_model_name),
+                },
+                payload=payload,
+            )
+        )
 
     if qdrant_url is None and qdrant_host is None:
         qdrant_url = ":memory:"
@@ -417,13 +421,8 @@ async def run(
             field_schema=models.PayloadSchemaType.INTEGER,
         )
 
-    if ids:
-        batch = models.Batch(
-            ids=ids,
-            vectors={"dense": dense_docs, "sparse": sparse_docs},
-            payloads=payloads,
-        )
-        await client.upsert(collection_name=collection_name, points=batch)
+    if points:
+        await client.upsert(collection_name=collection_name, points=points)
 
     json.dump([item.model_dump() for item in items], fp=sys.stdout, indent=2)
     sys.stdout.write("\n")

@@ -39,6 +39,7 @@ The project should handle natural-language searches and recommendations such as:
 - Use realistic (or as realistic as possible) data in tests; avoid meaningless placeholder values.
 - Always test both positive and negative logical paths.
 - Do **not** use `# pragma: no cover`; add tests to exercise code paths instead.
+- All changes should include tests that demonstrate the new or modified behavior.
 
 ## Efficiency and Search
 - Use `rg` (ripgrep) for recursive search.
