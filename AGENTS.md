@@ -1,10 +1,11 @@
 # AGENTS
 
 ## Architecture
-- `mcp_plex/loader.py` ingests Plex, TMDb, and IMDb metadata, builds dense and sparse embeddings, and stores items in a Qdrant collection.
+- `mcp_plex/loader.py` ingests Plex, TMDb, and IMDb metadata, relies on Qdrant to generate dense and sparse embeddings, and stores items in a Qdrant collection.
 - `mcp_plex/server.py` exposes retrieval and search tools via FastMCP backed by Qdrant.
 - `mcp_plex/types.py` defines the Pydantic models used across the project.
 - When making architectural design decisions, add a short note here describing the decision and its rationale.
+- Embedding generation was moved from local FastEmbed models to Qdrant's document API to reduce local dependencies and centralize vector creation.
 - Actor names are stored as a top-level payload field and indexed in Qdrant to enable actor and year-based filtering.
 - Dense and sparse embedding model names are configurable via `DENSE_MODEL` and
   `SPARSE_MODEL` environment variables or the corresponding CLI options.
@@ -38,6 +39,7 @@ The project should handle natural-language searches and recommendations such as:
 - Use realistic (or as realistic as possible) data in tests; avoid meaningless placeholder values.
 - Always test both positive and negative logical paths.
 - Do **not** use `# pragma: no cover`; add tests to exercise code paths instead.
+- All changes should include tests that demonstrate the new or modified behavior.
 
 ## Efficiency and Search
 - Use `rg` (ripgrep) for recursive search.

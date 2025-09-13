@@ -9,7 +9,6 @@ from typing import List, Optional
 
 import click
 import httpx
-from fastembed import SparseTextEmbedding, TextEmbedding
 from qdrant_client import models
 from qdrant_client.async_qdrant_client import AsyncQdrantClient
 
@@ -311,8 +310,8 @@ async def run(
         server = PlexServer(plex_url, plex_token)
         items = await _load_from_plex(server, tmdb_api_key)
 
-    # Embed and store in Qdrant
-    texts: List[str] = []
+    # Assemble points with server-side embeddings
+    points: List[models.PointStruct] = []
     for item in items:
         parts = [
             item.plex.title,
@@ -325,13 +324,33 @@ async def run(
         ]
         if item.tmdb and hasattr(item.tmdb, "reviews"):
             parts.extend(r.get("content", "") for r in getattr(item.tmdb, "reviews", []))
-        texts.append("\n".join(p for p in parts if p))
-
-    dense_model = TextEmbedding(dense_model_name)
-    sparse_model = SparseTextEmbedding(sparse_model_name)
-
-    dense_vectors = list(dense_model.embed(texts))
-    sparse_vectors = list(sparse_model.passage_embed(texts))
+        text = "\n".join(p for p in parts if p)
+        payload = {
+            "data": item.model_dump(),
+            "title": item.plex.title,
+            "type": item.plex.type,
+        }
+        if item.plex.actors:
+            payload["actors"] = [p.tag for p in item.plex.actors]
+        if item.plex.year is not None:
+            payload["year"] = item.plex.year
+        if item.plex.added_at is not None:
+            payload["added_at"] = item.plex.added_at
+        point_id: int | str = (
+            int(item.plex.rating_key)
+            if item.plex.rating_key.isdigit()
+            else item.plex.rating_key
+        )
+        points.append(
+            models.PointStruct(
+                id=point_id,
+                vector={
+                    "dense": models.Document(text=text, model=dense_model_name),
+                    "sparse": models.Document(text=text, model=sparse_model_name),
+                },
+                payload=payload,
+            )
+        )
 
     if qdrant_url is None and qdrant_host is None:
         qdrant_url = ":memory:"
@@ -344,31 +363,14 @@ async def run(
         https=qdrant_https,
         prefer_grpc=qdrant_prefer_grpc,
     )
+    dense_size, dense_distance = client._get_model_params(dense_model_name)
     collection_name = "media-items"
-    vectors_config = {
-        "dense": models.VectorParams(
-            size=dense_model.embedding_size, distance=models.Distance.COSINE
-        )
-    }
-    sparse_vectors_config = {"sparse": models.SparseVectorParams()}
-
     created_collection = False
-    if await client.collection_exists(collection_name):
-        info = await client.get_collection(collection_name)
-        existing_size = info.config.params.vectors["dense"].size  # type: ignore[index]
-        if existing_size != dense_model.embedding_size:
-            await client.delete_collection(collection_name)
-            await client.create_collection(
-                collection_name=collection_name,
-                vectors_config=vectors_config,
-                sparse_vectors_config=sparse_vectors_config,
-            )
-            created_collection = True
-    else:
+    if not await client.collection_exists(collection_name):
         await client.create_collection(
             collection_name=collection_name,
-            vectors_config=vectors_config,
-            sparse_vectors_config=sparse_vectors_config,
+            vectors_config={"dense": models.VectorParams(size=dense_size, distance=dense_distance)},
+            sparse_vectors_config={"sparse": models.SparseVectorParams()},
         )
         created_collection = True
 
@@ -419,34 +421,8 @@ async def run(
             field_schema=models.PayloadSchemaType.INTEGER,
         )
 
-    points = []
-    for idx, (item, dense, sparse) in enumerate(zip(items, dense_vectors, sparse_vectors)):
-        sv = models.SparseVector(
-            indices=sparse.indices.tolist(), values=sparse.values.tolist()
-        )
-        payload = {
-            "data": item.model_dump(),
-            "title": item.plex.title,
-            "type": item.plex.type,
-        }
-        if item.plex.actors:
-            payload["actors"] = [p.tag for p in item.plex.actors]
-        if item.plex.year is not None:
-            payload["year"] = item.plex.year
-        if item.plex.added_at is not None:
-            payload["added_at"] = item.plex.added_at
-        points.append(
-            models.Record(
-                id=int(item.plex.rating_key)
-                if item.plex.rating_key.isdigit()
-                else item.plex.rating_key,
-                payload=payload,
-                vector={"dense": dense, "sparse": sv},
-            )
-        )
-
     if points:
-        await client.upsert(collection_name="media-items", points=points)
+        await client.upsert(collection_name=collection_name, points=points)
 
     json.dump([item.model_dump() for item in items], fp=sys.stdout, indent=2)
     sys.stdout.write("\n")
