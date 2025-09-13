@@ -9,6 +9,8 @@
 - Actor names are stored as a top-level payload field and indexed in Qdrant to enable actor and year-based filtering.
 - Dense and sparse embedding model names are configurable via `DENSE_MODEL` and
   `SPARSE_MODEL` environment variables or the corresponding CLI options.
+- Hybrid search uses Qdrant's built-in `FusionQuery` with reciprocal rank fusion
+  to combine dense and sparse results before optional cross-encoder reranking.
 
 ## User Queries
 The project should handle natural-language searches and recommendations such as:
