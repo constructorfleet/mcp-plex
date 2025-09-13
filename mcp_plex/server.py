@@ -12,7 +12,6 @@ from fastmcp.server import FastMCP
 from pydantic import Field
 from qdrant_client import models
 from qdrant_client.async_qdrant_client import AsyncQdrantClient
-from qdrant_client.hybrid.fusion import reciprocal_rank_fusion
 
 try:
     from sentence_transformers import CrossEncoder
@@ -180,23 +179,26 @@ async def search_media(
     dense_doc = models.Document(text=query, model=_DENSE_MODEL_NAME)
     sparse_doc = models.Document(text=query, model=_SPARSE_MODEL_NAME)
     candidate_limit = limit * 3 if _reranker is not None else limit
-    dense_resp, sparse_resp = await asyncio.gather(
-        _client.query_points(
-            collection_name="media-items",
-            query=dense_doc,
+    prefetch = [
+        models.Prefetch(
+            query=models.NearestQuery(nearest=dense_doc),
             using="dense",
             limit=candidate_limit,
-            with_payload=True,
         ),
-        _client.query_points(
-            collection_name="media-items",
-            query=sparse_doc,
+        models.Prefetch(
+            query=models.NearestQuery(nearest=sparse_doc),
             using="sparse",
             limit=candidate_limit,
-            with_payload=True,
         ),
+    ]
+    res = await _client.query_points(
+        collection_name="media-items",
+        query=models.FusionQuery(fusion=models.Fusion.RRF),
+        prefetch=prefetch,
+        limit=candidate_limit,
+        with_payload=True,
     )
-    hits = reciprocal_rank_fusion([dense_resp.points, sparse_resp.points], limit=candidate_limit)
+    hits = res.points
 
     async def _prefetch(hit: models.ScoredPoint) -> None:
         data = hit.payload["data"]
