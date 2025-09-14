@@ -83,16 +83,19 @@ def test_fetch_functions_success_and_failure():
         return httpx.Response(404)
 
     async def tmdb_movie_mock(request):
+        assert request.headers.get("Authorization") == "Bearer k"
         if "good" in str(request.url):
             return httpx.Response(200, json={"id": 1, "title": "M"})
         return httpx.Response(404)
 
     async def tmdb_show_mock(request):
+        assert request.headers.get("Authorization") == "Bearer k"
         if "good" in str(request.url):
             return httpx.Response(200, json={"id": 1, "name": "S"})
         return httpx.Response(404)
 
     async def tmdb_episode_mock(request):
+        assert request.headers.get("Authorization") == "Bearer k"
         if "good" in str(request.url):
             return httpx.Response(200, json={"id": 1, "name": "E"})
         return httpx.Response(404)

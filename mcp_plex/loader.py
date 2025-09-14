@@ -65,9 +65,9 @@ async def _fetch_tmdb_movie(
     client: httpx.AsyncClient, tmdb_id: str, api_key: str
 ) -> Optional[TMDBMovie]:
     url = (
-        f"https://api.themoviedb.org/3/movie/{tmdb_id}?api_key={api_key}&append_to_response=reviews"
+        f"https://api.themoviedb.org/3/movie/{tmdb_id}?append_to_response=reviews"
     )
-    resp = await client.get(url)
+    resp = await client.get(url, headers={"Authorization": f"Bearer {api_key}"})
     if resp.is_success:
         return TMDBMovie.model_validate(resp.json())
     return None
@@ -77,9 +77,9 @@ async def _fetch_tmdb_show(
     client: httpx.AsyncClient, tmdb_id: str, api_key: str
 ) -> Optional[TMDBShow]:
     url = (
-        f"https://api.themoviedb.org/3/tv/{tmdb_id}?api_key={api_key}&append_to_response=reviews"
+        f"https://api.themoviedb.org/3/tv/{tmdb_id}?append_to_response=reviews"
     )
-    resp = await client.get(url)
+    resp = await client.get(url, headers={"Authorization": f"Bearer {api_key}"})
     if resp.is_success:
         return TMDBShow.model_validate(resp.json())
     return None
@@ -90,8 +90,8 @@ async def _fetch_tmdb_episode(
 ) -> Optional[TMDBEpisode]:
     """Attempt to fetch TMDb data for a TV episode by its ID."""
 
-    url = f"https://api.themoviedb.org/3/tv/episode/{tmdb_id}?api_key={api_key}"
-    resp = await client.get(url)
+    url = f"https://api.themoviedb.org/3/tv/episode/{tmdb_id}"
+    resp = await client.get(url, headers={"Authorization": f"Bearer {api_key}"})
     if resp.is_success:
         return TMDBEpisode.model_validate(resp.json())
     return None
@@ -190,19 +190,25 @@ async def _load_from_plex(
     results: List[AggregatedItem] = []
     async with httpx.AsyncClient(timeout=30) as client:
         movie_section = server.library.section("Movies")
-        movie_tasks = [_augment_movie(client, movie) for movie in movie_section.all()]
+        movie_tasks = [
+            _augment_movie(client, movie.fetchItem(movie.ratingKey))
+            for movie in movie_section.all()
+        ]
         if movie_tasks:
             results.extend(await _gather_in_batches(movie_tasks, batch_size))
 
         show_section = server.library.section("TV Shows")
         for show in show_section.all():
-            show_ids = _extract_external_ids(show)
+            full_show = show.fetchItem(show.ratingKey)
+            show_ids = _extract_external_ids(full_show)
             show_tmdb: Optional[TMDBShow] = None
             if show_ids.tmdb:
                 show_tmdb = await _fetch_tmdb_show(client, show_ids.tmdb, tmdb_api_key)
             episode_tasks = [
-                _augment_episode(client, episode, show_tmdb)
-                for episode in show.episodes()
+                _augment_episode(
+                    client, episode.fetchItem(episode.ratingKey), show_tmdb
+                )
+                for episode in full_show.episodes()
             ]
             if episode_tasks:
                 results.extend(await _gather_in_batches(episode_tasks, batch_size))
@@ -348,7 +354,7 @@ async def run(
             parts.extend(r.get("content", "") for r in getattr(item.tmdb, "reviews", []))
         text = "\n".join(p for p in parts if p)
         payload = {
-            "data": item.model_dump(),
+            "data": item.model_dump(mode="json"),
             "title": item.plex.title,
             "type": item.plex.type,
         }
@@ -357,7 +363,7 @@ async def run(
         if item.plex.year is not None:
             payload["year"] = item.plex.year
         if item.plex.added_at is not None:
-            payload["added_at"] = item.plex.added_at
+            payload["added_at"] = int(item.plex.added_at.timestamp())
         point_id: int | str = (
             int(item.plex.rating_key)
             if item.plex.rating_key.isdigit()
@@ -453,7 +459,7 @@ async def run(
     else:
         logger.info("No points to upsert")
 
-    json.dump([item.model_dump() for item in items], fp=sys.stdout, indent=2)
+    json.dump([item.model_dump(mode="json") for item in items], fp=sys.stdout, indent=2)
     sys.stdout.write("\n")
 
 
