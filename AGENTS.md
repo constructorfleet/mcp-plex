@@ -15,6 +15,8 @@
   simplify testing.
 - Cross-encoder reranker is initialized lazily via a `PlexServer` property to
   avoid unnecessary model downloads when reranking is disabled or unavailable.
+- Media payload and artwork caching centralized in `MediaCache` attached to
+  `PlexServer` to streamline cache management and testing.
 
 ## User Queries
 The project should handle natural-language searches and recommendations such as:
