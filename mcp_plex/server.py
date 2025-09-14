@@ -6,7 +6,6 @@ import asyncio
 import inspect
 import json
 import os
-from collections import OrderedDict
 from typing import Annotated, Any, Callable
 
 from fastapi import FastAPI
@@ -20,6 +19,8 @@ from qdrant_client import models
 from qdrant_client.async_qdrant_client import AsyncQdrantClient
 from starlette.requests import Request
 from starlette.responses import JSONResponse, PlainTextResponse, Response
+
+from .cache import MediaCache
 
 try:
     from sentence_transformers import CrossEncoder
@@ -51,6 +52,9 @@ if _QDRANT_URL is None and _QDRANT_HOST is None:
     _QDRANT_URL = ":memory:"
 
 
+_CACHE_SIZE = 128
+
+
 class PlexServer(FastMCP):
     """FastMCP server with an attached Qdrant client."""
 
@@ -65,6 +69,7 @@ class PlexServer(FastMCP):
             prefer_grpc=_QDRANT_PREFER_GRPC,
             https=_QDRANT_HTTPS,
         )
+        self.cache = MediaCache(_CACHE_SIZE)
 
 _USE_RERANKER = os.getenv("USE_RERANKER", "1") == "1"
 _reranker = None
@@ -75,27 +80,6 @@ if _USE_RERANKER and CrossEncoder is not None:
         _reranker = None
 
 server = PlexServer()
-
-
-_CACHE_SIZE = 128
-_payload_cache: OrderedDict[str, dict[str, Any]] = OrderedDict()
-_poster_cache: OrderedDict[str, str] = OrderedDict()
-_background_cache: OrderedDict[str, str] = OrderedDict()
-
-
-def _cache_set(cache: OrderedDict, key: str, value: Any) -> None:
-    if key in cache:
-        cache.move_to_end(key)
-    cache[key] = value
-    while len(cache) > _CACHE_SIZE:
-        cache.popitem(last=False)
-
-
-def _cache_get(cache: OrderedDict, key: str) -> Any | None:
-    if key in cache:
-        cache.move_to_end(key)
-        return cache[key]
-    return None
 
 
 async def _find_records(identifier: str, limit: int = 5) -> list[models.Record]:
@@ -137,7 +121,7 @@ async def _find_records(identifier: str, limit: int = 5) -> list[models.Record]:
 
 async def _get_media_data(identifier: str) -> dict[str, Any]:
     """Return the first matching media record's payload."""
-    cached = _cache_get(_payload_cache, identifier)
+    cached = server.cache.get_payload(identifier)
     if cached is not None:
         return cached
     records = await _find_records(identifier, limit=1)
@@ -146,13 +130,13 @@ async def _get_media_data(identifier: str) -> dict[str, Any]:
     data = records[0].payload["data"]
     rating_key = str(data.get("plex", {}).get("rating_key"))
     if rating_key:
-        _cache_set(_payload_cache, rating_key, data)
+        server.cache.set_payload(rating_key, data)
         thumb = data.get("plex", {}).get("thumb")
         if thumb:
-            _cache_set(_poster_cache, rating_key, thumb)
+            server.cache.set_poster(rating_key, thumb)
         art = data.get("plex", {}).get("art")
         if art:
-            _cache_set(_background_cache, rating_key, art)
+            server.cache.set_background(rating_key, art)
     return data
 
 
@@ -219,13 +203,13 @@ async def search_media(
         data = hit.payload["data"]
         rating_key = str(data.get("plex", {}).get("rating_key"))
         if rating_key:
-            _cache_set(_payload_cache, rating_key, data)
+            server.cache.set_payload(rating_key, data)
             thumb = data.get("plex", {}).get("thumb")
             if thumb:
-                _cache_set(_poster_cache, rating_key, thumb)
+                server.cache.set_poster(rating_key, thumb)
             art = data.get("plex", {}).get("art")
             if art:
-                _cache_set(_background_cache, rating_key, art)
+                server.cache.set_background(rating_key, art)
 
     prefetch_task = asyncio.gather(*[_prefetch(h) for h in hits[:limit]])
 
@@ -457,14 +441,16 @@ async def media_poster(
     ],
 ) -> str:
     """Return the poster image URL for the given media identifier."""
-    cached = _cache_get(_poster_cache, identifier)
+    cached = server.cache.get_poster(identifier)
     if cached:
         return cached
     data = await _get_media_data(identifier)
     thumb = data.get("plex", {}).get("thumb")
     if not thumb:
         raise ValueError("Poster not available")
-    _cache_set(_poster_cache, str(data.get("plex", {}).get("rating_key")), thumb)
+    server.cache.set_poster(
+        str(data.get("plex", {}).get("rating_key")), thumb
+    )
     return thumb
 
 
@@ -479,14 +465,16 @@ async def media_background(
     ],
 ) -> str:
     """Return the background art URL for the given media identifier."""
-    cached = _cache_get(_background_cache, identifier)
+    cached = server.cache.get_background(identifier)
     if cached:
         return cached
     data = await _get_media_data(identifier)
     art = data.get("plex", {}).get("art")
     if not art:
         raise ValueError("Background not available")
-    _cache_set(_background_cache, str(data.get("plex", {}).get("rating_key")), art)
+    server.cache.set_background(
+        str(data.get("plex", {}).get("rating_key")), art
+    )
     return art
 
 
