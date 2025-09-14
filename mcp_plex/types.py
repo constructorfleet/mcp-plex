@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
+from datetime import datetime
 from typing import List, Literal, Optional
 
 from pydantic import BaseModel, Field
@@ -121,7 +122,7 @@ class PlexItem(BaseModel):
     title: str
     summary: Optional[str] = None
     year: Optional[int] = None
-    added_at: Optional[int] = None
+    added_at: Optional[datetime] = None
     guids: List[PlexGuid] = Field(default_factory=list)
     thumb: Optional[str] = None
     art: Optional[str] = None

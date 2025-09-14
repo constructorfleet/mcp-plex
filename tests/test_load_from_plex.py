@@ -8,38 +8,51 @@ from mcp_plex.types import TMDBShow
 
 
 def test_load_from_plex(monkeypatch):
-    movie = types.SimpleNamespace(
-        ratingKey="101",
-        guid="plex://movie/101",
-        type="movie",
-        title="Inception",
-        guids=[
-            types.SimpleNamespace(id="imdb://tt1375666"),
-            types.SimpleNamespace(id="tmdb://27205"),
-        ],
+    def add_fetch(obj):
+        obj.fetchItem = lambda key: obj
+        return obj
+
+    movie = add_fetch(
+        types.SimpleNamespace(
+            ratingKey="101",
+            guid="plex://movie/101",
+            type="movie",
+            title="Inception",
+            guids=[
+                types.SimpleNamespace(id="imdb://tt1375666"),
+                types.SimpleNamespace(id="tmdb://27205"),
+            ],
+        )
     )
 
-    ep1 = types.SimpleNamespace(
-        ratingKey="102",
-        guid="plex://episode/102",
-        type="episode",
-        title="Pilot",
-        guids=[
-            types.SimpleNamespace(id="imdb://tt0959621"),
-            types.SimpleNamespace(id="tmdb://62085"),
-        ],
+    ep1 = add_fetch(
+        types.SimpleNamespace(
+            ratingKey="102",
+            guid="plex://episode/102",
+            type="episode",
+            title="Pilot",
+            guids=[
+                types.SimpleNamespace(id="imdb://tt0959621"),
+                types.SimpleNamespace(id="tmdb://62085"),
+            ],
+        )
     )
-    ep2 = types.SimpleNamespace(
-        ratingKey="103",
-        guid="plex://episode/103",
-        type="episode",
-        title="Cat's in the Bag...",
-        guids=[types.SimpleNamespace(id="imdb://tt0959622")],
+    ep2 = add_fetch(
+        types.SimpleNamespace(
+            ratingKey="103",
+            guid="plex://episode/103",
+            type="episode",
+            title="Cat's in the Bag...",
+            guids=[types.SimpleNamespace(id="imdb://tt0959622")],
+        )
     )
 
-    show = types.SimpleNamespace(
-        guids=[types.SimpleNamespace(id="tmdb://1396")],
-        episodes=lambda: [ep1, ep2],
+    show = add_fetch(
+        types.SimpleNamespace(
+            ratingKey="201",
+            guids=[types.SimpleNamespace(id="tmdb://1396")],
+            episodes=lambda: [ep1, ep2],
+        )
     )
 
     movie_section = types.SimpleNamespace(all=lambda: [movie])
@@ -51,6 +64,8 @@ def test_load_from_plex(monkeypatch):
 
     async def handler(request):
         url = str(request.url)
+        if "themoviedb.org" in url:
+            assert request.headers.get("Authorization") == "Bearer key"
         if "tt1375666" in url:
             return httpx.Response(
                 200,
