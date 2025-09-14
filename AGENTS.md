@@ -20,6 +20,8 @@
 - Plex episodes with year-based seasons are mapped to the correct TMDb season
   numbers via a helper that matches season names or air-date years to ensure
   accurate episode lookups.
+- Plex metadata is fetched in batches using `fetchItems` to reduce repeated
+  network calls when loading library items.
 
 ## User Queries
 The project should handle natural-language searches and recommendations such as:

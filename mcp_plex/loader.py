@@ -316,25 +316,24 @@ async def _load_from_plex(
     results: List[AggregatedItem] = []
     async with httpx.AsyncClient(timeout=30) as client:
         movie_section = server.library.section("Movies")
-        movie_tasks = [
-            _augment_movie(client, movie.fetchItem(movie.ratingKey))
-            for movie in movie_section.all()
-        ]
+        movie_keys = [int(m.ratingKey) for m in movie_section.all()]
+        movies = server.fetchItems(movie_keys) if movie_keys else []
+        movie_tasks = [_augment_movie(client, movie) for movie in movies]
         if movie_tasks:
             results.extend(await _gather_in_batches(movie_tasks, batch_size))
 
         show_section = server.library.section("TV Shows")
-        for show in show_section.all():
-            full_show = show.fetchItem(show.ratingKey)
+        show_keys = [int(s.ratingKey) for s in show_section.all()]
+        full_shows = server.fetchItems(show_keys) if show_keys else []
+        for full_show in full_shows:
             show_ids = _extract_external_ids(full_show)
             show_tmdb: Optional[TMDBShow] = None
             if show_ids.tmdb:
                 show_tmdb = await _fetch_tmdb_show(client, show_ids.tmdb, tmdb_api_key)
+            episode_keys = [int(e.ratingKey) for e in full_show.episodes()]
+            episodes = server.fetchItems(episode_keys) if episode_keys else []
             episode_tasks = [
-                _augment_episode(
-                    client, episode.fetchItem(episode.ratingKey), show_tmdb
-                )
-                for episode in full_show.episodes()
+                _augment_episode(client, episode, show_tmdb) for episode in episodes
             ]
             if episode_tasks:
                 results.extend(await _gather_in_batches(episode_tasks, batch_size))
