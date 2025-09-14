@@ -4,12 +4,13 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "mcp-plex"
-version = "0.26.5"
+version = "0.26.6"
 
 description = "Plex-Oriented Model Context Protocol Server"
 requires-python = ">=3.11,<3.13"
 dependencies = [
   "fastmcp>=2.11.2",
+  "fastapi>=0.115.0",
   "pydantic>=2.11.7",
   "plexapi>=4.17.0",
   "qdrant-client[fastembed-gpu]>=1.15.1",

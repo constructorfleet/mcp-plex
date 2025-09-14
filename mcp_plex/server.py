@@ -3,15 +3,23 @@ from __future__ import annotations
 
 import argparse
 import asyncio
+import inspect
 import json
 import os
 from collections import OrderedDict
 from typing import Annotated, Any
 
+from fastapi import FastAPI, HTTPException
+from fastapi.openapi.docs import get_swagger_ui_html
+from fastapi.openapi.utils import get_openapi
+from fastmcp.exceptions import NotFoundError
 from fastmcp.server import FastMCP
+from fastmcp.server.context import Context as FastMCPContext
 from pydantic import Field
 from qdrant_client import models
 from qdrant_client.async_qdrant_client import AsyncQdrantClient
+from starlette.requests import Request
+from starlette.responses import JSONResponse, PlainTextResponse, Response
 
 try:
     from sentence_transformers import CrossEncoder
@@ -473,6 +481,84 @@ async def media_background(
         raise ValueError("Background not available")
     _cache_set(_background_cache, str(data.get("plex", {}).get("rating_key")), art)
     return art
+
+
+@server.custom_route("/rest", methods=["GET"])
+async def rest_docs(request: Request) -> Response:
+    """Serve Swagger UI for REST endpoints."""
+    return get_swagger_ui_html(openapi_url="/openapi.json", title="MCP REST API")
+
+
+def _build_openapi_schema() -> dict[str, Any]:
+    app = FastAPI()
+    for name, tool in server._tool_manager._tools.items():
+        app.post(f"/rest/{name}")(tool.fn)
+    return get_openapi(title="MCP REST API", version="1.0.0", routes=app.routes)
+
+
+_OPENAPI_SCHEMA = _build_openapi_schema()
+
+
+@server.custom_route("/openapi.json", methods=["GET"])
+async def openapi_json(request: Request) -> Response:  # noqa: ARG001
+    """Return the OpenAPI schema for REST endpoints."""
+    return JSONResponse(_OPENAPI_SCHEMA)
+
+
+# Dynamically expose tools under `/rest/{tool_name}` while preserving metadata
+def _register_rest_tools() -> None:
+    for name, tool in server._tool_manager._tools.items():
+        async def _rest_tool(request: Request, _tool=tool) -> Response:  # noqa: ARG001
+            try:
+                arguments = await request.json()
+            except Exception:
+                arguments = {}
+            async with FastMCPContext(fastmcp=server):
+                result = await _tool.fn(**arguments)
+            return JSONResponse(result)
+
+        _rest_tool.__name__ = f"rest_{name.replace('-', '_')}"
+        _rest_tool.__doc__ = tool.fn.__doc__
+        _rest_tool.__signature__ = inspect.signature(tool.fn)
+        server.custom_route(f"/rest/{name}", methods=["POST"])(_rest_tool)
+
+
+_register_rest_tools()
+
+@server.custom_route("/rest/prompt/{prompt_name}", methods=["POST"])
+async def rest_prompt(request: Request) -> Response:
+    """Render a prompt via REST."""
+    prompt_name = request.path_params["prompt_name"]
+    try:
+        arguments = await request.json()
+    except Exception:
+        arguments = None
+    try:
+        prompt = await server._prompt_manager.get_prompt(prompt_name)
+    except NotFoundError as e:
+        raise HTTPException(status_code=404, detail=str(e))
+    async with FastMCPContext(fastmcp=server):
+        messages = await prompt.render(arguments)
+    return JSONResponse([m.model_dump() for m in messages])
+
+
+@server.custom_route("/rest/resource/{path:path}", methods=["GET"])
+async def rest_resource(request: Request) -> Response:
+    """Read a resource via REST."""
+    path = request.path_params["path"]
+    uri = f"resource://{path}"
+    try:
+        resource = await server._resource_manager.get_resource(uri)
+    except NotFoundError as e:
+        raise HTTPException(status_code=404, detail=str(e))
+    async with FastMCPContext(fastmcp=server):
+        data = await server._resource_manager.read_resource(uri)
+    if isinstance(data, bytes):
+        return Response(content=data, media_type=resource.mime_type)
+    try:
+        return JSONResponse(json.loads(data), media_type=resource.mime_type)
+    except Exception:
+        return PlainTextResponse(str(data), media_type=resource.mime_type)
 
 
 def main(argv: list[str] | None = None) -> None:
