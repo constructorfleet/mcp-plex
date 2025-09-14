@@ -175,6 +175,9 @@ def resolve_tmdb_season_number(
 
     parent_index = getattr(episode, "parentIndex", None)
     parent_title = getattr(episode, "parentTitle", None)
+    parent_year = getattr(episode, "parentYear", None)
+    if parent_year is None:
+        parent_year = getattr(episode, "year", None)
 
     seasons = getattr(show_tmdb, "seasons", []) if show_tmdb else []
 
@@ -195,7 +198,9 @@ def resolve_tmdb_season_number(
 
     # match by air date year when Plex uses year-based seasons
     year: Optional[int] = None
-    if isinstance(parent_index, int):
+    if isinstance(parent_year, int):
+        year = parent_year
+    elif isinstance(parent_index, int):
         year = parent_index
     elif title_norm and title_norm.isdigit():
         year = int(title_norm)
@@ -207,7 +212,9 @@ def resolve_tmdb_season_number(
                 if int(air[:4]) == year:
                     return season.season_number
 
-    if parent_index is not None:
+    if isinstance(parent_index, int):
+        return parent_index
+    if isinstance(parent_index, str) and parent_index.isdigit():
         return int(parent_index)
     if isinstance(parent_title, str) and parent_title.isdigit():
         return int(parent_title)
