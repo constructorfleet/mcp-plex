@@ -50,16 +50,21 @@ _SPARSE_MODEL_NAME = os.getenv(
 if _QDRANT_URL is None and _QDRANT_HOST is None:
     _QDRANT_URL = ":memory:"
 
-# Instantiate global client
-_client = AsyncQdrantClient(
-    location=_QDRANT_URL,
-    api_key=_QDRANT_API_KEY,
-    host=_QDRANT_HOST,
-    port=_QDRANT_PORT,
-    grpc_port=_QDRANT_GRPC_PORT,
-    prefer_grpc=_QDRANT_PREFER_GRPC,
-    https=_QDRANT_HTTPS,
-)
+
+class PlexServer(FastMCP):
+    """FastMCP server with an attached Qdrant client."""
+
+    def __init__(self) -> None:  # noqa: D401 - short description inherited
+        super().__init__()
+        self.qdrant_client = AsyncQdrantClient(
+            location=_QDRANT_URL,
+            api_key=_QDRANT_API_KEY,
+            host=_QDRANT_HOST,
+            port=_QDRANT_PORT,
+            grpc_port=_QDRANT_GRPC_PORT,
+            prefer_grpc=_QDRANT_PREFER_GRPC,
+            https=_QDRANT_HTTPS,
+        )
 
 _USE_RERANKER = os.getenv("USE_RERANKER", "1") == "1"
 _reranker = None
@@ -69,7 +74,7 @@ if _USE_RERANKER and CrossEncoder is not None:
     except Exception:
         _reranker = None
 
-server = FastMCP()
+server = PlexServer()
 
 
 _CACHE_SIZE = 128
@@ -98,7 +103,9 @@ async def _find_records(identifier: str, limit: int = 5) -> list[models.Record]:
     # First, try direct ID lookup
     try:
         record_id: Any = int(identifier) if identifier.isdigit() else identifier
-        recs = await _client.retrieve("media-items", ids=[record_id], with_payload=True)
+        recs = await server.qdrant_client.retrieve(
+            "media-items", ids=[record_id], with_payload=True
+        )
         if recs:
             return recs
     except Exception:
@@ -119,7 +126,7 @@ async def _find_records(identifier: str, limit: int = 5) -> list[models.Record]:
         models.FieldCondition(key="title", match=models.MatchText(text=identifier))
     )
     flt = models.Filter(should=should)
-    points, _ = await _client.scroll(
+    points, _ = await server.qdrant_client.scroll(
         collection_name="media-items",
         limit=limit,
         scroll_filter=flt,
@@ -199,7 +206,7 @@ async def search_media(
             limit=candidate_limit,
         ),
     ]
-    res = await _client.query_points(
+    res = await server.qdrant_client.query_points(
         collection_name="media-items",
         query=models.FusionQuery(fusion=models.Fusion.RRF),
         prefetch=prefetch,
@@ -274,7 +281,7 @@ async def recommend_media(
         record = records[0]
     if record is None:
         return []
-    recs = await _client.recommend(
+    recs = await server.qdrant_client.recommend(
         collection_name="media-items",
         positive=[record.id],
         limit=limit,
@@ -307,7 +314,7 @@ async def new_movies(
             )
         ]
     )
-    res = await _client.query_points(
+    res = await server.qdrant_client.query_points(
         collection_name="media-items",
         query=query,
         query_filter=flt,
@@ -340,7 +347,7 @@ async def new_shows(
             )
         ]
     )
-    res = await _client.query_points(
+    res = await server.qdrant_client.query_points(
         collection_name="media-items",
         query=query,
         query_filter=flt,
@@ -393,7 +400,7 @@ async def actor_movies(
     query = models.OrderByQuery(
         order_by=models.OrderBy(key="year", direction=models.Direction.DESC)
     )
-    res = await _client.query_points(
+    res = await server.qdrant_client.query_points(
         collection_name="media-items",
         query=query,
         query_filter=flt,

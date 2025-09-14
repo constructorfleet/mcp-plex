@@ -54,13 +54,14 @@ def test_qdrant_env_config(monkeypatch):
     monkeypatch.setenv("QDRANT_GRPC_PORT", "5678")
     monkeypatch.setenv("QDRANT_PREFER_GRPC", "1")
     monkeypatch.setenv("QDRANT_HTTPS", "1")
-    importlib.reload(importlib.import_module("mcp_plex.server"))
+    module = importlib.reload(importlib.import_module("mcp_plex.server"))
 
     assert captured["host"] == "example.com"
     assert captured["port"] == 1234
     assert captured["grpc_port"] == 5678
     assert captured["prefer_grpc"] is True
     assert captured["https"] is True
+    assert hasattr(module.server, "qdrant_client")
 
 
 def test_server_tools(monkeypatch):
