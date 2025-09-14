@@ -27,11 +27,6 @@ try:
 except Exception:
     CrossEncoder = None
 
-try:
-    from sentence_transformers import CrossEncoder
-except Exception:
-    CrossEncoder = None
-
 # Environment configuration for Qdrant
 _QDRANT_URL = os.getenv("QDRANT_URL")
 _QDRANT_API_KEY = os.getenv("QDRANT_API_KEY")
@@ -69,15 +64,26 @@ class PlexServer(FastMCP):
             prefer_grpc=_QDRANT_PREFER_GRPC,
             https=_QDRANT_HTTPS,
         )
+        self._reranker: CrossEncoder | None = None
+        self._reranker_loaded = False
         self.cache = MediaCache(_CACHE_SIZE)
 
+    @property
+    def reranker(self) -> CrossEncoder | None:
+        if not _USE_RERANKER or CrossEncoder is None:
+            return None
+        if not self._reranker_loaded:
+            try:
+                self._reranker = CrossEncoder(
+                    "cross-encoder/ms-marco-MiniLM-L-6-v2"
+                )
+            except Exception:
+                self._reranker = None
+            self._reranker_loaded = True
+        return self._reranker
+
+
 _USE_RERANKER = os.getenv("USE_RERANKER", "1") == "1"
-_reranker = None
-if _USE_RERANKER and CrossEncoder is not None:
-    try:
-        _reranker = CrossEncoder("cross-encoder/ms-marco-MiniLM-L-6-v2")
-    except Exception:
-        _reranker = None
 
 server = PlexServer()
 
@@ -177,7 +183,8 @@ async def search_media(
     """Hybrid similarity search across media items using dense and sparse vectors."""
     dense_doc = models.Document(text=query, model=_DENSE_MODEL_NAME)
     sparse_doc = models.Document(text=query, model=_SPARSE_MODEL_NAME)
-    candidate_limit = limit * 3 if _reranker is not None else limit
+    reranker = server.reranker
+    candidate_limit = limit * 3 if reranker is not None else limit
     prefetch = [
         models.Prefetch(
             query=models.NearestQuery(nearest=dense_doc),
@@ -214,7 +221,7 @@ async def search_media(
     prefetch_task = asyncio.gather(*[_prefetch(h) for h in hits[:limit]])
 
     def _rerank(hits: list[models.ScoredPoint]) -> list[models.ScoredPoint]:
-        if _reranker is None:
+        if reranker is None:
             return hits
         docs: list[str] = []
         for h in hits:
@@ -228,7 +235,7 @@ async def search_media(
             ]
             docs.append(" ".join(p for p in parts if p))
         pairs = [(query, d) for d in docs]
-        scores = _reranker.predict(pairs)
+        scores = reranker.predict(pairs)
         for h, s in zip(hits, scores):
             h.score = float(s)
         hits.sort(key=lambda h: h.score, reverse=True)

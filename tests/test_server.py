@@ -147,8 +147,8 @@ def test_reranker_import_failure(monkeypatch):
         return orig_import(name, *args, **kwargs)
 
     monkeypatch.setattr(builtins, "__import__", fake_import)
-    server = importlib.reload(importlib.import_module("mcp_plex.server"))
-    assert server._reranker is None
+    module = importlib.reload(importlib.import_module("mcp_plex.server"))
+    assert module.server.reranker is None
 
 
 def test_reranker_init_failure(monkeypatch):
@@ -161,8 +161,8 @@ def test_reranker_init_failure(monkeypatch):
 
     st_module.CrossEncoder = Broken
     monkeypatch.setitem(sys.modules, "sentence_transformers", st_module)
-    server = importlib.reload(importlib.import_module("mcp_plex.server"))
-    assert server._reranker is None
+    module = importlib.reload(importlib.import_module("mcp_plex.server"))
+    assert module.server.reranker is None
 
 
 def test_rest_endpoints(monkeypatch):
