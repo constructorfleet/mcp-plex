@@ -13,6 +13,8 @@
   to combine dense and sparse results before optional cross-encoder reranking.
 - Qdrant client initialization moved into `PlexServer` to centralize state and
   simplify testing.
+- Cross-encoder reranker is initialized lazily via a `PlexServer` property to
+  avoid unnecessary model downloads when reranking is disabled or unavailable.
 
 ## User Queries
 The project should handle natural-language searches and recommendations such as:
