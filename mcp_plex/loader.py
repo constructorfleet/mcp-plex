@@ -6,7 +6,7 @@ import json
 import logging
 import sys
 from pathlib import Path
-from typing import List, Optional
+from typing import Awaitable, List, Optional, Sequence, TypeVar
 
 import click
 import httpx
@@ -35,6 +35,20 @@ except Exception:
 
 
 logger = logging.getLogger(__name__)
+
+T = TypeVar("T")
+
+
+async def _gather_in_batches(
+    tasks: Sequence[Awaitable[T]], batch_size: int
+) -> List[T]:
+    """Gather awaitable tasks in fixed-size batches."""
+
+    results: List[T] = []
+    for i in range(0, len(tasks), batch_size):
+        batch = tasks[i : i + batch_size]
+        results.extend(await asyncio.gather(*batch))
+    return results
 
 
 async def _fetch_imdb(client: httpx.AsyncClient, imdb_id: str) -> Optional[IMDbTitle]:
@@ -137,7 +151,9 @@ def _build_plex_item(item: PlexPartialObject) -> PlexItem:
     )
 
 
-async def _load_from_plex(server: PlexServer, tmdb_api_key: str) -> List[AggregatedItem]:
+async def _load_from_plex(
+    server: PlexServer, tmdb_api_key: str, *, batch_size: int = 50
+) -> List[AggregatedItem]:
     """Load items from a live Plex server."""
 
     async def _augment_movie(client: httpx.AsyncClient, movie: PlexPartialObject) -> AggregatedItem:
@@ -174,11 +190,9 @@ async def _load_from_plex(server: PlexServer, tmdb_api_key: str) -> List[Aggrega
     results: List[AggregatedItem] = []
     async with httpx.AsyncClient(timeout=30) as client:
         movie_section = server.library.section("Movies")
-        movie_tasks = [
-            _augment_movie(client, movie) for movie in movie_section.all()
-        ]
+        movie_tasks = [_augment_movie(client, movie) for movie in movie_section.all()]
         if movie_tasks:
-            results.extend(await asyncio.gather(*movie_tasks))
+            results.extend(await _gather_in_batches(movie_tasks, batch_size))
 
         show_section = server.library.section("TV Shows")
         for show in show_section.all():
@@ -187,10 +201,11 @@ async def _load_from_plex(server: PlexServer, tmdb_api_key: str) -> List[Aggrega
             if show_ids.tmdb:
                 show_tmdb = await _fetch_tmdb_show(client, show_ids.tmdb, tmdb_api_key)
             episode_tasks = [
-                _augment_episode(client, episode, show_tmdb) for episode in show.episodes()
+                _augment_episode(client, episode, show_tmdb)
+                for episode in show.episodes()
             ]
             if episode_tasks:
-                results.extend(await asyncio.gather(*episode_tasks))
+                results.extend(await _gather_in_batches(episode_tasks, batch_size))
     return results
 
 
