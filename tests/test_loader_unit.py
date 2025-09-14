@@ -6,6 +6,7 @@ import types
 from pathlib import Path
 
 import httpx
+from qdrant_client import models
 
 from mcp_plex import loader
 from mcp_plex.imdb_cache import IMDbCache
@@ -147,6 +148,24 @@ def test_fetch_functions_success_and_failure():
         async with httpx.AsyncClient(transport=episode_transport) as client:
             assert (await _fetch_tmdb_episode(client, 1, 2, 3, "k")) is not None
             assert (await _fetch_tmdb_episode(client, 1, 2, 4, "k")) is None
+
+    asyncio.run(main())
+
+
+def test_fetch_functions_handle_http_error():
+    def raise_error(request: httpx.Request) -> httpx.Response:  # type: ignore[override]
+        raise httpx.ConnectError("boom", request=request)
+
+    async def main() -> None:
+        transport = httpx.MockTransport(raise_error)
+        async with httpx.AsyncClient(transport=transport) as client:
+            assert await _fetch_imdb(client, "tt1") is None
+        async with httpx.AsyncClient(transport=transport) as client:
+            assert await _fetch_tmdb_movie(client, "1", "k") is None
+        async with httpx.AsyncClient(transport=transport) as client:
+            assert await _fetch_tmdb_show(client, "1", "k") is None
+        async with httpx.AsyncClient(transport=transport) as client:
+            assert await _fetch_tmdb_episode(client, 1, 1, 1, "k") is None
 
     asyncio.run(main())
 
@@ -446,3 +465,20 @@ def test_resolve_tmdb_season_number_parent_index_str():
 def test_resolve_tmdb_season_number_parent_title_digit():
     episode = types.SimpleNamespace(parentTitle="4")
     assert resolve_tmdb_season_number(None, episode) == 4
+
+
+def test_upsert_in_batches_handles_errors(monkeypatch):
+    class DummyClient:
+        def __init__(self):
+            self.calls = 0
+
+        async def upsert(self, collection_name: str, points, **kwargs):
+            self.calls += 1
+            if self.calls == 2:
+                raise httpx.ConnectError("fail", request=httpx.Request("POST", ""))
+
+    client = DummyClient()
+    points = [models.PointStruct(id=i, vector={}, payload={}) for i in range(3)]
+    monkeypatch.setattr(loader, "_qdrant_batch_size", 1)
+    asyncio.run(loader._upsert_in_batches(client, "c", points))
+    assert client.calls == 3

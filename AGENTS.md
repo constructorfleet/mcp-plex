@@ -25,6 +25,8 @@
 - IMDb metadata is fetched via `titles:batchGet` to minimize repeated API calls.
 - The `titles:batchGet` endpoint accepts at most five IDs, so IMDb lookups are
   split into batches of five.
+- Qdrant upserts are batched and network errors are logged so large loads can
+  proceed even when individual batches fail.
 
 ## User Queries
 The project should handle natural-language searches and recommendations such as:
