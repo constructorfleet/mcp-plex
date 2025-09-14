@@ -31,6 +31,8 @@ def test_load_from_plex(monkeypatch):
             guid="plex://episode/102",
             type="episode",
             title="Pilot",
+            parentIndex=1,
+            index=1,
             guids=[
                 types.SimpleNamespace(id="imdb://tt0959621"),
                 types.SimpleNamespace(id="tmdb://62085"),
@@ -95,10 +97,10 @@ def test_load_from_plex(monkeypatch):
             )
         if "/movie/27205" in url:
             return httpx.Response(200, json={"id": 27205, "title": "Inception"})
+        if "/tv/1396/season/1/episode/1" in url:
+            return httpx.Response(200, json={"id": 62085, "name": "Pilot"})
         if "/tv/1396" in url:
             return httpx.Response(200, json={"id": 1396, "name": "Breaking Bad"})
-        if "/episode/62085" in url:
-            return httpx.Response(200, json={"id": 62085, "name": "Pilot"})
         return httpx.Response(404)
 
     transport = httpx.MockTransport(handler)

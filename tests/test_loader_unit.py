@@ -96,7 +96,7 @@ def test_fetch_functions_success_and_failure():
 
     async def tmdb_episode_mock(request):
         assert request.headers.get("Authorization") == "Bearer k"
-        if "good" in str(request.url):
+        if "/tv/1/season/2/episode/3" in str(request.url):
             return httpx.Response(200, json={"id": 1, "name": "E"})
         return httpx.Response(404)
 
@@ -119,7 +119,7 @@ def test_fetch_functions_success_and_failure():
             assert (await _fetch_tmdb_show(client, "bad", "k")) is None
 
         async with httpx.AsyncClient(transport=episode_transport) as client:
-            assert (await _fetch_tmdb_episode(client, "good", "k")) is not None
-            assert (await _fetch_tmdb_episode(client, "bad", "k")) is None
+            assert (await _fetch_tmdb_episode(client, 1, 2, 3, "k")) is not None
+            assert (await _fetch_tmdb_episode(client, 1, 2, 4, "k")) is None
 
     asyncio.run(main())
