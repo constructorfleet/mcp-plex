@@ -5,9 +5,9 @@ from mcp_plex.config import Settings
 
 
 def test_settings_env_override(monkeypatch):
-    monkeypatch.setenv("qdrant_port", "7000")
+    monkeypatch.setenv("QDRANT_PORT", "7001")
     settings = Settings()
-    assert settings.qdrant_port == 7000
+    assert settings.qdrant_port == 7001
 
 
 def test_settings_invalid_cache_size(monkeypatch):

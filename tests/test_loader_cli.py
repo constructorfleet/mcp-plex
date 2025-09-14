@@ -1,4 +1,6 @@
 import asyncio
+import runpy
+import sys
 
 import pytest
 from click.testing import CliRunner
@@ -64,6 +66,26 @@ def test_run_requires_credentials(monkeypatch):
         asyncio.run(invoke())
 
 
+def test_run_requires_tmdb_api_key(monkeypatch):
+    monkeypatch.setattr(loader, "PlexServer", object)
+
+    async def invoke():
+        await loader.run("http://localhost", "token", None, None, None, None)
+
+    with pytest.raises(RuntimeError, match="TMDB_API_KEY must be provided"):
+        asyncio.run(invoke())
+
+
+def test_run_requires_plexapi(monkeypatch):
+    monkeypatch.setattr(loader, "PlexServer", None)
+
+    async def invoke():
+        await loader.run("http://localhost", "token", "key", None, None, None)
+
+    with pytest.raises(RuntimeError, match="plexapi is required for live loading"):
+        asyncio.run(invoke())
+
+
 def test_cli_model_overrides(monkeypatch):
     captured: dict[str, str] = {}
 
@@ -114,3 +136,10 @@ def test_cli_model_env(monkeypatch):
 
     assert captured["dense"] == "foo"
     assert captured["sparse"] == "bar"
+
+
+def test_loader_script_entrypoint(monkeypatch):
+    monkeypatch.setattr(sys, "argv", ["loader", "--help"])
+    with pytest.raises(SystemExit) as exc:
+        runpy.run_module("mcp_plex.loader", run_name="__main__")
+    assert exc.value.code == 0

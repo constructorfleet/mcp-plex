@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import asyncio
+import json
 from pathlib import Path
 
 from qdrant_client.async_qdrant_client import AsyncQdrantClient
@@ -53,3 +54,27 @@ def test_run_writes_points(monkeypatch):
     )
 
 
+def test_run_processes_imdb_queue(monkeypatch, tmp_path):
+    monkeypatch.setattr(loader, "AsyncQdrantClient", CaptureClient)
+    queue_file = tmp_path / "queue.json"
+    queue_file.write_text(json.dumps(["tt0111161"]))
+    sample_dir = Path(__file__).resolve().parents[1] / "sample-data"
+
+    async def fake_fetch(client, imdb_id):
+        return None
+
+    monkeypatch.setattr(loader, "_fetch_imdb", fake_fetch)
+
+    asyncio.run(
+        loader.run(
+            None,
+            None,
+            None,
+            sample_dir,
+            None,
+            None,
+            imdb_queue_path=queue_file,
+        )
+    )
+
+    assert json.loads(queue_file.read_text()) == ["tt0111161"]

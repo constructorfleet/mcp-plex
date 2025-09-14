@@ -1,4 +1,6 @@
 import asyncio
+import builtins
+import importlib
 import json
 import types
 from pathlib import Path
@@ -22,6 +24,21 @@ from mcp_plex.loader import (
     resolve_tmdb_season_number,
 )
 from mcp_plex.types import TMDBSeason, TMDBShow
+
+
+def test_loader_import_fallback(monkeypatch):
+    real_import = builtins.__import__
+
+    def fake_import(name, globals=None, locals=None, fromlist=(), level=0):
+        if name.startswith("plexapi"):
+            raise ModuleNotFoundError
+        return real_import(name, globals, locals, fromlist, level)
+
+    monkeypatch.setattr(builtins, "__import__", fake_import)
+    module = importlib.reload(loader)
+    assert module.PlexServer is None
+    assert module.PlexPartialObject is object
+    importlib.reload(loader)
 
 
 def test_extract_external_ids():
@@ -234,6 +251,38 @@ def test_fetch_imdb_batch_chunks(monkeypatch, tmp_path):
     assert all(len(c) <= 5 for c in calls)
 
 
+def test_fetch_imdb_batch_all_cached(monkeypatch, tmp_path):
+    cache_path = tmp_path / "cache.json"
+    cache_path.write_text(
+        json.dumps(
+            {
+                "tt0111161": {
+                    "id": "tt0111161",
+                    "type": "movie",
+                    "primaryTitle": "The Shawshank Redemption",
+                },
+                "tt0068646": {
+                    "id": "tt0068646",
+                    "type": "movie",
+                    "primaryTitle": "The Godfather",
+                },
+            }
+        )
+    )
+    monkeypatch.setattr(loader, "_imdb_cache", IMDbCache(cache_path))
+
+    async def error_mock(request):
+        raise AssertionError("network should not be called")
+
+    async def main():
+        async with httpx.AsyncClient(transport=httpx.MockTransport(error_mock)) as client:
+            result = await _fetch_imdb_batch(client, ["tt0111161", "tt0068646"])
+            assert result["tt0111161"].primaryTitle == "The Shawshank Redemption"
+            assert result["tt0068646"].primaryTitle == "The Godfather"
+
+    asyncio.run(main())
+
+
 def test_fetch_imdb_retries_on_429(monkeypatch, tmp_path):
     cache_path = tmp_path / "cache.json"
     monkeypatch.setattr(loader, "_imdb_cache", IMDbCache(cache_path))
@@ -279,17 +328,24 @@ def test_imdb_retry_queue_persists_and_retries(tmp_path, monkeypatch):
         return httpx.Response(429)
 
     async def second_transport(request):
-        return httpx.Response(200, json={"id": "tt1", "type": "movie", "primaryTitle": "T"})
+        return httpx.Response(
+            200,
+            json={
+                "id": "tt0111161",
+                "type": "movie",
+                "primaryTitle": "The Shawshank Redemption",
+            },
+        )
 
     async def first_run():
         _load_imdb_retry_queue(queue_path)
         async with httpx.AsyncClient(transport=httpx.MockTransport(first_transport)) as client:
             await _process_imdb_retry_queue(client)
-            await _fetch_imdb(client, "tt1")
+            await _fetch_imdb(client, "tt0111161")
         _persist_imdb_retry_queue(queue_path)
 
     asyncio.run(first_run())
-    assert json.loads(queue_path.read_text()) == ["tt1"]
+    assert json.loads(queue_path.read_text()) == ["tt0111161"]
 
     async def second_run():
         _load_imdb_retry_queue(queue_path)
@@ -299,7 +355,33 @@ def test_imdb_retry_queue_persists_and_retries(tmp_path, monkeypatch):
 
     asyncio.run(second_run())
     assert json.loads(queue_path.read_text()) == []
-    assert loader._imdb_cache.get("tt1") is not None
+    assert loader._imdb_cache.get("tt0111161") is not None
+
+
+def test_load_imdb_retry_queue_invalid_json(tmp_path):
+    path = tmp_path / "queue.json"
+    path.write_text("not json")
+    _load_imdb_retry_queue(path)
+    assert loader._imdb_retry_queue is not None
+    assert loader._imdb_retry_queue.qsize() == 0
+
+
+def test_process_imdb_retry_queue_requeues(monkeypatch):
+    queue: asyncio.Queue[str] = asyncio.Queue()
+    queue.put_nowait("tt0111161")
+    monkeypatch.setattr(loader, "_imdb_retry_queue", queue)
+
+    async def fake_fetch(client, imdb_id):
+        return None
+
+    monkeypatch.setattr(loader, "_fetch_imdb", fake_fetch)
+
+    async def run_test():
+        async with httpx.AsyncClient() as client:
+            await _process_imdb_retry_queue(client)
+
+    asyncio.run(run_test())
+    assert queue.qsize() == 1
 
 
 def test_resolve_tmdb_season_number_matches_name():
@@ -334,3 +416,33 @@ def test_resolve_tmdb_season_number_parent_year_fallback():
         seasons=[TMDBSeason(season_number=5, name="Season 5", air_date="2018-06-01")],
     )
     assert resolve_tmdb_season_number(show, episode) == 5
+
+
+def test_resolve_tmdb_season_number_numeric_match():
+    episode = types.SimpleNamespace(parentIndex=2, parentTitle="Season 2")
+    show = TMDBShow(
+        id=1,
+        name="Show",
+        seasons=[TMDBSeason(season_number=2, name="Season 2")],
+    )
+    assert resolve_tmdb_season_number(show, episode) == 2
+
+
+def test_resolve_tmdb_season_number_title_year():
+    episode = types.SimpleNamespace(parentTitle="2018")
+    show = TMDBShow(
+        id=1,
+        name="Show",
+        seasons=[TMDBSeason(season_number=7, name="Season 7", air_date="2018-02-03")],
+    )
+    assert resolve_tmdb_season_number(show, episode) == 7
+
+
+def test_resolve_tmdb_season_number_parent_index_str():
+    episode = types.SimpleNamespace(parentIndex="3")
+    assert resolve_tmdb_season_number(None, episode) == 3
+
+
+def test_resolve_tmdb_season_number_parent_title_digit():
+    episode = types.SimpleNamespace(parentTitle="4")
+    assert resolve_tmdb_season_number(None, episode) == 4
