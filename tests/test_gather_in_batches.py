@@ -1,5 +1,6 @@
 import asyncio
 import logging
+import pytest
 
 from mcp_plex import loader
 
@@ -29,3 +30,7 @@ def test_gather_in_batches(monkeypatch, caplog):
     assert "Processed 4/5 items" in caplog.text
     assert "Processed 5/5 items" in caplog.text
 
+def test_gather_in_batches_zero_batch_size():
+    tasks = [_echo(i) for i in range(3)]
+    with pytest.raises(ValueError):
+        asyncio.run(loader._gather_in_batches(tasks, 0))
