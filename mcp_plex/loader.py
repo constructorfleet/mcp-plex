@@ -35,6 +35,7 @@ except Exception:
     PlexPartialObject = object  # type: ignore[assignment]
 
 
+logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
 
 T = TypeVar("T")
