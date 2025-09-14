@@ -13,6 +13,7 @@ import httpx
 from qdrant_client import models
 from qdrant_client.async_qdrant_client import AsyncQdrantClient
 
+from .imdb_cache import IMDbCache
 from .types import (
     AggregatedItem,
     ExternalIDs,
@@ -38,6 +39,10 @@ logger = logging.getLogger(__name__)
 
 T = TypeVar("T")
 
+_imdb_cache: IMDbCache | None = None
+_imdb_max_retries: int = 3
+_imdb_backoff: float = 1.0
+
 
 async def _gather_in_batches(
     tasks: Sequence[Awaitable[T]], batch_size: int
@@ -52,12 +57,29 @@ async def _gather_in_batches(
 
 
 async def _fetch_imdb(client: httpx.AsyncClient, imdb_id: str) -> Optional[IMDbTitle]:
-    """Fetch metadata for an IMDb ID."""
+    """Fetch metadata for an IMDb ID with caching and retry logic."""
+
+    if _imdb_cache:
+        cached = _imdb_cache.get(imdb_id)
+        if cached:
+            return IMDbTitle.model_validate(cached)
 
     url = f"https://api.imdbapi.dev/titles/{imdb_id}"
-    resp = await client.get(url)
-    if resp.is_success:
-        return IMDbTitle.model_validate(resp.json())
+    delay = _imdb_backoff
+    for attempt in range(_imdb_max_retries + 1):
+        resp = await client.get(url)
+        if resp.status_code == 429:
+            if attempt == _imdb_max_retries:
+                return None
+            await asyncio.sleep(delay)
+            delay *= 2
+            continue
+        if resp.is_success:
+            data = resp.json()
+            if _imdb_cache:
+                _imdb_cache.set(imdb_id, data)
+            return IMDbTitle.model_validate(data)
+        return None
     return None
 
 
@@ -327,8 +349,16 @@ async def run(
     qdrant_prefer_grpc: bool = False,
     dense_model_name: str = "BAAI/bge-small-en-v1.5",
     sparse_model_name: str = "Qdrant/bm42-all-minilm-l6-v2-attentions",
+    imdb_cache_path: Path | None = None,
+    imdb_max_retries: int = 3,
+    imdb_backoff: float = 1.0,
 ) -> None:
     """Core execution logic for the CLI."""
+
+    global _imdb_cache, _imdb_max_retries, _imdb_backoff
+    _imdb_cache = IMDbCache(imdb_cache_path) if imdb_cache_path else None
+    _imdb_max_retries = imdb_max_retries
+    _imdb_backoff = imdb_backoff
 
     items: List[AggregatedItem]
     if sample_dir is not None:
@@ -586,6 +616,33 @@ async def run(
     required=False,
     help="Delay between runs in seconds when using --continuous",
 )
+@click.option(
+    "--imdb-cache",
+    envvar="IMDB_CACHE",
+    show_envvar=True,
+    type=click.Path(path_type=Path),
+    default=Path("imdb_cache.json"),
+    show_default=True,
+    help="Path to persistent IMDb response cache",
+)
+@click.option(
+    "--imdb-max-retries",
+    envvar="IMDB_MAX_RETRIES",
+    show_envvar=True,
+    type=int,
+    default=3,
+    show_default=True,
+    help="Maximum retries for IMDb requests returning HTTP 429",
+)
+@click.option(
+    "--imdb-backoff",
+    envvar="IMDB_BACKOFF",
+    show_envvar=True,
+    type=float,
+    default=1.0,
+    show_default=True,
+    help="Initial backoff delay in seconds for IMDb retries",
+)
 def main(
     plex_url: Optional[str],
     plex_token: Optional[str],
@@ -602,6 +659,9 @@ def main(
     sparse_model: str,
     continuous: bool,
     delay: float,
+    imdb_cache: Path,
+    imdb_max_retries: int,
+    imdb_backoff: float,
 ) -> None:
     """Entry-point for the ``load-data`` script."""
 
@@ -622,6 +682,9 @@ def main(
             sparse_model,
             continuous,
             delay,
+            imdb_cache,
+            imdb_max_retries,
+            imdb_backoff,
         )
     )
 
@@ -642,6 +705,9 @@ async def load_media(
     sparse_model_name: str,
     continuous: bool,
     delay: float,
+    imdb_cache: Path,
+    imdb_max_retries: int,
+    imdb_backoff: float,
 ) -> None:
     """Orchestrate one or more runs of :func:`run`."""
 
@@ -660,6 +726,9 @@ async def load_media(
             qdrant_prefer_grpc,
             dense_model_name,
             sparse_model_name,
+            imdb_cache,
+            imdb_max_retries,
+            imdb_backoff,
         )
         if not continuous:
             break
