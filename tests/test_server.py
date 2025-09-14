@@ -76,12 +76,17 @@ def test_server_tools(monkeypatch):
 
     poster = asyncio.run(server.media_poster.fn(identifier=movie_id))
     assert isinstance(poster, str) and "thumb" in poster
+    assert server.server.cache.get_poster(movie_id) == poster
 
     art = asyncio.run(server.media_background.fn(identifier=movie_id))
     assert isinstance(art, str) and "art" in art
+    assert server.server.cache.get_background(movie_id) == art
 
     item = json.loads(asyncio.run(server.media_item.fn(identifier=movie_id)))
     assert item["plex"]["rating_key"] == movie_id
+    assert (
+        server.server.cache.get_payload(movie_id)["plex"]["rating_key"] == movie_id
+    )
 
     ids = json.loads(asyncio.run(server.media_ids.fn(identifier=movie_id)))
     assert ids["imdb"] == "tt8367814"

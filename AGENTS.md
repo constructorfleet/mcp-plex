@@ -13,6 +13,8 @@
   to combine dense and sparse results before optional cross-encoder reranking.
 - Qdrant client initialization moved into `PlexServer` to centralize state and
   simplify testing.
+- Media payload and artwork caching centralized in `MediaCache` attached to
+  `PlexServer` to streamline cache management and testing.
 
 ## User Queries
 The project should handle natural-language searches and recommendations such as:
