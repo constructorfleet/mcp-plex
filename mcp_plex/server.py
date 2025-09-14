@@ -5,7 +5,6 @@ import argparse
 import asyncio
 import inspect
 import json
-import os
 from typing import Annotated, Any, Callable
 
 from fastapi import FastAPI
@@ -21,56 +20,60 @@ from starlette.requests import Request
 from starlette.responses import JSONResponse, PlainTextResponse, Response
 
 from .cache import MediaCache
+from .config import Settings
 
 try:
     from sentence_transformers import CrossEncoder
 except Exception:
     CrossEncoder = None
 
-# Environment configuration for Qdrant
-_QDRANT_URL = os.getenv("QDRANT_URL")
-_QDRANT_API_KEY = os.getenv("QDRANT_API_KEY")
-_QDRANT_HOST = os.getenv("QDRANT_HOST")
-_QDRANT_PORT = int(os.getenv("QDRANT_PORT", "6333"))
-_QDRANT_GRPC_PORT = int(os.getenv("QDRANT_GRPC_PORT", "6334"))
-_QDRANT_PREFER_GRPC = os.getenv("QDRANT_PREFER_GRPC", "0") == "1"
-_https_env = os.getenv("QDRANT_HTTPS")
-_QDRANT_HTTPS = None if _https_env is None else _https_env == "1"
 
-# Embedding model configuration
-_DENSE_MODEL_NAME = os.getenv("DENSE_MODEL", "BAAI/bge-small-en-v1.5")
-_SPARSE_MODEL_NAME = os.getenv(
-    "SPARSE_MODEL", "Qdrant/bm42-all-minilm-l6-v2-attentions"
-)
-
-if _QDRANT_URL is None and _QDRANT_HOST is None:
-    _QDRANT_URL = ":memory:"
-
-
-_CACHE_SIZE = 128
+settings = Settings()
 
 
 class PlexServer(FastMCP):
     """FastMCP server with an attached Qdrant client."""
 
-    def __init__(self) -> None:  # noqa: D401 - short description inherited
-        super().__init__()
-        self.qdrant_client = AsyncQdrantClient(
-            location=_QDRANT_URL,
-            api_key=_QDRANT_API_KEY,
-            host=_QDRANT_HOST,
-            port=_QDRANT_PORT,
-            grpc_port=_QDRANT_GRPC_PORT,
-            prefer_grpc=_QDRANT_PREFER_GRPC,
-            https=_QDRANT_HTTPS,
+    def __init__(
+        self,
+        *,
+        settings: Settings | None = None,
+        qdrant_client: AsyncQdrantClient | None = None,
+    ) -> None:  # noqa: D401 - short description inherited
+        self._settings = settings or Settings()
+        location = self.settings.qdrant_url
+        host = self.settings.qdrant_host
+        if location is None and host is None:
+            location = ":memory:"
+        self.qdrant_client = qdrant_client or AsyncQdrantClient(
+            location=location,
+            api_key=self.settings.qdrant_api_key,
+            host=host,
+            port=self.settings.qdrant_port,
+            grpc_port=self.settings.qdrant_grpc_port,
+            prefer_grpc=self.settings.qdrant_prefer_grpc,
+            https=self.settings.qdrant_https,
         )
+
+        async def _lifespan(app: FastMCP):  # noqa: ARG001
+            yield
+            await self.close()
+
+        super().__init__(lifespan=_lifespan)
         self._reranker: CrossEncoder | None = None
         self._reranker_loaded = False
-        self.cache = MediaCache(_CACHE_SIZE)
+        self.cache = MediaCache(self.settings.cache_size)
+
+    async def close(self) -> None:
+        await self.qdrant_client.close()
+
+    @property
+    def settings(self) -> Settings:  # type: ignore[override]
+        return self._settings
 
     @property
     def reranker(self) -> CrossEncoder | None:
-        if not _USE_RERANKER or CrossEncoder is None:
+        if not self.settings.use_reranker or CrossEncoder is None:
             return None
         if not self._reranker_loaded:
             try:
@@ -83,9 +86,7 @@ class PlexServer(FastMCP):
         return self._reranker
 
 
-_USE_RERANKER = os.getenv("USE_RERANKER", "1") == "1"
-
-server = PlexServer()
+server = PlexServer(settings=settings)
 
 
 async def _find_records(identifier: str, limit: int = 5) -> list[models.Record]:
@@ -181,8 +182,8 @@ async def search_media(
     ] = 5,
 ) -> list[dict[str, Any]]:
     """Hybrid similarity search across media items using dense and sparse vectors."""
-    dense_doc = models.Document(text=query, model=_DENSE_MODEL_NAME)
-    sparse_doc = models.Document(text=query, model=_SPARSE_MODEL_NAME)
+    dense_doc = models.Document(text=query, model=server.settings.dense_model)
+    sparse_doc = models.Document(text=query, model=server.settings.sparse_model)
     reranker = server.reranker
     candidate_limit = limit * 3 if reranker is not None else limit
     prefetch = [
@@ -618,7 +619,6 @@ _register_rest_endpoints()
 
 def main(argv: list[str] | None = None) -> None:
     """CLI entrypoint for running the MCP server."""
-    global _DENSE_MODEL_NAME, _SPARSE_MODEL_NAME
     parser = argparse.ArgumentParser(description="Run the MCP server")
     parser.add_argument("--bind", help="Host address to bind to")
     parser.add_argument("--port", type=int, help="Port to listen on")
@@ -631,12 +631,12 @@ def main(argv: list[str] | None = None) -> None:
     parser.add_argument("--mount", help="Mount path for HTTP transports")
     parser.add_argument(
         "--dense-model",
-        default=_DENSE_MODEL_NAME,
+        default=server.settings.dense_model,
         help="Dense embedding model name (env: DENSE_MODEL)",
     )
     parser.add_argument(
         "--sparse-model",
-        default=_SPARSE_MODEL_NAME,
+        default=server.settings.sparse_model,
         help="Sparse embedding model name (env: SPARSE_MODEL)",
     )
     args = parser.parse_args(argv)
@@ -653,8 +653,8 @@ def main(argv: list[str] | None = None) -> None:
         if args.mount:
             run_kwargs["path"] = args.mount
 
-    _DENSE_MODEL_NAME = args.dense_model
-    _SPARSE_MODEL_NAME = args.sparse_model
+    server.settings.dense_model = args.dense_model
+    server.settings.sparse_model = args.sparse_model
 
     server.run(transport=args.transport, **run_kwargs)
 
