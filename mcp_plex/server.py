@@ -7,12 +7,12 @@ import inspect
 import json
 import os
 from collections import OrderedDict
-from typing import Annotated, Any
+from typing import Annotated, Any, Callable
 
-from fastapi import FastAPI, HTTPException
+from fastapi import FastAPI
 from fastapi.openapi.docs import get_swagger_ui_html
 from fastapi.openapi.utils import get_openapi
-from fastmcp.exceptions import NotFoundError
+from fastmcp.prompts import Message
 from fastmcp.server import FastMCP
 from fastmcp.server.context import Context as FastMCPContext
 from pydantic import Field
@@ -483,6 +483,23 @@ async def media_background(
     return art
 
 
+@server.prompt("media-info")
+async def media_info(
+    identifier: Annotated[
+        str,
+        Field(
+            description="Rating key, IMDb/TMDb ID, or media title",
+            examples=["49915", "tt8367814", "The Gentlemen"],
+        ),
+    ],
+) -> list[Message]:
+    """Return a basic description for the given media identifier."""
+    data = await _get_media_data(identifier)
+    title = data.get("title") or data.get("plex", {}).get("title", "")
+    summary = data.get("summary") or data.get("plex", {}).get("summary", "")
+    return [Message(f"{title}: {summary}")]
+
+
 @server.custom_route("/rest", methods=["GET"])
 async def rest_docs(request: Request) -> Response:
     """Serve Swagger UI for REST endpoints."""
@@ -493,6 +510,25 @@ def _build_openapi_schema() -> dict[str, Any]:
     app = FastAPI()
     for name, tool in server._tool_manager._tools.items():
         app.post(f"/rest/{name}")(tool.fn)
+    for name, prompt in server._prompt_manager._prompts.items():
+        async def _p_stub(**kwargs):  # noqa: ARG001
+            pass
+        _p_stub.__name__ = f"prompt_{name.replace('-', '_')}"
+        _p_stub.__doc__ = prompt.fn.__doc__
+        _p_stub.__signature__ = inspect.signature(prompt.fn).replace(
+            return_annotation=Any
+        )
+        app.post(f"/rest/prompt/{name}")(_p_stub)
+    for uri, resource in server._resource_manager._templates.items():
+        path = uri.replace("resource://", "")
+        async def _r_stub(**kwargs):  # noqa: ARG001
+            pass
+        _r_stub.__name__ = f"resource_{path.replace('/', '_').replace('{', '').replace('}', '')}"
+        _r_stub.__doc__ = resource.fn.__doc__
+        _r_stub.__signature__ = inspect.signature(resource.fn).replace(
+            return_annotation=Any
+        )
+        app.get(f"/rest/resource/{path}")(_r_stub)
     return get_openapi(title="MCP REST API", version="1.0.0", routes=app.routes)
 
 
@@ -505,8 +541,14 @@ async def openapi_json(request: Request) -> Response:  # noqa: ARG001
     return JSONResponse(_OPENAPI_SCHEMA)
 
 
-# Dynamically expose tools under `/rest/{tool_name}` while preserving metadata
-def _register_rest_tools() -> None:
+
+def _register_rest_endpoints() -> None:
+    def _register(path: str, method: str, handler: Callable, fn: Callable, name: str) -> None:
+        handler.__name__ = name
+        handler.__doc__ = fn.__doc__
+        handler.__signature__ = inspect.signature(fn).replace(return_annotation=Any)
+        server.custom_route(path, methods=[method])(handler)
+
     for name, tool in server._tool_manager._tools.items():
         async def _rest_tool(request: Request, _tool=tool) -> Response:  # noqa: ARG001
             try:
@@ -517,48 +559,59 @@ def _register_rest_tools() -> None:
                 result = await _tool.fn(**arguments)
             return JSONResponse(result)
 
-        _rest_tool.__name__ = f"rest_{name.replace('-', '_')}"
-        _rest_tool.__doc__ = tool.fn.__doc__
-        _rest_tool.__signature__ = inspect.signature(tool.fn)
-        server.custom_route(f"/rest/{name}", methods=["POST"])(_rest_tool)
+        _register(
+            f"/rest/{name}",
+            "POST",
+            _rest_tool,
+            tool.fn,
+            f"rest_{name.replace('-', '_')}",
+        )
+
+    for name, prompt in server._prompt_manager._prompts.items():
+        async def _rest_prompt(request: Request, _prompt=prompt) -> Response:  # noqa: ARG001
+            try:
+                arguments = await request.json()
+            except Exception:
+                arguments = None
+            async with FastMCPContext(fastmcp=server):
+                messages = await _prompt.render(arguments)
+            return JSONResponse([m.model_dump() for m in messages])
+
+        _register(
+            f"/rest/prompt/{name}",
+            "POST",
+            _rest_prompt,
+            prompt.fn,
+            f"rest_prompt_{name.replace('-', '_')}",
+        )
+
+    for uri, resource in server._resource_manager._templates.items():
+        path = uri.replace("resource://", "")
+
+        async def _rest_resource(request: Request, _uri_template=uri, _resource=resource) -> Response:
+            formatted = _uri_template
+            for key, value in request.path_params.items():
+                formatted = formatted.replace(f"{{{key}}}", value)
+            async with FastMCPContext(fastmcp=server):
+                data = await server._resource_manager.read_resource(formatted)
+            if isinstance(data, bytes):
+                return Response(content=data, media_type=_resource.mime_type)
+            try:
+                return JSONResponse(json.loads(data), media_type=_resource.mime_type)
+            except Exception:
+                return PlainTextResponse(str(data), media_type=_resource.mime_type)
+
+        handler_name = f"rest_resource_{path.replace('/', '_').replace('{', '').replace('}', '')}"
+        _register(
+            f"/rest/resource/{path}",
+            "GET",
+            _rest_resource,
+            resource.fn,
+            handler_name,
+        )
 
 
-_register_rest_tools()
-
-@server.custom_route("/rest/prompt/{prompt_name}", methods=["POST"])
-async def rest_prompt(request: Request) -> Response:
-    """Render a prompt via REST."""
-    prompt_name = request.path_params["prompt_name"]
-    try:
-        arguments = await request.json()
-    except Exception:
-        arguments = None
-    try:
-        prompt = await server._prompt_manager.get_prompt(prompt_name)
-    except NotFoundError as e:
-        raise HTTPException(status_code=404, detail=str(e))
-    async with FastMCPContext(fastmcp=server):
-        messages = await prompt.render(arguments)
-    return JSONResponse([m.model_dump() for m in messages])
-
-
-@server.custom_route("/rest/resource/{path:path}", methods=["GET"])
-async def rest_resource(request: Request) -> Response:
-    """Read a resource via REST."""
-    path = request.path_params["path"]
-    uri = f"resource://{path}"
-    try:
-        resource = await server._resource_manager.get_resource(uri)
-    except NotFoundError as e:
-        raise HTTPException(status_code=404, detail=str(e))
-    async with FastMCPContext(fastmcp=server):
-        data = await server._resource_manager.read_resource(uri)
-    if isinstance(data, bytes):
-        return Response(content=data, media_type=resource.mime_type)
-    try:
-        return JSONResponse(json.loads(data), media_type=resource.mime_type)
-    except Exception:
-        return PlainTextResponse(str(data), media_type=resource.mime_type)
+_register_rest_endpoints()
 
 
 def main(argv: list[str] | None = None) -> None:
