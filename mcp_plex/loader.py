@@ -219,6 +219,7 @@ def resolve_tmdb_season_number(
     if isinstance(parent_title, str) and parent_title.isdigit():
         return int(parent_title)
     return None
+    return None
 
 
 def _extract_external_ids(item: PlexPartialObject) -> ExternalIDs:
