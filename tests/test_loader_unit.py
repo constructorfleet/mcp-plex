@@ -18,7 +18,9 @@ from mcp_plex.loader import (
     _load_imdb_retry_queue,
     _persist_imdb_retry_queue,
     _process_imdb_retry_queue,
+    resolve_tmdb_season_number,
 )
+from mcp_plex.types import TMDBSeason, TMDBShow
 
 
 def test_extract_external_ids():
@@ -240,3 +242,23 @@ def test_imdb_retry_queue_persists_and_retries(tmp_path, monkeypatch):
     asyncio.run(second_run())
     assert json.loads(queue_path.read_text()) == []
     assert loader._imdb_cache.get("tt1") is not None
+
+
+def test_resolve_tmdb_season_number_matches_name():
+    episode = types.SimpleNamespace(parentIndex=2018, parentTitle="2018")
+    show = TMDBShow(
+        id=1,
+        name="Show",
+        seasons=[TMDBSeason(season_number=14, name="2018")],
+    )
+    assert resolve_tmdb_season_number(show, episode) == 14
+
+
+def test_resolve_tmdb_season_number_matches_air_date():
+    episode = types.SimpleNamespace(parentIndex=2018, parentTitle="Season 2018")
+    show = TMDBShow(
+        id=1,
+        name="Show",
+        seasons=[TMDBSeason(season_number=16, name="Season 16", air_date="2018-01-03")],
+    )
+    assert resolve_tmdb_season_number(show, episode) == 16

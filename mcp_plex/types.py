@@ -50,6 +50,12 @@ class TMDBGenre(BaseModel):
     name: str
 
 
+class TMDBSeason(BaseModel):
+    season_number: int
+    name: str
+    air_date: Optional[str] = None
+
+
 class TMDBMovie(BaseModel):
     id: int
     title: str
@@ -77,6 +83,7 @@ class TMDBShow(BaseModel):
     first_air_date: Optional[str] = None
     last_air_date: Optional[str] = None
     genres: List[TMDBGenre] = Field(default_factory=list)
+    seasons: List[TMDBSeason] = Field(default_factory=list)
     poster_path: Optional[str] = None
     backdrop_path: Optional[str] = None
     tagline: Optional[str] = None
@@ -153,6 +160,7 @@ __all__ = [
     "IMDbName",
     "TMDBGenre",
     "TMDBMovie",
+    "TMDBSeason",
     "TMDBShow",
     "TMDBEpisode",
     "TMDBItem",

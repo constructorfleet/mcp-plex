@@ -17,6 +17,9 @@
   avoid unnecessary model downloads when reranking is disabled or unavailable.
 - Media payload and artwork caching centralized in `MediaCache` attached to
   `PlexServer` to streamline cache management and testing.
+- Plex episodes with year-based seasons are mapped to the correct TMDb season
+  numbers via a helper that matches season names or air-date years to ensure
+  accurate episode lookups.
 
 ## User Queries
 The project should handle natural-language searches and recommendations such as:

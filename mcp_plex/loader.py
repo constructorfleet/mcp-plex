@@ -164,6 +164,56 @@ async def _fetch_tmdb_episode(
     return None
 
 
+def resolve_tmdb_season_number(
+    show_tmdb: Optional[TMDBShow], episode: PlexPartialObject
+) -> Optional[int]:
+    """Map a Plex episode to the appropriate TMDb season number.
+
+    This resolves cases where Plex uses year-based season indices that do not
+    match TMDb's sequential ``season_number`` values.
+    """
+
+    parent_index = getattr(episode, "parentIndex", None)
+    parent_title = getattr(episode, "parentTitle", None)
+
+    seasons = getattr(show_tmdb, "seasons", []) if show_tmdb else []
+
+    # direct numeric match
+    if parent_index is not None:
+        for season in seasons:
+            if season.season_number == parent_index:
+                return season.season_number
+
+    # match by season name (e.g. "Season 2018" -> "2018")
+    title_norm: Optional[str] = None
+    if isinstance(parent_title, str):
+        title_norm = parent_title.lower().lstrip("season ").strip()
+        for season in seasons:
+            name_norm = (season.name or "").lower().lstrip("season ").strip()
+            if name_norm == title_norm:
+                return season.season_number
+
+    # match by air date year when Plex uses year-based seasons
+    year: Optional[int] = None
+    if isinstance(parent_index, int):
+        year = parent_index
+    elif title_norm and title_norm.isdigit():
+        year = int(title_norm)
+
+    if year is not None:
+        for season in seasons:
+            air = getattr(season, "air_date", None)
+            if isinstance(air, str) and len(air) >= 4 and air[:4].isdigit():
+                if int(air[:4]) == year:
+                    return season.season_number
+
+    if parent_index is not None:
+        return int(parent_index)
+    if isinstance(parent_title, str) and parent_title.isdigit():
+        return int(parent_title)
+    return None
+
+
 def _extract_external_ids(item: PlexPartialObject) -> ExternalIDs:
     """Extract IMDb and TMDb IDs from a Plex object."""
 
@@ -245,11 +295,7 @@ async def _load_from_plex(
         imdb_task = (
             _fetch_imdb(client, ids.imdb) if ids.imdb else asyncio.sleep(0, result=None)
         )
-        season = getattr(episode, "parentIndex", None)
-        if season is None:
-            title = getattr(episode, "parentTitle", "")
-            if isinstance(title, str) and title.isdigit():
-                season = int(title)
+        season = resolve_tmdb_season_number(show_tmdb, episode)
         ep_num = getattr(episode, "index", None)
         tmdb_task = (
             _fetch_tmdb_episode(client, show_tmdb.id, season, ep_num, tmdb_api_key)
