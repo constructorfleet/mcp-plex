@@ -205,6 +205,35 @@ def test_fetch_imdb_batch(tmp_path, monkeypatch):
     assert set(data.keys()) == {"tt1", "tt2"}
 
 
+def test_fetch_imdb_batch_chunks(monkeypatch, tmp_path):
+    cache_path = tmp_path / "cache.json"
+    monkeypatch.setattr(loader, "_imdb_cache", IMDbCache(cache_path))
+
+    calls: list[list[str]] = []
+
+    async def imdb_mock(request):
+        ids = request.url.params.get_list("titleIds")
+        calls.append(ids)
+        return httpx.Response(
+            200,
+            json={
+                "titles": [
+                    {"id": i, "type": "movie", "primaryTitle": i} for i in ids
+                ]
+            },
+        )
+
+    async def main():
+        ids = [f"tt{i}" for i in range(6)]
+        async with httpx.AsyncClient(transport=httpx.MockTransport(imdb_mock)) as client:
+            result = await _fetch_imdb_batch(client, ids)
+            assert set(result.keys()) == set(ids)
+
+    asyncio.run(main())
+    assert len(calls) == 2
+    assert all(len(c) <= 5 for c in calls)
+
+
 def test_fetch_imdb_retries_on_429(monkeypatch, tmp_path):
     cache_path = tmp_path / "cache.json"
     monkeypatch.setattr(loader, "_imdb_cache", IMDbCache(cache_path))
