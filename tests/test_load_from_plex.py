@@ -94,7 +94,17 @@ def test_load_from_plex(monkeypatch):
         lambda *args, **kwargs: orig_client(transport=transport),
     )
 
-    items = asyncio.run(loader._load_from_plex(server, "key"))
+    calls = []
+    orig_batch = loader._gather_in_batches
+
+    async def fake_batch(tasks, batch_size):
+        calls.append((len(tasks), batch_size))
+        return await orig_batch(tasks, batch_size)
+
+    monkeypatch.setattr(loader, "_gather_in_batches", fake_batch)
+
+    items = asyncio.run(loader._load_from_plex(server, "key", batch_size=1))
+    assert calls == [(1, 1), (2, 1)]
     assert len(items) == 3
     assert items[0].tmdb and items[0].tmdb.id == 27205
     assert items[1].tmdb and items[1].tmdb.id == 62085
