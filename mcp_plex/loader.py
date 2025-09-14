@@ -43,6 +43,7 @@ _imdb_cache: IMDbCache | None = None
 _imdb_max_retries: int = 3
 _imdb_backoff: float = 1.0
 _imdb_retry_queue: asyncio.Queue[str] | None = None
+_imdb_batch_limit: int = 5
 
 
 async def _gather_in_batches(
@@ -91,7 +92,7 @@ async def _fetch_imdb(client: httpx.AsyncClient, imdb_id: str) -> Optional[IMDbT
 async def _fetch_imdb_batch(
     client: httpx.AsyncClient, imdb_ids: Sequence[str]
 ) -> dict[str, Optional[IMDbTitle]]:
-    """Fetch metadata for multiple IMDb IDs in a single request."""
+    """Fetch metadata for multiple IMDb IDs, batching requests."""
 
     results: dict[str, Optional[IMDbTitle]] = {}
     ids_to_fetch: list[str] = []
@@ -106,32 +107,39 @@ async def _fetch_imdb_batch(
     if not ids_to_fetch:
         return results
 
-    delay = _imdb_backoff
-    params = [("titleIds", i) for i in ids_to_fetch]
-    for attempt in range(_imdb_max_retries + 1):
-        resp = await client.get("https://api.imdbapi.dev/titles:batchGet", params=params)
-        if resp.status_code == 429:
-            if attempt == _imdb_max_retries:
-                if _imdb_retry_queue is not None:
-                    for imdb_id in ids_to_fetch:
-                        await _imdb_retry_queue.put(imdb_id)
+    url = "https://api.imdbapi.dev/titles:batchGet"
+    for i in range(0, len(ids_to_fetch), _imdb_batch_limit):
+        chunk = ids_to_fetch[i : i + _imdb_batch_limit]
+        params = [("titleIds", imdb_id) for imdb_id in chunk]
+        delay = _imdb_backoff
+        for attempt in range(_imdb_max_retries + 1):
+            resp = await client.get(url, params=params)
+            if resp.status_code == 429:
+                if attempt == _imdb_max_retries:
+                    if _imdb_retry_queue is not None:
+                        for imdb_id in chunk:
+                            await _imdb_retry_queue.put(imdb_id)
+                    for imdb_id in chunk:
+                        results[imdb_id] = None
+                    break
+                await asyncio.sleep(delay)
+                delay *= 2
+                continue
+            if resp.is_success:
+                data = resp.json()
+                found: set[str] = set()
+                for title_data in data.get("titles", []):
+                    imdb_title = IMDbTitle.model_validate(title_data)
+                    results[imdb_title.id] = imdb_title
+                    found.add(imdb_title.id)
+                    if _imdb_cache:
+                        _imdb_cache.set(imdb_title.id, title_data)
+                for missing in set(chunk) - found:
+                    results[missing] = None
                 break
-            await asyncio.sleep(delay)
-            delay *= 2
-            continue
-        if resp.is_success:
-            data = resp.json()
-            for title_data in data.get("titles", []):
-                imdb_title = IMDbTitle.model_validate(title_data)
-                results[imdb_title.id] = imdb_title
-                if _imdb_cache:
-                    _imdb_cache.set(imdb_title.id, title_data)
-            for missing in set(ids_to_fetch) - set(results):
-                results[missing] = None
+            for imdb_id in chunk:
+                results[imdb_id] = None
             break
-        for imdb_id in ids_to_fetch:
-            results[imdb_id] = None
-        break
 
     return results
 
