@@ -262,3 +262,17 @@ def test_resolve_tmdb_season_number_matches_air_date():
         seasons=[TMDBSeason(season_number=16, name="Season 16", air_date="2018-01-03")],
     )
     assert resolve_tmdb_season_number(show, episode) == 16
+
+
+def test_resolve_tmdb_season_number_parent_year_fallback():
+    episode = types.SimpleNamespace(
+        parentIndex="Special",
+        parentTitle="Special",
+        parentYear=2018,
+    )
+    show = TMDBShow(
+        id=1,
+        name="Show",
+        seasons=[TMDBSeason(season_number=5, name="Season 5", air_date="2018-06-01")],
+    )
+    assert resolve_tmdb_season_number(show, episode) == 5
