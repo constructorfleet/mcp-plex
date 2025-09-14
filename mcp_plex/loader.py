@@ -42,6 +42,7 @@ T = TypeVar("T")
 _imdb_cache: IMDbCache | None = None
 _imdb_max_retries: int = 3
 _imdb_backoff: float = 1.0
+_imdb_retry_queue: asyncio.Queue[str] | None = None
 
 
 async def _gather_in_batches(
@@ -70,6 +71,8 @@ async def _fetch_imdb(client: httpx.AsyncClient, imdb_id: str) -> Optional[IMDbT
         resp = await client.get(url)
         if resp.status_code == 429:
             if attempt == _imdb_max_retries:
+                if _imdb_retry_queue is not None:
+                    await _imdb_retry_queue.put(imdb_id)
                 return None
             await asyncio.sleep(delay)
             delay *= 2
@@ -81,6 +84,42 @@ async def _fetch_imdb(client: httpx.AsyncClient, imdb_id: str) -> Optional[IMDbT
             return IMDbTitle.model_validate(data)
         return None
     return None
+
+
+def _load_imdb_retry_queue(path: Path) -> None:
+    """Populate the retry queue from a JSON file if it exists."""
+
+    global _imdb_retry_queue
+    _imdb_retry_queue = asyncio.Queue()
+    if path.exists():
+        try:
+            ids = json.loads(path.read_text())
+            for imdb_id in ids:
+                _imdb_retry_queue.put_nowait(str(imdb_id))
+        except Exception:
+            logger.exception("Failed to load IMDb retry queue from %s", path)
+
+
+async def _process_imdb_retry_queue(client: httpx.AsyncClient) -> None:
+    """Attempt to fetch queued IMDb IDs, re-queueing failures."""
+
+    if _imdb_retry_queue is None or _imdb_retry_queue.empty():
+        return
+    size = _imdb_retry_queue.qsize()
+    for _ in range(size):
+        imdb_id = await _imdb_retry_queue.get()
+        title = await _fetch_imdb(client, imdb_id)
+        if title is None:
+            await _imdb_retry_queue.put(imdb_id)
+
+
+def _persist_imdb_retry_queue(path: Path) -> None:
+    """Persist the retry queue to disk."""
+
+    if _imdb_retry_queue is None:
+        return
+    ids = list(_imdb_retry_queue._queue)  # type: ignore[attr-defined]
+    path.write_text(json.dumps(ids))
 
 
 async def _fetch_tmdb_movie(
@@ -207,6 +246,10 @@ async def _load_from_plex(
             _fetch_imdb(client, ids.imdb) if ids.imdb else asyncio.sleep(0, result=None)
         )
         season = getattr(episode, "parentIndex", None)
+        if season is None:
+            title = getattr(episode, "parentTitle", "")
+            if isinstance(title, str) and title.isdigit():
+                season = int(title)
         ep_num = getattr(episode, "index", None)
         tmdb_task = (
             _fetch_tmdb_episode(client, show_tmdb.id, season, ep_num, tmdb_api_key)
@@ -352,13 +395,20 @@ async def run(
     imdb_cache_path: Path | None = None,
     imdb_max_retries: int = 3,
     imdb_backoff: float = 1.0,
+    imdb_queue_path: Path | None = None,
 ) -> None:
     """Core execution logic for the CLI."""
 
-    global _imdb_cache, _imdb_max_retries, _imdb_backoff
+    global _imdb_cache, _imdb_max_retries, _imdb_backoff, _imdb_retry_queue
     _imdb_cache = IMDbCache(imdb_cache_path) if imdb_cache_path else None
     _imdb_max_retries = imdb_max_retries
     _imdb_backoff = imdb_backoff
+    if imdb_queue_path:
+        _load_imdb_retry_queue(imdb_queue_path)
+        async with httpx.AsyncClient(timeout=30) as client:
+            await _process_imdb_retry_queue(client)
+    else:
+        _imdb_retry_queue = asyncio.Queue()
 
     items: List[AggregatedItem]
     if sample_dir is not None:
@@ -496,6 +546,9 @@ async def run(
         await client.upsert(collection_name=collection_name, points=points)
     else:
         logger.info("No points to upsert")
+
+    if imdb_queue_path:
+        _persist_imdb_retry_queue(imdb_queue_path)
 
     json.dump([item.model_dump(mode="json") for item in items], fp=sys.stdout, indent=2)
     sys.stdout.write("\n")
@@ -643,6 +696,15 @@ async def run(
     show_default=True,
     help="Initial backoff delay in seconds for IMDb retries",
 )
+@click.option(
+    "--imdb-queue",
+    envvar="IMDB_QUEUE",
+    show_envvar=True,
+    type=click.Path(path_type=Path),
+    default=Path("imdb_queue.json"),
+    show_default=True,
+    help="Path to persistent IMDb retry queue",
+)
 def main(
     plex_url: Optional[str],
     plex_token: Optional[str],
@@ -662,6 +724,7 @@ def main(
     imdb_cache: Path,
     imdb_max_retries: int,
     imdb_backoff: float,
+    imdb_queue: Path,
 ) -> None:
     """Entry-point for the ``load-data`` script."""
 
@@ -685,6 +748,7 @@ def main(
             imdb_cache,
             imdb_max_retries,
             imdb_backoff,
+            imdb_queue,
         )
     )
 
@@ -708,6 +772,7 @@ async def load_media(
     imdb_cache: Path,
     imdb_max_retries: int,
     imdb_backoff: float,
+    imdb_queue: Path,
 ) -> None:
     """Orchestrate one or more runs of :func:`run`."""
 
@@ -729,6 +794,7 @@ async def load_media(
             imdb_cache,
             imdb_max_retries,
             imdb_backoff,
+            imdb_queue,
         )
         if not continuous:
             break

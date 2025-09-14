@@ -33,6 +33,12 @@ Run continuously with a delay between runs:
 uv run load-data --continuous --delay 600
 ```
 
+### IMDb Retry Queue
+When IMDb lookups continue to return HTTP 429 after the configured retries,
+their IDs are added to a small queue (`imdb_queue.json` by default). The queue
+is persisted after each run and reloaded on the next run so pending IDs are
+retried before normal processing.
+
 ### Run the MCP Server
 Start the FastMCP server over stdio (default):
 ```bash

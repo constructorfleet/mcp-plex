@@ -15,6 +15,9 @@ from mcp_plex.loader import (
     _fetch_tmdb_movie,
     _fetch_tmdb_show,
     _load_from_sample,
+    _load_imdb_retry_queue,
+    _persist_imdb_retry_queue,
+    _process_imdb_retry_queue,
 )
 
 
@@ -203,3 +206,37 @@ def test_fetch_imdb_retries_on_429(monkeypatch, tmp_path):
     asyncio.run(main())
     assert call_count == 3
     assert delays == [0.1, 0.2]
+
+
+def test_imdb_retry_queue_persists_and_retries(tmp_path, monkeypatch):
+    cache_path = tmp_path / "cache.json"
+    queue_path = tmp_path / "queue.json"
+    monkeypatch.setattr(loader, "_imdb_cache", IMDbCache(cache_path))
+    monkeypatch.setattr(loader, "_imdb_max_retries", 0)
+    monkeypatch.setattr(loader, "_imdb_backoff", 0)
+
+    async def first_transport(request):
+        return httpx.Response(429)
+
+    async def second_transport(request):
+        return httpx.Response(200, json={"id": "tt1", "type": "movie", "primaryTitle": "T"})
+
+    async def first_run():
+        _load_imdb_retry_queue(queue_path)
+        async with httpx.AsyncClient(transport=httpx.MockTransport(first_transport)) as client:
+            await _process_imdb_retry_queue(client)
+            await _fetch_imdb(client, "tt1")
+        _persist_imdb_retry_queue(queue_path)
+
+    asyncio.run(first_run())
+    assert json.loads(queue_path.read_text()) == ["tt1"]
+
+    async def second_run():
+        _load_imdb_retry_queue(queue_path)
+        async with httpx.AsyncClient(transport=httpx.MockTransport(second_transport)) as client:
+            await _process_imdb_retry_queue(client)
+        _persist_imdb_retry_queue(queue_path)
+
+    asyncio.run(second_run())
+    assert json.loads(queue_path.read_text()) == []
+    assert loader._imdb_cache.get("tt1") is not None
