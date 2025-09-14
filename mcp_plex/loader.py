@@ -86,11 +86,17 @@ async def _fetch_tmdb_show(
 
 
 async def _fetch_tmdb_episode(
-    client: httpx.AsyncClient, tmdb_id: str, api_key: str
+    client: httpx.AsyncClient,
+    show_id: int,
+    season_number: int,
+    episode_number: int,
+    api_key: str,
 ) -> Optional[TMDBEpisode]:
-    """Attempt to fetch TMDb data for a TV episode by its ID."""
+    """Fetch TMDb data for a TV episode."""
 
-    url = f"https://api.themoviedb.org/3/tv/episode/{tmdb_id}"
+    url = (
+        f"https://api.themoviedb.org/3/tv/{show_id}/season/{season_number}/episode/{episode_number}"
+    )
     resp = await client.get(url, headers={"Authorization": f"Bearer {api_key}"})
     if resp.is_success:
         return TMDBEpisode.model_validate(resp.json())
@@ -178,9 +184,11 @@ async def _load_from_plex(
         imdb_task = (
             _fetch_imdb(client, ids.imdb) if ids.imdb else asyncio.sleep(0, result=None)
         )
+        season = getattr(episode, "parentIndex", None)
+        ep_num = getattr(episode, "index", None)
         tmdb_task = (
-            _fetch_tmdb_episode(client, ids.tmdb, tmdb_api_key)
-            if ids.tmdb
+            _fetch_tmdb_episode(client, show_tmdb.id, season, ep_num, tmdb_api_key)
+            if show_tmdb and season is not None and ep_num is not None
             else asyncio.sleep(0, result=None)
         )
         imdb, tmdb_episode = await asyncio.gather(imdb_task, tmdb_task)
