@@ -51,9 +51,11 @@ async def _gather_in_batches(
     """Gather awaitable tasks in fixed-size batches."""
 
     results: List[T] = []
-    for i in range(0, len(tasks), batch_size):
+    total = len(tasks)
+    for i in range(0, total, batch_size):
         batch = tasks[i : i + batch_size]
         results.extend(await asyncio.gather(*batch))
+        logger.info("Processed %d/%d items", min(i + batch_size, total), total)
     return results
 
 
@@ -84,6 +86,54 @@ async def _fetch_imdb(client: httpx.AsyncClient, imdb_id: str) -> Optional[IMDbT
             return IMDbTitle.model_validate(data)
         return None
     return None
+
+
+async def _fetch_imdb_batch(
+    client: httpx.AsyncClient, imdb_ids: Sequence[str]
+) -> dict[str, Optional[IMDbTitle]]:
+    """Fetch metadata for multiple IMDb IDs in a single request."""
+
+    results: dict[str, Optional[IMDbTitle]] = {}
+    ids_to_fetch: list[str] = []
+    for imdb_id in imdb_ids:
+        if _imdb_cache:
+            cached = _imdb_cache.get(imdb_id)
+            if cached:
+                results[imdb_id] = IMDbTitle.model_validate(cached)
+                continue
+        ids_to_fetch.append(imdb_id)
+
+    if not ids_to_fetch:
+        return results
+
+    delay = _imdb_backoff
+    params = [("titleIds", i) for i in ids_to_fetch]
+    for attempt in range(_imdb_max_retries + 1):
+        resp = await client.get("https://api.imdbapi.dev/titles:batchGet", params=params)
+        if resp.status_code == 429:
+            if attempt == _imdb_max_retries:
+                if _imdb_retry_queue is not None:
+                    for imdb_id in ids_to_fetch:
+                        await _imdb_retry_queue.put(imdb_id)
+                break
+            await asyncio.sleep(delay)
+            delay *= 2
+            continue
+        if resp.is_success:
+            data = resp.json()
+            for title_data in data.get("titles", []):
+                imdb_title = IMDbTitle.model_validate(title_data)
+                results[imdb_title.id] = imdb_title
+                if _imdb_cache:
+                    _imdb_cache.set(imdb_title.id, title_data)
+            for missing in set(ids_to_fetch) - set(results):
+                results[missing] = None
+            break
+        for imdb_id in ids_to_fetch:
+            results[imdb_id] = None
+        break
+
+    return results
 
 
 def _load_imdb_retry_queue(path: Path) -> None:
@@ -279,46 +329,29 @@ async def _load_from_plex(
     server: PlexServer, tmdb_api_key: str, *, batch_size: int = 50
 ) -> List[AggregatedItem]:
     """Load items from a live Plex server."""
-
-    async def _augment_movie(client: httpx.AsyncClient, movie: PlexPartialObject) -> AggregatedItem:
-        ids = _extract_external_ids(movie)
-        imdb_task = (
-            _fetch_imdb(client, ids.imdb) if ids.imdb else asyncio.sleep(0, result=None)
-        )
-        tmdb_task = (
-            _fetch_tmdb_movie(client, ids.tmdb, tmdb_api_key)
-            if ids.tmdb
-            else asyncio.sleep(0, result=None)
-        )
-        imdb, tmdb = await asyncio.gather(imdb_task, tmdb_task)
-        return AggregatedItem(plex=_build_plex_item(movie), imdb=imdb, tmdb=tmdb)
-
-    async def _augment_episode(
-        client: httpx.AsyncClient,
-        episode: PlexPartialObject,
-        show_tmdb: Optional[TMDBShow],
-    ) -> AggregatedItem:
-        ids = _extract_external_ids(episode)
-        imdb_task = (
-            _fetch_imdb(client, ids.imdb) if ids.imdb else asyncio.sleep(0, result=None)
-        )
-        season = resolve_tmdb_season_number(show_tmdb, episode)
-        ep_num = getattr(episode, "index", None)
-        tmdb_task = (
-            _fetch_tmdb_episode(client, show_tmdb.id, season, ep_num, tmdb_api_key)
-            if show_tmdb and season is not None and ep_num is not None
-            else asyncio.sleep(0, result=None)
-        )
-        imdb, tmdb_episode = await asyncio.gather(imdb_task, tmdb_task)
-        tmdb: Optional[TMDBItem] = tmdb_episode or show_tmdb
-        return AggregatedItem(plex=_build_plex_item(episode), imdb=imdb, tmdb=tmdb)
-
     results: List[AggregatedItem] = []
     async with httpx.AsyncClient(timeout=30) as client:
         movie_section = server.library.section("Movies")
         movie_keys = [int(m.ratingKey) for m in movie_section.all()]
         movies = server.fetchItems(movie_keys) if movie_keys else []
-        movie_tasks = [_augment_movie(client, movie) for movie in movies]
+        movie_imdb_ids = [
+            _extract_external_ids(m).imdb for m in movies if _extract_external_ids(m).imdb
+        ]
+        movie_imdb_map = (
+            await _fetch_imdb_batch(client, movie_imdb_ids) if movie_imdb_ids else {}
+        )
+
+        async def _augment_movie(movie: PlexPartialObject) -> AggregatedItem:
+            ids = _extract_external_ids(movie)
+            imdb = movie_imdb_map.get(ids.imdb) if ids.imdb else None
+            tmdb = (
+                await _fetch_tmdb_movie(client, ids.tmdb, tmdb_api_key)
+                if ids.tmdb
+                else None
+            )
+            return AggregatedItem(plex=_build_plex_item(movie), imdb=imdb, tmdb=tmdb)
+
+        movie_tasks = [_augment_movie(movie) for movie in movies]
         if movie_tasks:
             results.extend(await _gather_in_batches(movie_tasks, batch_size))
 
@@ -332,9 +365,33 @@ async def _load_from_plex(
                 show_tmdb = await _fetch_tmdb_show(client, show_ids.tmdb, tmdb_api_key)
             episode_keys = [int(e.ratingKey) for e in full_show.episodes()]
             episodes = server.fetchItems(episode_keys) if episode_keys else []
-            episode_tasks = [
-                _augment_episode(client, episode, show_tmdb) for episode in episodes
+            ep_imdb_ids = [
+                _extract_external_ids(e).imdb
+                for e in episodes
+                if _extract_external_ids(e).imdb
             ]
+            ep_imdb_map = (
+                await _fetch_imdb_batch(client, ep_imdb_ids) if ep_imdb_ids else {}
+            )
+
+            async def _augment_episode(episode: PlexPartialObject) -> AggregatedItem:
+                ids = _extract_external_ids(episode)
+                imdb = ep_imdb_map.get(ids.imdb) if ids.imdb else None
+                season = resolve_tmdb_season_number(show_tmdb, episode)
+                ep_num = getattr(episode, "index", None)
+                tmdb_episode = (
+                    await _fetch_tmdb_episode(
+                        client, show_tmdb.id, season, ep_num, tmdb_api_key
+                    )
+                    if show_tmdb and season is not None and ep_num is not None
+                    else None
+                )
+                tmdb: Optional[TMDBItem] = tmdb_episode or show_tmdb
+                return AggregatedItem(
+                    plex=_build_plex_item(episode), imdb=imdb, tmdb=tmdb
+                )
+
+            episode_tasks = [_augment_episode(ep) for ep in episodes]
             if episode_tasks:
                 results.extend(await _gather_in_batches(episode_tasks, batch_size))
     return results

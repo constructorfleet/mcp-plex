@@ -11,6 +11,7 @@ from mcp_plex.loader import (
     _build_plex_item,
     _extract_external_ids,
     _fetch_imdb,
+    _fetch_imdb_batch,
     _fetch_tmdb_episode,
     _fetch_tmdb_movie,
     _fetch_tmdb_show,
@@ -174,6 +175,34 @@ def test_fetch_imdb_cache_hit(tmp_path, monkeypatch):
             assert result.id == "tt1"
 
     asyncio.run(main())
+
+
+def test_fetch_imdb_batch(tmp_path, monkeypatch):
+    cache_path = tmp_path / "cache.json"
+    monkeypatch.setattr(loader, "_imdb_cache", IMDbCache(cache_path))
+
+    async def imdb_mock(request):
+        params = request.url.params
+        assert sorted(params.get_list("titleIds")) == ["tt1", "tt2"]
+        return httpx.Response(
+            200,
+            json={
+                "titles": [
+                    {"id": "tt1", "type": "movie", "primaryTitle": "A"},
+                    {"id": "tt2", "type": "movie", "primaryTitle": "B"},
+                ]
+            },
+        )
+
+    async def main():
+        async with httpx.AsyncClient(transport=httpx.MockTransport(imdb_mock)) as client:
+            result = await _fetch_imdb_batch(client, ["tt1", "tt2"])
+            assert result["tt1"] and result["tt1"].primaryTitle == "A"
+            assert result["tt2"] and result["tt2"].primaryTitle == "B"
+
+    asyncio.run(main())
+    data = json.loads(cache_path.read_text())
+    assert set(data.keys()) == {"tt1", "tt2"}
 
 
 def test_fetch_imdb_retries_on_429(monkeypatch, tmp_path):

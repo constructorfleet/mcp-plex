@@ -62,33 +62,34 @@ def test_load_from_plex(monkeypatch):
         url = str(request.url)
         if "themoviedb.org" in url:
             assert request.headers.get("Authorization") == "Bearer key"
-        if "tt1375666" in url:
-            return httpx.Response(
-                200,
-                json={
-                    "id": "tt1375666",
-                    "type": "movie",
-                    "primaryTitle": "Inception",
-                },
-            )
-        if "tt0959621" in url:
-            return httpx.Response(
-                200,
-                json={
-                    "id": "tt0959621",
-                    "type": "episode",
-                    "primaryTitle": "Pilot",
-                },
-            )
-        if "tt0959622" in url:
-            return httpx.Response(
-                200,
-                json={
-                    "id": "tt0959622",
-                    "type": "episode",
-                    "primaryTitle": "Cat's in the Bag...",
-                },
-            )
+        if "titles:batchGet" in url:
+            ids = request.url.params.get_list("titleIds")
+            titles = []
+            if "tt1375666" in ids:
+                titles.append(
+                    {
+                        "id": "tt1375666",
+                        "type": "movie",
+                        "primaryTitle": "Inception",
+                    }
+                )
+            if "tt0959621" in ids:
+                titles.append(
+                    {
+                        "id": "tt0959621",
+                        "type": "episode",
+                        "primaryTitle": "Pilot",
+                    }
+                )
+            if "tt0959622" in ids:
+                titles.append(
+                    {
+                        "id": "tt0959622",
+                        "type": "episode",
+                        "primaryTitle": "Cat's in the Bag...",
+                    }
+                )
+            return httpx.Response(200, json={"titles": titles})
         if "/movie/27205" in url:
             return httpx.Response(200, json={"id": 27205, "title": "Inception"})
         if "/tv/1396/season/1/episode/1" in url:
