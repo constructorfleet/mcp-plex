@@ -11,6 +11,8 @@
   `SPARSE_MODEL` environment variables or the corresponding CLI options.
 - Hybrid search uses Qdrant's built-in `FusionQuery` with reciprocal rank fusion
   to combine dense and sparse results before optional cross-encoder reranking.
+- Qdrant client initialization moved into `PlexServer` to centralize state and
+  simplify testing.
 
 ## User Queries
 The project should handle natural-language searches and recommendations such as:
