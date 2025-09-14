@@ -68,8 +68,8 @@ def test_cli_model_overrides(monkeypatch):
     captured: dict[str, str] = {}
 
     async def fake_run(*args, **kwargs):
-        captured["dense"] = args[-2]
-        captured["sparse"] = args[-1]
+        captured["dense"] = args[11]
+        captured["sparse"] = args[12]
 
     monkeypatch.setattr(loader, "run", fake_run)
 
@@ -93,8 +93,8 @@ def test_cli_model_env(monkeypatch):
     captured: dict[str, str] = {}
 
     async def fake_run(*args, **kwargs):
-        captured["dense"] = args[-2]
-        captured["sparse"] = args[-1]
+        captured["dense"] = args[11]
+        captured["sparse"] = args[12]
 
     monkeypatch.setattr(loader, "run", fake_run)
 
