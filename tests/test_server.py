@@ -167,11 +167,23 @@ def test_rest_endpoints(monkeypatch):
     assert resp.status_code == 200
     assert resp.json()[0]["plex"]["rating_key"] == "49915"
 
+    resp = client.post("/rest/prompt/media-info", json={"identifier": "49915"})
+    assert resp.status_code == 200
+    msg = resp.json()[0]
+    assert msg["role"] == "user"
+    assert "The Gentlemen" in msg["content"]["text"]
+
+    resp = client.get("/rest/resource/media-ids/49915")
+    assert resp.status_code == 200
+    assert resp.json()["rating_key"] == "49915"
+
     spec = client.get("/openapi.json").json()
     get_media = spec["paths"]["/rest/get-media"]["post"]
     assert get_media["description"].startswith("Retrieve media items")
     params = {p["name"]: p for p in get_media["parameters"]}
     assert params["identifier"]["schema"]["description"].startswith("Rating key")
+    assert "/rest/prompt/media-info" in spec["paths"]
+    assert "/rest/resource/media-ids/{identifier}" in spec["paths"]
 
     resp = client.get("/rest")
     assert resp.status_code == 200
