@@ -8,10 +8,16 @@ import os
 from collections import OrderedDict
 from typing import Annotated, Any
 
+from fastapi import HTTPException
+from fastapi.openapi.docs import get_swagger_ui_html
+from fastmcp.exceptions import NotFoundError
 from fastmcp.server import FastMCP
+from fastmcp.server.context import Context as FastMCPContext
 from pydantic import Field
 from qdrant_client import models
 from qdrant_client.async_qdrant_client import AsyncQdrantClient
+from starlette.requests import Request
+from starlette.responses import JSONResponse, PlainTextResponse, Response
 
 try:
     from sentence_transformers import CrossEncoder
@@ -473,6 +479,65 @@ async def media_background(
         raise ValueError("Background not available")
     _cache_set(_background_cache, str(data.get("plex", {}).get("rating_key")), art)
     return art
+
+
+@server.custom_route("/rest", methods=["GET"])
+async def rest_docs(request: Request) -> Response:
+    """Serve Swagger UI for REST endpoints."""
+    return get_swagger_ui_html(openapi_url="/openapi.json", title="MCP REST API")
+
+
+@server.custom_route("/rest/tool/{tool_name}", methods=["POST"])
+async def rest_tool(request: Request) -> Response:
+    """Execute a tool via REST."""
+    tool_name = request.path_params["tool_name"]
+    try:
+        arguments = await request.json()
+    except Exception:
+        arguments = {}
+    try:
+        tool = await server._tool_manager.get_tool(tool_name)
+    except NotFoundError as e:
+        raise HTTPException(status_code=404, detail=str(e))
+    async with FastMCPContext(fastmcp=server):
+        result = await tool.fn(**arguments)
+    return JSONResponse(result)
+
+
+@server.custom_route("/rest/prompt/{prompt_name}", methods=["POST"])
+async def rest_prompt(request: Request) -> Response:
+    """Render a prompt via REST."""
+    prompt_name = request.path_params["prompt_name"]
+    try:
+        arguments = await request.json()
+    except Exception:
+        arguments = None
+    try:
+        prompt = await server._prompt_manager.get_prompt(prompt_name)
+    except NotFoundError as e:
+        raise HTTPException(status_code=404, detail=str(e))
+    async with FastMCPContext(fastmcp=server):
+        messages = await prompt.render(arguments)
+    return JSONResponse([m.model_dump() for m in messages])
+
+
+@server.custom_route("/rest/resource/{path:path}", methods=["GET"])
+async def rest_resource(request: Request) -> Response:
+    """Read a resource via REST."""
+    path = request.path_params["path"]
+    uri = f"resource://{path}"
+    try:
+        resource = await server._resource_manager.get_resource(uri)
+    except NotFoundError as e:
+        raise HTTPException(status_code=404, detail=str(e))
+    async with FastMCPContext(fastmcp=server):
+        data = await server._resource_manager.read_resource(uri)
+    if isinstance(data, bytes):
+        return Response(content=data, media_type=resource.mime_type)
+    try:
+        return JSONResponse(json.loads(data), media_type=resource.mime_type)
+    except Exception:
+        return PlainTextResponse(str(data), media_type=resource.mime_type)
 
 
 def main(argv: list[str] | None = None) -> None:

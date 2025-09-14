@@ -9,6 +9,7 @@ from pathlib import Path
 
 import builtins
 import pytest
+from starlette.testclient import TestClient
 
 from mcp_plex import loader
 
@@ -156,3 +157,19 @@ def test_reranker_init_failure(monkeypatch):
     monkeypatch.setitem(sys.modules, "sentence_transformers", st_module)
     server = importlib.reload(importlib.import_module("mcp_plex.server"))
     assert server._reranker is None
+
+
+def test_rest_endpoints(monkeypatch):
+    module = _load_server(monkeypatch)
+    client = TestClient(module.server.http_app())
+
+    resp = client.post("/rest/tool/get-media", json={"identifier": "49915"})
+    assert resp.status_code == 200
+    assert resp.json()[0]["plex"]["rating_key"] == "49915"
+
+    resp = client.get("/rest/resource/media-item/49915")
+    assert resp.status_code == 200
+    assert resp.json()["plex"]["rating_key"] == "49915"
+
+    resp = client.get("/rest")
+    assert resp.status_code == 200
