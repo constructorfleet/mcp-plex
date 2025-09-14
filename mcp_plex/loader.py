@@ -3,6 +3,7 @@ from __future__ import annotations
 
 import asyncio
 import json
+import logging
 import sys
 from pathlib import Path
 from typing import List, Optional
@@ -31,6 +32,9 @@ try:  # Only import plexapi when available; the sample data mode does not requir
 except Exception:
     PlexServer = None  # type: ignore[assignment]
     PlexPartialObject = object  # type: ignore[assignment]
+
+
+logger = logging.getLogger(__name__)
 
 
 async def _fetch_imdb(client: httpx.AsyncClient, imdb_id: str) -> Optional[IMDbTitle]:
@@ -299,6 +303,7 @@ async def run(
 
     items: List[AggregatedItem]
     if sample_dir is not None:
+        logger.info("Loading sample data from %s", sample_dir)
         items = _load_from_sample(sample_dir)
     else:
         if PlexServer is None:
@@ -307,8 +312,10 @@ async def run(
             raise RuntimeError("PLEX_URL and PLEX_TOKEN must be provided")
         if not tmdb_api_key:
             raise RuntimeError("TMDB_API_KEY must be provided")
+        logger.info("Loading data from Plex server %s", plex_url)
         server = PlexServer(plex_url, plex_token)
         items = await _load_from_plex(server, tmdb_api_key)
+    logger.info("Loaded %d items", len(items))
 
     # Assemble points with server-side embeddings
     points: List[models.PointStruct] = []
@@ -422,7 +429,14 @@ async def run(
         )
 
     if points:
+        logger.info(
+            "Upserting %d points into Qdrant collection %s",
+            len(points),
+            collection_name,
+        )
         await client.upsert(collection_name=collection_name, points=points)
+    else:
+        logger.info("No points to upsert")
 
     json.dump([item.model_dump() for item in items], fp=sys.stdout, indent=2)
     sys.stdout.write("\n")
