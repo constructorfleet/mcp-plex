@@ -45,6 +45,7 @@ _imdb_max_retries: int = 3
 _imdb_backoff: float = 1.0
 _imdb_retry_queue: asyncio.Queue[str] | None = None
 _imdb_batch_limit: int = 5
+_qdrant_batch_size: int = 1000
 
 
 async def _gather_in_batches(
@@ -72,7 +73,11 @@ async def _fetch_imdb(client: httpx.AsyncClient, imdb_id: str) -> Optional[IMDbT
     url = f"https://api.imdbapi.dev/titles/{imdb_id}"
     delay = _imdb_backoff
     for attempt in range(_imdb_max_retries + 1):
-        resp = await client.get(url)
+        try:
+            resp = await client.get(url)
+        except httpx.HTTPError:
+            logger.exception("HTTP error fetching IMDb ID %s", imdb_id)
+            return None
         if resp.status_code == 429:
             if attempt == _imdb_max_retries:
                 if _imdb_retry_queue is not None:
@@ -114,7 +119,13 @@ async def _fetch_imdb_batch(
         params = [("titleIds", imdb_id) for imdb_id in chunk]
         delay = _imdb_backoff
         for attempt in range(_imdb_max_retries + 1):
-            resp = await client.get(url, params=params)
+            try:
+                resp = await client.get(url, params=params)
+            except httpx.HTTPError:
+                logger.exception("HTTP error fetching IMDb IDs %s", ",".join(chunk))
+                for imdb_id in chunk:
+                    results[imdb_id] = None
+                break
             if resp.status_code == 429:
                 if attempt == _imdb_max_retries:
                     if _imdb_retry_queue is not None:
@@ -181,13 +192,39 @@ def _persist_imdb_retry_queue(path: Path) -> None:
     path.write_text(json.dumps(ids))
 
 
+async def _upsert_in_batches(
+    client: AsyncQdrantClient,
+    collection_name: str,
+    points: Sequence[models.PointStruct],
+) -> None:
+    """Upsert points into Qdrant in batches, logging HTTP errors."""
+
+    total = len(points)
+    for i in range(0, total, _qdrant_batch_size):
+        batch = points[i : i + _qdrant_batch_size]
+        try:
+            await client.upsert(collection_name=collection_name, points=batch)
+        except Exception:
+            logger.exception(
+                "Failed to upsert batch %d-%d", i, i + len(batch)
+            )
+        else:
+            logger.info(
+                "Upserted %d/%d points", min(i + len(batch), total), total
+            )
+
+
 async def _fetch_tmdb_movie(
     client: httpx.AsyncClient, tmdb_id: str, api_key: str
 ) -> Optional[TMDBMovie]:
     url = (
         f"https://api.themoviedb.org/3/movie/{tmdb_id}?append_to_response=reviews"
     )
-    resp = await client.get(url, headers={"Authorization": f"Bearer {api_key}"})
+    try:
+        resp = await client.get(url, headers={"Authorization": f"Bearer {api_key}"})
+    except httpx.HTTPError:
+        logger.exception("HTTP error fetching TMDb movie %s", tmdb_id)
+        return None
     if resp.is_success:
         return TMDBMovie.model_validate(resp.json())
     return None
@@ -199,7 +236,11 @@ async def _fetch_tmdb_show(
     url = (
         f"https://api.themoviedb.org/3/tv/{tmdb_id}?append_to_response=reviews"
     )
-    resp = await client.get(url, headers={"Authorization": f"Bearer {api_key}"})
+    try:
+        resp = await client.get(url, headers={"Authorization": f"Bearer {api_key}"})
+    except httpx.HTTPError:
+        logger.exception("HTTP error fetching TMDb show %s", tmdb_id)
+        return None
     if resp.is_success:
         return TMDBShow.model_validate(resp.json())
     return None
@@ -217,7 +258,16 @@ async def _fetch_tmdb_episode(
     url = (
         f"https://api.themoviedb.org/3/tv/{show_id}/season/{season_number}/episode/{episode_number}"
     )
-    resp = await client.get(url, headers={"Authorization": f"Bearer {api_key}"})
+    try:
+        resp = await client.get(url, headers={"Authorization": f"Bearer {api_key}"})
+    except httpx.HTTPError:
+        logger.exception(
+            "HTTP error fetching TMDb episode %s S%sE%s",
+            show_id,
+            season_number,
+            episode_number,
+        )
+        return None
     if resp.is_success:
         return TMDBEpisode.model_validate(resp.json())
     return None
@@ -657,11 +707,12 @@ async def run(
 
     if points:
         logger.info(
-            "Upserting %d points into Qdrant collection %s",
+            "Upserting %d points into Qdrant collection %s in batches of %d",
             len(points),
             collection_name,
+            _qdrant_batch_size,
         )
-        await client.upsert(collection_name=collection_name, points=points)
+        await _upsert_in_batches(client, collection_name, points)
     else:
         logger.info("No points to upsert")
 

@@ -13,14 +13,18 @@ from mcp_plex import loader
 class CaptureClient(AsyncQdrantClient):
     instance: "CaptureClient" | None = None
     captured_points: list[models.PointStruct] = []
+    upsert_calls: int = 0
 
     def __init__(self, *args, **kwargs):
         super().__init__(*args, **kwargs)
         CaptureClient.instance = self
 
     async def upsert(self, collection_name: str, points, **kwargs):
-        CaptureClient.captured_points = points
-        return await super().upsert(collection_name=collection_name, points=points, **kwargs)
+        CaptureClient.upsert_calls += 1
+        CaptureClient.captured_points.extend(points)
+        return await super().upsert(
+            collection_name=collection_name, points=points, **kwargs
+        )
 
 
 async def _run_loader(sample_dir: Path) -> None:
@@ -36,6 +40,8 @@ async def _run_loader(sample_dir: Path) -> None:
 
 def test_run_writes_points(monkeypatch):
     monkeypatch.setattr(loader, "AsyncQdrantClient", CaptureClient)
+    CaptureClient.captured_points = []
+    CaptureClient.upsert_calls = 0
     sample_dir = Path(__file__).resolve().parents[1] / "sample-data"
     asyncio.run(_run_loader(sample_dir))
     client = CaptureClient.instance
@@ -56,6 +62,8 @@ def test_run_writes_points(monkeypatch):
 
 def test_run_processes_imdb_queue(monkeypatch, tmp_path):
     monkeypatch.setattr(loader, "AsyncQdrantClient", CaptureClient)
+    CaptureClient.captured_points = []
+    CaptureClient.upsert_calls = 0
     queue_file = tmp_path / "queue.json"
     queue_file.write_text(json.dumps(["tt0111161"]))
     sample_dir = Path(__file__).resolve().parents[1] / "sample-data"
@@ -78,3 +86,14 @@ def test_run_processes_imdb_queue(monkeypatch, tmp_path):
     )
 
     assert json.loads(queue_file.read_text()) == ["tt0111161"]
+
+
+def test_run_upserts_in_batches(monkeypatch):
+    monkeypatch.setattr(loader, "AsyncQdrantClient", CaptureClient)
+    monkeypatch.setattr(loader, "_qdrant_batch_size", 1)
+    CaptureClient.captured_points = []
+    CaptureClient.upsert_calls = 0
+    sample_dir = Path(__file__).resolve().parents[1] / "sample-data"
+    asyncio.run(_run_loader(sample_dir))
+    assert CaptureClient.upsert_calls == 2
+    assert len(CaptureClient.captured_points) == 2
