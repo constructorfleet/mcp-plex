@@ -22,6 +22,7 @@
   accurate episode lookups.
 - Plex metadata is fetched in batches using `fetchItems` to reduce repeated
   network calls when loading library items.
+- IMDb metadata is fetched via `titles:batchGet` to minimize repeated API calls.
 
 ## User Queries
 The project should handle natural-language searches and recommendations such as:
