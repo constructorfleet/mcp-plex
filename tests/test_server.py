@@ -5,6 +5,7 @@ import importlib
 import json
 import sys
 import types
+from contextlib import contextmanager
 from pathlib import Path
 
 import builtins
@@ -14,6 +15,7 @@ from starlette.testclient import TestClient
 from mcp_plex import loader
 
 
+@contextmanager
 def _load_server(monkeypatch):
     from qdrant_client import async_qdrant_client
 
@@ -36,7 +38,11 @@ def _load_server(monkeypatch):
     monkeypatch.setattr(async_qdrant_client, "AsyncQdrantClient", SharedClient)
     sample_dir = Path(__file__).resolve().parents[1] / "sample-data"
     asyncio.run(loader.run(None, None, None, sample_dir, None, None))
-    return importlib.reload(importlib.import_module("mcp_plex.server"))
+    module = importlib.reload(importlib.import_module("mcp_plex.server"))
+    try:
+        yield module
+    finally:
+        asyncio.run(module.server.close())
 
 
 def test_qdrant_env_config(monkeypatch):
@@ -47,6 +53,8 @@ def test_qdrant_env_config(monkeypatch):
     class CaptureClient:
         def __init__(self, *args, **kwargs):
             captured.update(kwargs)
+        async def close(self):
+            pass
 
     monkeypatch.setattr(async_qdrant_client, "AsyncQdrantClient", CaptureClient)
     monkeypatch.setenv("QDRANT_HOST", "example.com")
@@ -62,79 +70,80 @@ def test_qdrant_env_config(monkeypatch):
     assert captured["prefer_grpc"] is True
     assert captured["https"] is True
     assert hasattr(module.server, "qdrant_client")
+    asyncio.run(module.server.close())
 
 
 def test_server_tools(monkeypatch):
-    server = _load_server(monkeypatch)
+    with _load_server(monkeypatch) as server:
+        movie_id = "49915"
+        res = asyncio.run(server.get_media.fn(identifier=movie_id))
+        assert res and res[0]["plex"]["title"] == "The Gentlemen"
 
-    movie_id = "49915"
-    res = asyncio.run(server.get_media.fn(identifier=movie_id))
-    assert res and res[0]["plex"]["title"] == "The Gentlemen"
+        res = asyncio.run(server.get_media.fn(identifier="tt8367814"))
+        assert res and res[0]["plex"]["rating_key"] == movie_id
 
-    res = asyncio.run(server.get_media.fn(identifier="tt8367814"))
-    assert res and res[0]["plex"]["rating_key"] == movie_id
+        poster = asyncio.run(server.media_poster.fn(identifier=movie_id))
+        assert isinstance(poster, str) and "thumb" in poster
+        assert server.server.cache.get_poster(movie_id) == poster
 
-    poster = asyncio.run(server.media_poster.fn(identifier=movie_id))
-    assert isinstance(poster, str) and "thumb" in poster
-    assert server.server.cache.get_poster(movie_id) == poster
+        art = asyncio.run(server.media_background.fn(identifier=movie_id))
+        assert isinstance(art, str) and "art" in art
+        assert server.server.cache.get_background(movie_id) == art
 
-    art = asyncio.run(server.media_background.fn(identifier=movie_id))
-    assert isinstance(art, str) and "art" in art
-    assert server.server.cache.get_background(movie_id) == art
+        item = json.loads(asyncio.run(server.media_item.fn(identifier=movie_id)))
+        assert item["plex"]["rating_key"] == movie_id
+        assert (
+            server.server.cache.get_payload(movie_id)["plex"]["rating_key"]
+            == movie_id
+        )
 
-    item = json.loads(asyncio.run(server.media_item.fn(identifier=movie_id)))
-    assert item["plex"]["rating_key"] == movie_id
-    assert (
-        server.server.cache.get_payload(movie_id)["plex"]["rating_key"] == movie_id
-    )
+        ids = json.loads(asyncio.run(server.media_ids.fn(identifier=movie_id)))
+        assert ids["imdb"] == "tt8367814"
 
-    ids = json.loads(asyncio.run(server.media_ids.fn(identifier=movie_id)))
-    assert ids["imdb"] == "tt8367814"
+        res = asyncio.run(
+            server.search_media.fn(query="Matthew McConaughey crime movie", limit=1)
+        )
+        assert res and res[0]["plex"]["title"] == "The Gentlemen"
 
-    res = asyncio.run(server.search_media.fn(query="Matthew McConaughey crime movie", limit=1))
-    assert res and res[0]["plex"]["title"] == "The Gentlemen"
+        rec = asyncio.run(server.recommend_media.fn(identifier=movie_id, limit=1))
+        assert rec and rec[0]["plex"]["rating_key"] == "61960"
 
-    rec = asyncio.run(server.recommend_media.fn(identifier=movie_id, limit=1))
-    assert rec and rec[0]["plex"]["rating_key"] == "61960"
+        assert asyncio.run(server.recommend_media.fn(identifier="0", limit=1)) == []
 
-    assert asyncio.run(server.recommend_media.fn(identifier="0", limit=1)) == []
-
-    with pytest.raises(ValueError):
-        asyncio.run(server.media_item.fn(identifier="0"))
-    with pytest.raises(ValueError):
-        asyncio.run(server.media_ids.fn(identifier="0"))
-    with pytest.raises(ValueError):
-        asyncio.run(server.media_poster.fn(identifier="0"))
-    with pytest.raises(ValueError):
-        asyncio.run(server.media_background.fn(identifier="0"))
+        with pytest.raises(ValueError):
+            asyncio.run(server.media_item.fn(identifier="0"))
+        with pytest.raises(ValueError):
+            asyncio.run(server.media_ids.fn(identifier="0"))
+        with pytest.raises(ValueError):
+            asyncio.run(server.media_poster.fn(identifier="0"))
+        with pytest.raises(ValueError):
+            asyncio.run(server.media_background.fn(identifier="0"))
 
 
 def test_new_media_tools(monkeypatch):
-    server = _load_server(monkeypatch)
+    with _load_server(monkeypatch) as server:
+        movies = asyncio.run(server.new_movies.fn(limit=1))
+        assert movies and movies[0]["plex"]["type"] == "movie"
+        assert movies[0]["plex"]["added_at"] is not None
 
-    movies = asyncio.run(server.new_movies.fn(limit=1))
-    assert movies and movies[0]["plex"]["type"] == "movie"
-    assert movies[0]["plex"]["added_at"] is not None
-
-    shows = asyncio.run(server.new_shows.fn(limit=1))
-    assert shows and shows[0]["plex"]["type"] == "episode"
-    assert shows[0]["plex"]["added_at"] is not None
+        shows = asyncio.run(server.new_shows.fn(limit=1))
+        assert shows and shows[0]["plex"]["type"] == "episode"
+        assert shows[0]["plex"]["added_at"] is not None
 
 
 def test_actor_movies(monkeypatch):
-    server = _load_server(monkeypatch)
-
-    movies = asyncio.run(
-        server.actor_movies.fn(actor="Matthew McConaughey", limit=1)
-    )
-    assert movies and movies[0]["plex"]["title"] == "The Gentlemen"
-
-    none = asyncio.run(
-        server.actor_movies.fn(
-            actor="Matthew McConaughey", year_from=1990, year_to=1999
+    with _load_server(monkeypatch) as server:
+        movies = asyncio.run(
+            server.actor_movies.fn(actor="Matthew McConaughey", limit=1)
         )
-    )
-    assert none == []
+        assert movies and movies[0]["plex"]["title"] == "The Gentlemen"
+
+        none = asyncio.run(
+            server.actor_movies.fn(
+                actor="Matthew McConaughey", year_from=1990, year_to=1999
+            )
+        )
+        assert none == []
 
 
 def test_reranker_import_failure(monkeypatch):
@@ -149,6 +158,7 @@ def test_reranker_import_failure(monkeypatch):
     monkeypatch.setattr(builtins, "__import__", fake_import)
     module = importlib.reload(importlib.import_module("mcp_plex.server"))
     assert module.server.reranker is None
+    asyncio.run(module.server.close())
 
 
 def test_reranker_init_failure(monkeypatch):
@@ -163,33 +173,34 @@ def test_reranker_init_failure(monkeypatch):
     monkeypatch.setitem(sys.modules, "sentence_transformers", st_module)
     module = importlib.reload(importlib.import_module("mcp_plex.server"))
     assert module.server.reranker is None
+    asyncio.run(module.server.close())
 
 
 def test_rest_endpoints(monkeypatch):
-    module = _load_server(monkeypatch)
-    client = TestClient(module.server.http_app())
+    with _load_server(monkeypatch) as module:
+        client = TestClient(module.server.http_app())
 
-    resp = client.post("/rest/get-media", json={"identifier": "49915"})
-    assert resp.status_code == 200
-    assert resp.json()[0]["plex"]["rating_key"] == "49915"
+        resp = client.post("/rest/get-media", json={"identifier": "49915"})
+        assert resp.status_code == 200
+        assert resp.json()[0]["plex"]["rating_key"] == "49915"
 
-    resp = client.post("/rest/prompt/media-info", json={"identifier": "49915"})
-    assert resp.status_code == 200
-    msg = resp.json()[0]
-    assert msg["role"] == "user"
-    assert "The Gentlemen" in msg["content"]["text"]
+        resp = client.post("/rest/prompt/media-info", json={"identifier": "49915"})
+        assert resp.status_code == 200
+        msg = resp.json()[0]
+        assert msg["role"] == "user"
+        assert "The Gentlemen" in msg["content"]["text"]
 
-    resp = client.get("/rest/resource/media-ids/49915")
-    assert resp.status_code == 200
-    assert resp.json()["rating_key"] == "49915"
+        resp = client.get("/rest/resource/media-ids/49915")
+        assert resp.status_code == 200
+        assert resp.json()["rating_key"] == "49915"
 
-    spec = client.get("/openapi.json").json()
-    get_media = spec["paths"]["/rest/get-media"]["post"]
-    assert get_media["description"].startswith("Retrieve media items")
-    params = {p["name"]: p for p in get_media["parameters"]}
-    assert params["identifier"]["schema"]["description"].startswith("Rating key")
-    assert "/rest/prompt/media-info" in spec["paths"]
-    assert "/rest/resource/media-ids/{identifier}" in spec["paths"]
+        spec = client.get("/openapi.json").json()
+        get_media = spec["paths"]["/rest/get-media"]["post"]
+        assert get_media["description"].startswith("Retrieve media items")
+        params = {p["name"]: p for p in get_media["parameters"]}
+        assert params["identifier"]["schema"]["description"].startswith("Rating key")
+        assert "/rest/prompt/media-info" in spec["paths"]
+        assert "/rest/resource/media-ids/{identifier}" in spec["paths"]
 
-    resp = client.get("/rest")
-    assert resp.status_code == 200
+        resp = client.get("/rest")
+        assert resp.status_code == 200

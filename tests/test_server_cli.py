@@ -1,8 +1,16 @@
 from unittest.mock import patch
 
+import asyncio
+import importlib
 import pytest
 
 from mcp_plex import server
+
+
+@pytest.fixture(scope="module", autouse=True)
+def close_server_module():
+    yield
+    asyncio.run(server.server.close())
 
 
 def test_main_stdio_runs():
@@ -37,19 +45,19 @@ def test_main_model_overrides():
             "--sparse-model",
             "bar",
         ])
-        assert server._DENSE_MODEL_NAME == "foo"
-        assert server._SPARSE_MODEL_NAME == "bar"
+        assert server.settings.dense_model == "foo"
+        assert server.settings.sparse_model == "bar"
         mock_run.assert_called_once_with(transport="stdio")
 
 
 def test_env_model_overrides(monkeypatch):
     monkeypatch.setenv("DENSE_MODEL", "foo")
     monkeypatch.setenv("SPARSE_MODEL", "bar")
-    import importlib
-
+    asyncio.run(server.server.close())
     importlib.reload(server)
-    assert server._DENSE_MODEL_NAME == "foo"
-    assert server._SPARSE_MODEL_NAME == "bar"
+    assert server.settings.dense_model == "foo"
+    assert server.settings.sparse_model == "bar"
 
     # reload to reset globals
+    asyncio.run(server.server.close())
     importlib.reload(server)
