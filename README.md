@@ -49,6 +49,11 @@ Expose the server over SSE on port 8000:
 uv run mcp-server --transport sse --bind 0.0.0.0 --port 8000 --mount /mcp
 ```
 
+The runtime also reads `MCP_TRANSPORT`, `MCP_HOST`, `MCP_PORT`, and `MCP_MOUNT`
+environment variables. When set, those values override any conflicting CLI
+flags so Docker Compose or other orchestrators can control the exposed MCP
+endpoint without editing the container command.
+
 ### Embedding Models
 
 Both the loader and server default to `BAAI/bge-small-en-v1.5` for dense
@@ -71,6 +76,27 @@ docker run --rm --gpus all mcp-plex --sample-dir /data
 ```
 Use `--continuous` and `--delay` flags with `docker run` to keep the loader
 running in a loop.
+
+### Dependency Layer Workflow
+
+Docker builds now install dependencies using `docker/pyproject.deps.toml`, a
+manifest that mirrors the application's runtime requirements without the
+`[project]` version field. The `Dockerfile` copies that manifest and `uv.lock`
+first, runs `uv sync --no-dev --frozen --manifest-path pyproject.deps.toml`,
+and only then copies the rest of the source tree. This keeps the heavy
+dependency layer cached even when the application version changes.
+
+When cutting a release:
+
+1. Update dependencies as needed and refresh `uv.lock` with `uv lock`.
+2. Build the image twice to confirm the dependency layer cache hit:
+   ```bash
+   docker build -t mcp-plex:release-test-1 .
+   docker build -t mcp-plex:release-test-2 .
+   ```
+   The second build should reuse the `uv sync` layer as long as
+   `docker/pyproject.deps.toml` and `uv.lock` are unchanged.
+3. Tag and push the final release image once satisfied with the cache behavior.
 
 ## Docker Compose
 The included `docker-compose.yml` launches both Qdrant and the MCP server.

@@ -5,6 +5,7 @@ import argparse
 import asyncio
 import inspect
 import json
+import os
 from contextlib import asynccontextmanager
 from typing import Annotated, Any, Callable
 
@@ -645,22 +646,48 @@ def main(argv: list[str] | None = None) -> None:
     )
     args = parser.parse_args(argv)
 
-    if args.transport != "stdio":
-        if not args.bind or not args.port:
-            parser.error("--bind and --port are required when transport is not stdio")
-    if args.transport == "stdio" and args.mount:
-        parser.error("--mount is not allowed when transport is stdio")
+    env_transport = os.getenv("MCP_TRANSPORT")
+    env_host = os.getenv("MCP_HOST") or os.getenv("MCP_BIND")
+    env_port = os.getenv("MCP_PORT")
+    env_mount = os.getenv("MCP_MOUNT")
+
+    transport = env_transport or args.transport
+    valid_transports = {"stdio", "sse", "streamable-http"}
+    if transport not in valid_transports:
+        parser.error(
+            "MCP_TRANSPORT must be one of stdio, sse, or streamable-http"
+        )
+
+    host = env_host or args.bind
+    port: int | None
+    if env_port is not None:
+        try:
+            port = int(env_port)
+        except ValueError:
+            parser.error("MCP_PORT must be an integer")
+    else:
+        port = args.port
+
+    mount = env_mount or args.mount
+
+    if transport != "stdio":
+        if not host or port is None:
+            parser.error(
+                "--bind/--port or MCP_HOST/MCP_PORT are required when transport is not stdio"
+            )
+    if transport == "stdio" and mount:
+        parser.error("--mount or MCP_MOUNT is not allowed when transport is stdio")
 
     run_kwargs: dict[str, Any] = {}
-    if args.transport != "stdio":
-        run_kwargs.update({"host": args.bind, "port": args.port})
-        if args.mount:
-            run_kwargs["path"] = args.mount
+    if transport != "stdio":
+        run_kwargs.update({"host": host, "port": port})
+        if mount:
+            run_kwargs["path"] = mount
 
     server.settings.dense_model = args.dense_model
     server.settings.sparse_model = args.sparse_model
 
-    server.run(transport=args.transport, **run_kwargs)
+    server.run(transport=transport, **run_kwargs)
 
 
 if __name__ == "__main__":
