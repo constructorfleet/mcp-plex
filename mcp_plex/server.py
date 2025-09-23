@@ -647,7 +647,7 @@ def main(argv: list[str] | None = None) -> None:
     args = parser.parse_args(argv)
 
     env_transport = os.getenv("MCP_TRANSPORT")
-    env_host = os.getenv("MCP_HOST") or os.getenv("MCP_BIND")
+    env_host = os.getenv("MCP_HOST") if os.getenv("MCP_HOST") is not None else os.getenv("MCP_BIND")
     env_port = os.getenv("MCP_PORT")
     env_mount = os.getenv("MCP_MOUNT")
 
@@ -671,7 +671,7 @@ def main(argv: list[str] | None = None) -> None:
     mount = env_mount or args.mount
 
     if transport != "stdio":
-        if not host or port is None:
+        if host is None or port is None:
             parser.error(
                 "--bind/--port or MCP_HOST/MCP_PORT are required when transport is not stdio"
             )
