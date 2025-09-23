@@ -61,3 +61,45 @@ def test_env_model_overrides(monkeypatch):
     # reload to reset globals
     asyncio.run(server.server.close())
     importlib.reload(server)
+
+
+def test_env_overrides_cli_arguments(monkeypatch):
+    monkeypatch.setenv("MCP_TRANSPORT", "sse")
+    monkeypatch.setenv("MCP_HOST", "1.2.3.4")
+    monkeypatch.setenv("MCP_PORT", "1234")
+    monkeypatch.setenv("MCP_MOUNT", "/env")
+    with patch.object(server.server, "run") as mock_run:
+        server.main(
+            [
+                "--transport",
+                "stdio",
+                "--bind",
+                "0.0.0.0",
+                "--port",
+                "9999",
+                "--mount",
+                "/cli",
+            ]
+        )
+        mock_run.assert_called_once_with(
+            transport="sse", host="1.2.3.4", port=1234, path="/env"
+        )
+
+
+def test_env_only_http_configuration(monkeypatch):
+    monkeypatch.setenv("MCP_TRANSPORT", "sse")
+    monkeypatch.setenv("MCP_HOST", "0.0.0.0")
+    monkeypatch.setenv("MCP_PORT", "8000")
+    with patch.object(server.server, "run") as mock_run:
+        server.main([])
+        mock_run.assert_called_once_with(
+            transport="sse", host="0.0.0.0", port=8000
+        )
+
+
+def test_env_invalid_port(monkeypatch):
+    monkeypatch.setenv("MCP_TRANSPORT", "sse")
+    monkeypatch.setenv("MCP_HOST", "0.0.0.0")
+    monkeypatch.setenv("MCP_PORT", "not-a-port")
+    with pytest.raises(SystemExit):
+        server.main([])

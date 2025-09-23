@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "mcp-plex"
-version = "0.26.26"
+version = "0.26.27"
 
 description = "Plex-Oriented Model Context Protocol Server"
 requires-python = ">=3.11,<3.13"
@@ -29,6 +29,9 @@ dev = [
 [project.scripts]
 load-data = "mcp_plex.loader:main"
 mcp-server = "mcp_plex.server:main"
+
+[tool.setuptools.packages.find]
+include = ["mcp_plex*"]
 
 [[tool.uv.index]]
 url = "https://aiinfra.pkgs.visualstudio.com/PublicPackages/_packaging/onnxruntime-cuda-12/pypi/simple/"

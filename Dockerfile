@@ -8,8 +8,9 @@ RUN curl -LsSf https://astral.sh/uv/install.sh | sh
 ENV PATH="/root/.local/bin:$PATH"
 
 WORKDIR /app
-COPY pyproject.toml uv.lock ./
-RUN uv sync --no-dev
+COPY docker/pyproject.deps.toml uv.lock ./
+RUN uv sync --no-dev --frozen --manifest-path pyproject.deps.toml
+
 COPY . .
 ENTRYPOINT ["./entrypoint.sh"]
 CMD ["load-data"]
