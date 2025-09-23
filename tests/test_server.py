@@ -204,3 +204,12 @@ def test_rest_endpoints(monkeypatch):
 
         resp = client.get("/rest")
         assert resp.status_code == 200
+
+
+def test_server_lifespan_context(monkeypatch):
+    with _load_server(monkeypatch) as module:
+        async def _lifespan() -> None:
+            async with module.server._mcp_server.lifespan(module.server):
+                pass
+
+        asyncio.run(_lifespan())
