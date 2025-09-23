@@ -66,11 +66,13 @@ class _IMDbRetryQueue(asyncio.Queue[str]):
         self._items.append(item)
 
     def get_nowait(self) -> str:  # type: ignore[override]
-        item = super().get_nowait()
+        if not self._items:
+            raise RuntimeError("Desynchronization: self._items is empty but asyncio.Queue is not.")
         try:
-            self._items.popleft()
-        except IndexError:
-            raise RuntimeError("Desynchronization: asyncio.Queue has items but self._items is empty.")
+            item = super().get_nowait()
+        except asyncio.QueueEmpty:
+            raise RuntimeError("Desynchronization: asyncio.Queue is empty but self._items is not.")
+        self._items.popleft()
         return item
 
     def snapshot(self) -> list[str]:
