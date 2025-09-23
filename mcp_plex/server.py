@@ -5,6 +5,7 @@ import argparse
 import asyncio
 import inspect
 import json
+from contextlib import asynccontextmanager
 from typing import Annotated, Any, Callable
 
 from fastapi import FastAPI
@@ -55,9 +56,12 @@ class PlexServer(FastMCP):
             https=self.settings.qdrant_https,
         )
 
+        @asynccontextmanager
         async def _lifespan(app: FastMCP):  # noqa: ARG001
-            yield
-            await self.close()
+            try:
+                yield
+            finally:
+                await self.close()
 
         super().__init__(lifespan=_lifespan)
         self._reranker: CrossEncoder | None = None
