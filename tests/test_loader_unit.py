@@ -370,6 +370,9 @@ def test_imdb_retry_queue_persists_and_retries(tmp_path, monkeypatch):
 
     async def second_run():
         _load_imdb_retry_queue(queue_path)
+        assert loader._imdb_retry_queue is not None
+        assert loader._imdb_retry_queue.qsize() == 1
+        assert loader._imdb_retry_queue.snapshot() == ["tt0111161"]
         async with httpx.AsyncClient(transport=httpx.MockTransport(second_transport)) as client:
             await _process_imdb_retry_queue(client)
         _persist_imdb_retry_queue(queue_path)
@@ -388,8 +391,7 @@ def test_load_imdb_retry_queue_invalid_json(tmp_path):
 
 
 def test_process_imdb_retry_queue_requeues(monkeypatch):
-    queue: asyncio.Queue[str] = asyncio.Queue()
-    queue.put_nowait("tt0111161")
+    queue = loader._IMDbRetryQueue(["tt0111161"])
     monkeypatch.setattr(loader, "_imdb_retry_queue", queue)
 
     async def fake_fetch(client, imdb_id):
@@ -403,6 +405,7 @@ def test_process_imdb_retry_queue_requeues(monkeypatch):
 
     asyncio.run(run_test())
     assert queue.qsize() == 1
+    assert queue.snapshot() == ["tt0111161"]
 
 
 def test_resolve_tmdb_season_number_matches_name():
