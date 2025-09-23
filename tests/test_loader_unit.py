@@ -7,6 +7,7 @@ from pathlib import Path
 
 import httpx
 from qdrant_client import models
+import pytest
 
 from mcp_plex import loader
 from mcp_plex.imdb_cache import IMDbCache
@@ -22,6 +23,7 @@ from mcp_plex.loader import (
     _load_imdb_retry_queue,
     _persist_imdb_retry_queue,
     _process_imdb_retry_queue,
+    _resolve_dense_model_params,
     resolve_tmdb_season_number,
 )
 from mcp_plex.types import TMDBSeason, TMDBShow
@@ -482,3 +484,14 @@ def test_upsert_in_batches_handles_errors(monkeypatch):
     monkeypatch.setattr(loader, "_qdrant_batch_size", 1)
     asyncio.run(loader._upsert_in_batches(client, "c", points))
     assert client.calls == 3
+
+
+def test_resolve_dense_model_params_known_model():
+    size, distance = _resolve_dense_model_params("BAAI/bge-small-en-v1.5")
+    assert size == 384
+    assert distance is models.Distance.COSINE
+
+
+def test_resolve_dense_model_params_unknown_model():
+    with pytest.raises(ValueError, match="Unknown dense embedding model"):
+        _resolve_dense_model_params("not-a-real/model")

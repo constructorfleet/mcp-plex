@@ -47,6 +47,17 @@ _imdb_retry_queue: asyncio.Queue[str] | None = None
 _imdb_batch_limit: int = 5
 _qdrant_batch_size: int = 1000
 
+# Known Qdrant-managed dense embedding models with their dimensionality and
+# similarity metric. To support a new server-side embedding model, add an entry
+# here with the appropriate vector size and `models.Distance` value.
+_DENSE_MODEL_PARAMS: dict[str, tuple[int, models.Distance]] = {
+    "BAAI/bge-small-en-v1.5": (384, models.Distance.COSINE),
+    "BAAI/bge-base-en-v1.5": (768, models.Distance.COSINE),
+    "BAAI/bge-large-en-v1.5": (1024, models.Distance.COSINE),
+    "text-embedding-3-small": (1536, models.Distance.COSINE),
+    "text-embedding-3-large": (3072, models.Distance.COSINE),
+}
+
 
 async def _gather_in_batches(
     tasks: Sequence[Awaitable[T]], batch_size: int
@@ -60,6 +71,18 @@ async def _gather_in_batches(
         results.extend(await asyncio.gather(*batch))
         logger.info("Processed %d/%d items", min(i + batch_size, total), total)
     return results
+
+
+def _resolve_dense_model_params(model_name: str) -> tuple[int, models.Distance]:
+    """Look up Qdrant vector parameters for a known dense embedding model."""
+
+    try:
+        return _DENSE_MODEL_PARAMS[model_name]
+    except KeyError as exc:
+        raise ValueError(
+            "Unknown dense embedding model"
+            f" '{model_name}'. Update _DENSE_MODEL_PARAMS with the model's size and distance."
+        ) from exc
 
 
 async def _fetch_imdb(client: httpx.AsyncClient, imdb_id: str) -> Optional[IMDbTitle]:
@@ -636,6 +659,7 @@ async def run(
             )
         )
 
+    dense_size, dense_distance = _resolve_dense_model_params(dense_model_name)
     if qdrant_url is None and qdrant_host is None:
         qdrant_url = ":memory:"
     client = AsyncQdrantClient(
@@ -647,7 +671,6 @@ async def run(
         https=qdrant_https,
         prefer_grpc=qdrant_prefer_grpc,
     )
-    dense_size, dense_distance = client._get_model_params(dense_model_name)
     collection_name = "media-items"
     created_collection = False
     if not await client.collection_exists(collection_name):
