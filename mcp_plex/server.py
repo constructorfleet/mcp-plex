@@ -655,7 +655,7 @@ def main(argv: list[str] | None = None) -> None:
     valid_transports = {"stdio", "sse", "streamable-http"}
     if transport not in valid_transports:
         parser.error(
-            "MCP_TRANSPORT must be one of stdio, sse, or streamable-http"
+            "transport must be one of stdio, sse, or streamable-http (via --transport or MCP_TRANSPORT)"
         )
 
     host = env_host or args.bind
