@@ -6,6 +6,7 @@ from pathlib import Path
 
 from qdrant_client.async_qdrant_client import AsyncQdrantClient
 from qdrant_client import models
+import pytest
 
 from mcp_plex import loader
 
@@ -97,3 +98,20 @@ def test_run_upserts_in_batches(monkeypatch):
     asyncio.run(_run_loader(sample_dir))
     assert CaptureClient.upsert_calls == 2
     assert len(CaptureClient.captured_points) == 2
+
+
+def test_run_raises_for_unknown_dense_model():
+    sample_dir = Path(__file__).resolve().parents[1] / "sample-data"
+
+    with pytest.raises(ValueError, match="Unknown dense embedding model"):
+        asyncio.run(
+            loader.run(
+                None,
+                None,
+                None,
+                sample_dir,
+                None,
+                None,
+                dense_model_name="not-a-real/model",
+            )
+        )
