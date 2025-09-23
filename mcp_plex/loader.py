@@ -80,8 +80,7 @@ def _resolve_dense_model_params(model_name: str) -> tuple[int, models.Distance]:
         return _DENSE_MODEL_PARAMS[model_name]
     except KeyError as exc:
         raise ValueError(
-            "Unknown dense embedding model"
-            f" '{model_name}'. Update _DENSE_MODEL_PARAMS with the model's size and distance."
+            f"Unknown dense embedding model '{model_name}'. Update _DENSE_MODEL_PARAMS with the model's size and distance."
         ) from exc
 
 
