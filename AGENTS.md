@@ -42,7 +42,8 @@ The project should handle natural-language searches and recommendations such as:
 - "Suggest a movie from the 90's with Glenn Close"
 
 ## Dependency Management
-- Use [uv](https://github.com/astral-sh/uv) for all Python dependency management and command execution.
+- Use [uv](https://github.com/astral-sh/uv) for all Python dependency management and command execution; do not fall back to `pip`, `poetry`, or other tools.
+- When inspecting installed packages, look inside the active uv-managed virtual environment (e.g., `.venv/`) rather than the system Python directories.
 - Install project and development dependencies with:
   ```bash
   uv sync --extra dev
