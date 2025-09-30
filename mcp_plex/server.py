@@ -14,7 +14,7 @@ from fastapi.openapi.utils import get_openapi
 from fastmcp.prompts import Message
 from fastmcp.server import FastMCP
 from fastmcp.server.context import Context as FastMCPContext
-from pydantic import Field
+from pydantic import BaseModel, Field, create_model
 from qdrant_client import models
 from qdrant_client.async_qdrant_client import AsyncQdrantClient
 from starlette.requests import Request
@@ -97,6 +97,36 @@ class PlexServer(FastMCP):
 
 
 server = PlexServer(settings=settings)
+
+
+def _request_model(name: str, fn: Callable[..., Any]) -> type[BaseModel] | None:
+    """Generate a Pydantic model representing the callable's parameters."""
+
+    signature = inspect.signature(fn)
+    if not signature.parameters:
+        return None
+
+    fields: dict[str, tuple[Any, Any]] = {}
+    for param_name, parameter in signature.parameters.items():
+        annotation = (
+            parameter.annotation
+            if parameter.annotation is not inspect._empty
+            else Any
+        )
+        default = (
+            parameter.default
+            if parameter.default is not inspect._empty
+            else ...
+        )
+        fields[param_name] = (annotation, default)
+
+    if not fields:
+        return None
+
+    model_name = "".join(part.capitalize() for part in name.replace("-", "_").split("_"))
+    model_name = f"{model_name or 'Request'}Request"
+    request_model = create_model(model_name, **fields)  # type: ignore[arg-type]
+    return request_model
 
 
 async def _find_records(identifier: str, limit: int = 5) -> list[models.Record]:
@@ -522,15 +552,50 @@ async def rest_docs(request: Request) -> Response:
 def _build_openapi_schema() -> dict[str, Any]:
     app = FastAPI()
     for name, tool in server._tool_manager._tools.items():
-        app.post(f"/rest/{name}")(tool.fn)
+        request_model = _request_model(name, tool.fn)
+
+        if request_model is None:
+            app.post(f"/rest/{name}")(tool.fn)
+            continue
+
+        async def _tool_stub(payload: request_model) -> None:  # type: ignore[name-defined]
+            pass
+
+        _tool_stub.__name__ = f"tool_{name.replace('-', '_')}"
+        _tool_stub.__doc__ = tool.fn.__doc__
+        _tool_stub.__signature__ = inspect.Signature(
+            parameters=[
+                inspect.Parameter(
+                    "payload",
+                    inspect.Parameter.POSITIONAL_OR_KEYWORD,
+                    annotation=request_model,
+                )
+            ],
+            return_annotation=Any,
+        )
+
+        app.post(f"/rest/{name}")(_tool_stub)
     for name, prompt in server._prompt_manager._prompts.items():
         async def _p_stub(**kwargs):  # noqa: ARG001
             pass
         _p_stub.__name__ = f"prompt_{name.replace('-', '_')}"
         _p_stub.__doc__ = prompt.fn.__doc__
-        _p_stub.__signature__ = inspect.signature(prompt.fn).replace(
-            return_annotation=Any
-        )
+        request_model = _request_model(name, prompt.fn)
+        if request_model is None:
+            _p_stub.__signature__ = inspect.signature(prompt.fn).replace(
+                return_annotation=Any
+            )
+        else:
+            _p_stub.__signature__ = inspect.Signature(
+                parameters=[
+                    inspect.Parameter(
+                        "payload",
+                        inspect.Parameter.POSITIONAL_OR_KEYWORD,
+                        annotation=request_model,
+                    )
+                ],
+                return_annotation=Any,
+            )
         app.post(f"/rest/prompt/{name}")(_p_stub)
     for uri, resource in server._resource_manager._templates.items():
         path = uri.replace("resource://", "")

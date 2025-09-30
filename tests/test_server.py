@@ -195,10 +195,32 @@ def test_rest_endpoints(monkeypatch):
         assert resp.json()["rating_key"] == "49915"
 
         spec = client.get("/openapi.json").json()
+        def _resolve(schema: dict):
+            if "$ref" in schema:
+                ref = schema["$ref"].split("/")[-1]
+                return spec["components"]["schemas"][ref]
+            return schema
+
         get_media = spec["paths"]["/rest/get-media"]["post"]
         assert get_media["description"].startswith("Retrieve media items")
-        params = {p["name"]: p for p in get_media["parameters"]}
-        assert params["identifier"]["schema"]["description"].startswith("Rating key")
+        assert "parameters" not in get_media or not get_media["parameters"]
+        get_media_schema = get_media["requestBody"]["content"]["application/json"][
+            "schema"
+        ]
+        get_media_schema = _resolve(get_media_schema)
+        assert (
+            get_media_schema["properties"]["identifier"]["description"].startswith(
+                "Rating key"
+            )
+        )
+
+        search_media = spec["paths"]["/rest/search-media"]["post"]
+        assert "parameters" not in search_media or not search_media["parameters"]
+        search_schema = search_media["requestBody"]["content"][
+            "application/json"
+        ]["schema"]
+        search_schema = _resolve(search_schema)
+        assert "query" in search_schema["required"]
         assert "/rest/prompt/media-info" in spec["paths"]
         assert "/rest/resource/media-ids/{identifier}" in spec["paths"]
 
