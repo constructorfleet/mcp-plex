@@ -80,11 +80,13 @@ running in a loop.
 ### Dependency Layer Workflow
 
 Docker builds now install dependencies using `docker/pyproject.deps.toml`, a
-manifest that mirrors the application's runtime requirements without the
-`[project]` version field. The `Dockerfile` copies that manifest and `uv.lock`
-first, runs `uv sync --no-dev --frozen --manifest-path pyproject.deps.toml`,
-and only then copies the rest of the source tree. This keeps the heavy
-dependency layer cached even when the application version changes.
+manifest that mirrors the application's runtime requirements. Keep the
+`[project]` metadata—including the `version`—identical to the root
+`pyproject.toml` so `uv sync` can reuse the shared `uv.lock` without
+validation errors. The `Dockerfile` copies that manifest and `uv.lock` first,
+runs `uv sync --no-dev --frozen --manifest-path pyproject.deps.toml`, and only
+then copies the rest of the source tree. This keeps the heavy dependency layer
+cached even when the application version changes.
 
 When cutting a release:
 

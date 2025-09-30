@@ -51,6 +51,8 @@ The project should handle natural-language searches and recommendations such as:
 
 ## Versioning
 - Always bump the version in `pyproject.toml` for any change.
+- Mirror the version change in `docker/pyproject.deps.toml` so the Docker
+  dependency manifest stays consistent with the root project file.
 - Update `uv.lock` after version or dependency changes by running `uv lock`.
 
 ## Checks
