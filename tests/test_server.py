@@ -208,8 +208,17 @@ def test_rest_endpoints(monkeypatch):
 
 def test_server_lifespan_context(monkeypatch):
     with _load_server(monkeypatch) as module:
+        closed = False
+
+        async def fake_close() -> None:
+            nonlocal closed
+            closed = True
+
+        monkeypatch.setattr(module.server, "close", fake_close)
+
         async def _lifespan() -> None:
             async with module.server._mcp_server.lifespan(module.server):
                 pass
 
         asyncio.run(_lifespan())
+        assert closed is True
