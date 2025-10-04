@@ -882,28 +882,33 @@ async def run(
         item_iter = _iter_from_plex(server, tmdb_api_key)
 
     points_buffer: List[models.PointStruct] = []
-    upsert_tasks: list[asyncio.Task[None]] = []
+    upsert_tasks: set[asyncio.Task[None]] = set()
     max_concurrent_upserts = _require_positive(
         _qdrant_max_concurrent_upserts, name="max_concurrent_upserts"
     )
-    upsert_semaphore = asyncio.Semaphore(max_concurrent_upserts)
 
-    async def _run_upsert(batch: List[models.PointStruct]) -> None:
-        async with upsert_semaphore:
-            await _upsert_in_batches(
-                client,
-                collection_name,
-                batch,
-            )
-
-    def _schedule_upsert(batch: List[models.PointStruct]) -> None:
+    async def _schedule_upsert(batch: List[models.PointStruct]) -> None:
         logger.info(
             "Upserting %d points into Qdrant collection %s in batches of %d",
             len(batch),
             collection_name,
             _qdrant_batch_size,
         )
-        upsert_tasks.append(asyncio.create_task(_run_upsert(batch)))
+        task = asyncio.create_task(
+            _upsert_in_batches(
+                client,
+                collection_name,
+                batch,
+            )
+        )
+        upsert_tasks.add(task)
+        if len(upsert_tasks) >= max_concurrent_upserts:
+            done, _ = await asyncio.wait(
+                upsert_tasks, return_when=asyncio.FIRST_COMPLETED
+            )
+            for finished in done:
+                upsert_tasks.discard(finished)
+                finished.result()
 
     async for item in item_iter:
         items.append(item)
@@ -1014,14 +1019,14 @@ async def run(
         if len(points_buffer) >= upsert_buffer_size:
             batch = list(points_buffer)
             points_buffer.clear()
-            _schedule_upsert(batch)
+            await _schedule_upsert(batch)
 
     logger.info("Loaded %d items", len(items))
 
     if points_buffer:
         batch = list(points_buffer)
         points_buffer.clear()
-        _schedule_upsert(batch)
+        await _schedule_upsert(batch)
 
     if upsert_tasks:
         await asyncio.gather(*upsert_tasks)
