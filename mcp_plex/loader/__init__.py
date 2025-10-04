@@ -915,6 +915,7 @@ async def run(
         _qdrant_max_concurrent_upserts, name="max_concurrent_upserts"
     )
     upsert_queue: asyncio.Queue[List[models.PointStruct] | None] = asyncio.Queue()
+    upsert_capacity = asyncio.Semaphore(max_concurrent_upserts)
     batches_enqueued = 0
     worker_error: Exception | None = None
     worker_error_tb: TracebackType | None = None
@@ -948,6 +949,8 @@ async def run(
                 logger.exception("Unexpected error upserting batch")
             finally:
                 upsert_queue.task_done()
+                if batch is not None:
+                    upsert_capacity.release()
 
     upsert_workers = [
         asyncio.create_task(_upsert_worker()) for _ in range(max_concurrent_upserts)
@@ -1063,7 +1066,12 @@ async def run(
             batch = list(points_buffer)
             points_buffer.clear()
             batches_enqueued += 1
-            await upsert_queue.put(batch)
+            await upsert_capacity.acquire()
+            try:
+                await upsert_queue.put(batch)
+            except BaseException:
+                upsert_capacity.release()
+                raise
 
     logger.info("Loaded %d items", len(items))
 
@@ -1071,7 +1079,12 @@ async def run(
         batch = list(points_buffer)
         points_buffer.clear()
         batches_enqueued += 1
-        await upsert_queue.put(batch)
+        await upsert_capacity.acquire()
+        try:
+            await upsert_queue.put(batch)
+        except BaseException:
+            upsert_capacity.release()
+            raise
 
     try:
         await upsert_queue.join()
