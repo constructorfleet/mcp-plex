@@ -26,7 +26,7 @@ from starlette.responses import JSONResponse, PlainTextResponse, Response
 
 from rapidfuzz import fuzz, process
 
-from .cache import MediaCache
+from ..common.cache import MediaCache
 from .config import Settings
 
 try:

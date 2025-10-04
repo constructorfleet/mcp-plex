@@ -1,38 +1,9 @@
 # AGENTS
 
 ## Architecture
-- `mcp_plex/loader.py` ingests Plex, TMDb, and IMDb metadata, relies on Qdrant to generate dense and sparse embeddings, and stores items in a Qdrant collection.
-- `mcp_plex/server.py` exposes retrieval and search tools via FastMCP backed by Qdrant.
-- `mcp_plex/types.py` defines the Pydantic models used across the project.
-- When making architectural design decisions, add a short note here describing the decision and its rationale.
-- Embedding generation was moved from local FastEmbed models to Qdrant's document API to reduce local dependencies and centralize vector creation.
-- Actor names are stored as a top-level payload field and indexed in Qdrant to enable actor and year-based filtering.
-- Dense and sparse embedding model names are configurable via `DENSE_MODEL` and
-  `SPARSE_MODEL` environment variables or the corresponding CLI options.
-- Hybrid search uses Qdrant's built-in `FusionQuery` with reciprocal rank fusion
-  to combine dense and sparse results before optional cross-encoder reranking.
-- Qdrant client initialization moved into `PlexServer` to centralize state and
-  simplify testing.
-- Cross-encoder reranker is initialized lazily via a `PlexServer` property to
-  avoid unnecessary model downloads when reranking is disabled or unavailable.
-- Media payload and artwork caching centralized in `MediaCache` attached to
-  `PlexServer` to streamline cache management and testing.
-- Plex episodes with year-based seasons are mapped to the correct TMDb season
-  numbers via a helper that matches season names or air-date years to ensure
-  accurate episode lookups.
-- Plex metadata is fetched in batches using `fetchItems` to reduce repeated
-  network calls when loading library items.
-- IMDb metadata is fetched via `titles:batchGet` to minimize repeated API calls.
-- The `titles:batchGet` endpoint accepts at most five IDs, so IMDb lookups are
-  split into batches of five.
-- Qdrant upserts are batched and network errors are logged so large loads can
-  proceed even when individual batches fail.
-- Qdrant model metadata is tracked locally in a supported mapping so the loader
-  no longer depends on the private `_get_model_params` helper removed in newer
-  clients.
-- Qdrant collection setup now happens before media ingestion and loader
-  streaming schedules asynchronous upsert tasks once the configurable buffer is
-  filled so fetching can continue while points are written.
+- The project is organized into dedicated `loader`, `server`, and `common` packages under `mcp_plex/`.
+- Package-specific architectural notes live alongside the code in `mcp_plex/loader/AGENTS.md`, `mcp_plex/server/AGENTS.md`, and `mcp_plex/common/AGENTS.md`.
+- Update this file when repo-wide conventions or folder-level guidelines change.
 
 ## User Queries
 The project should handle natural-language searches and recommendations such as:
@@ -54,8 +25,7 @@ The project should handle natural-language searches and recommendations such as:
 
 ## Versioning
 - Always bump the version in `pyproject.toml` for any change.
-- Mirror the version change in `docker/pyproject.deps.toml` so the Docker
-  dependency manifest stays consistent with the root project file.
+- Mirror the version change in `docker/pyproject.deps.toml` so the Docker dependency manifest stays consistent with the root project file.
 - Update `uv.lock` after version or dependency changes by running `uv lock`.
 
 ## Checks
