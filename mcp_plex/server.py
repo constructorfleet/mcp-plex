@@ -651,14 +651,17 @@ async def recommend_media(
         record = records[0]
     if record is None:
         return []
-    recs = await server.qdrant_client.recommend(
+    rec_query = models.RecommendQuery(
+        recommend=models.RecommendInput(positive=[record.id])
+    )
+    response = await server.qdrant_client.query_points(
         collection_name="media-items",
-        positive=[record.id],
+        query=rec_query,
         limit=limit,
         with_payload=True,
         using="dense",
     )
-    return [_flatten_payload(r.payload) for r in recs]
+    return [_flatten_payload(r.payload) for r in response.points]
 
 
 @server.tool("new-movies")

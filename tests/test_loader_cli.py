@@ -140,6 +140,11 @@ def test_cli_model_env(monkeypatch):
 
 def test_loader_script_entrypoint(monkeypatch):
     monkeypatch.setattr(sys, "argv", ["loader", "--help"])
-    with pytest.raises(SystemExit) as exc:
-        runpy.run_module("mcp_plex.loader", run_name="__main__")
+    module = sys.modules.pop("mcp_plex.loader", None)
+    try:
+        with pytest.raises(SystemExit) as exc:
+            runpy.run_module("mcp_plex.loader", run_name="__main__")
+    finally:
+        if module is not None:
+            sys.modules["mcp_plex.loader"] = module
     assert exc.value.code == 0

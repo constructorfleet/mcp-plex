@@ -2,9 +2,11 @@
 from __future__ import annotations
 
 import asyncio
+import inspect
 import json
 import logging
 import sys
+import warnings
 from collections import deque
 from pathlib import Path
 from typing import AsyncIterator, Awaitable, Iterable, List, Optional, Sequence, TypeVar
@@ -39,6 +41,12 @@ except Exception:
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
 
+warnings.filterwarnings(
+    "ignore",
+    message=".*'mcp_plex\\.loader' found in sys.modules after import of package 'mcp_plex'.*",
+    category=RuntimeWarning,
+)
+
 T = TypeVar("T")
 
 _imdb_cache: IMDbCache | None = None
@@ -57,6 +65,15 @@ def _require_positive(value: int, *, name: str) -> int:
     if value <= 0:
         raise ValueError(f"{name} must be positive")
     return value
+
+
+def _is_local_qdrant(client: AsyncQdrantClient) -> bool:
+    """Return ``True`` if *client* targets an in-process Qdrant instance."""
+
+    inner = getattr(client, "_client", None)
+    return bool(inner) and inner.__class__.__module__.startswith(
+        "qdrant_client.local"
+    )
 
 
 class _IMDbRetryQueue(asyncio.Queue[str]):
@@ -102,11 +119,21 @@ _DENSE_MODEL_PARAMS: dict[str, tuple[int, models.Distance]] = {
 }
 
 
+def _close_coroutines(tasks: Sequence[Awaitable[object]]) -> None:
+    """Close coroutine objects to avoid unawaited warnings."""
+
+    for task in tasks:
+        if inspect.iscoroutine(task):
+            task.close()
+
+
 async def _iter_gather_in_batches(
     tasks: Sequence[Awaitable[T]], batch_size: int
 ) -> AsyncIterator[T]:
     """Yield results from awaitable tasks in fixed-size batches."""
 
+    if batch_size <= 0:
+        _close_coroutines(tasks)
     _require_positive(batch_size, name="batch_size")
 
     total = len(tasks)
@@ -314,112 +341,57 @@ async def _ensure_collection(
     if not created_collection:
         return
 
+    suppress_payload_warning = _is_local_qdrant(client)
+
+    async def _create_index(
+        field_name: str,
+        field_schema: models.PayloadSchemaType | models.TextIndexParams,
+    ) -> None:
+        if suppress_payload_warning:
+            with warnings.catch_warnings():
+                warnings.filterwarnings(
+                    "ignore",
+                    message="Payload indexes have no effect in the local Qdrant.*",
+                    category=UserWarning,
+                )
+                await client.create_payload_index(
+                    collection_name=collection_name,
+                    field_name=field_name,
+                    field_schema=field_schema,
+                )
+        else:
+            await client.create_payload_index(
+                collection_name=collection_name,
+                field_name=field_name,
+                field_schema=field_schema,
+            )
+
     text_index = models.TextIndexParams(
         type=models.PayloadSchemaType.TEXT,
         tokenizer=models.TokenizerType.WORD,
         min_token_len=2,
         lowercase=True,
     )
-    await client.create_payload_index(
-        collection_name=collection_name,
-        field_name="title",
-        field_schema=text_index,
-    )
-    await client.create_payload_index(
-        collection_name=collection_name,
-        field_name="type",
-        field_schema=models.PayloadSchemaType.KEYWORD,
-    )
-    await client.create_payload_index(
-        collection_name=collection_name,
-        field_name="year",
-        field_schema=models.PayloadSchemaType.INTEGER,
-    )
-    await client.create_payload_index(
-        collection_name=collection_name,
-        field_name="added_at",
-        field_schema=models.PayloadSchemaType.INTEGER,
-    )
-    await client.create_payload_index(
-        collection_name=collection_name,
-        field_name="actors",
-        field_schema=models.PayloadSchemaType.KEYWORD,
-    )
-    await client.create_payload_index(
-        collection_name=collection_name,
-        field_name="directors",
-        field_schema=models.PayloadSchemaType.KEYWORD,
-    )
-    await client.create_payload_index(
-        collection_name=collection_name,
-        field_name="writers",
-        field_schema=models.PayloadSchemaType.KEYWORD,
-    )
-    await client.create_payload_index(
-        collection_name=collection_name,
-        field_name="genres",
-        field_schema=models.PayloadSchemaType.KEYWORD,
-    )
-    await client.create_payload_index(
-        collection_name=collection_name,
-        field_name="show_title",
-        field_schema=models.PayloadSchemaType.KEYWORD,
-    )
-    await client.create_payload_index(
-        collection_name=collection_name,
-        field_name="season_number",
-        field_schema=models.PayloadSchemaType.INTEGER,
-    )
-    await client.create_payload_index(
-        collection_name=collection_name,
-        field_name="episode_number",
-        field_schema=models.PayloadSchemaType.INTEGER,
-    )
-    await client.create_payload_index(
-        collection_name=collection_name,
-        field_name="collections",
-        field_schema=models.PayloadSchemaType.KEYWORD,
-    )
-    await client.create_payload_index(
-        collection_name=collection_name,
-        field_name="summary",
-        field_schema=text_index,
-    )
-    await client.create_payload_index(
-        collection_name=collection_name,
-        field_name="overview",
-        field_schema=text_index,
-    )
-    await client.create_payload_index(
-        collection_name=collection_name,
-        field_name="plot",
-        field_schema=text_index,
-    )
-    await client.create_payload_index(
-        collection_name=collection_name,
-        field_name="tagline",
-        field_schema=text_index,
-    )
-    await client.create_payload_index(
-        collection_name=collection_name,
-        field_name="reviews",
-        field_schema=text_index,
-    )
-    await client.create_payload_index(
-        collection_name=collection_name,
-        field_name="data.plex.rating_key",
-        field_schema=models.PayloadSchemaType.KEYWORD,
-    )
-    await client.create_payload_index(
-        collection_name=collection_name,
-        field_name="data.imdb.id",
-        field_schema=models.PayloadSchemaType.KEYWORD,
-    )
-    await client.create_payload_index(
-        collection_name=collection_name,
-        field_name="data.tmdb.id",
-        field_schema=models.PayloadSchemaType.INTEGER,
-    )
+    await _create_index("title", text_index)
+    await _create_index("type", models.PayloadSchemaType.KEYWORD)
+    await _create_index("year", models.PayloadSchemaType.INTEGER)
+    await _create_index("added_at", models.PayloadSchemaType.INTEGER)
+    await _create_index("actors", models.PayloadSchemaType.KEYWORD)
+    await _create_index("directors", models.PayloadSchemaType.KEYWORD)
+    await _create_index("writers", models.PayloadSchemaType.KEYWORD)
+    await _create_index("genres", models.PayloadSchemaType.KEYWORD)
+    await _create_index("show_title", models.PayloadSchemaType.KEYWORD)
+    await _create_index("season_number", models.PayloadSchemaType.INTEGER)
+    await _create_index("episode_number", models.PayloadSchemaType.INTEGER)
+    await _create_index("collections", models.PayloadSchemaType.KEYWORD)
+    await _create_index("summary", text_index)
+    await _create_index("overview", text_index)
+    await _create_index("plot", text_index)
+    await _create_index("tagline", text_index)
+    await _create_index("reviews", text_index)
+    await _create_index("data.plex.rating_key", models.PayloadSchemaType.KEYWORD)
+    await _create_index("data.imdb.id", models.PayloadSchemaType.KEYWORD)
+    await _create_index("data.tmdb.id", models.PayloadSchemaType.INTEGER)
 
 
 async def _fetch_tmdb_movie(
