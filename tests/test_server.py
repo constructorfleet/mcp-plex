@@ -9,6 +9,7 @@ from contextlib import contextmanager
 from pathlib import Path
 
 import builtins
+from qdrant_client import models
 import pytest
 from starlette.testclient import TestClient
 
@@ -276,3 +277,236 @@ def test_server_lifespan_context(monkeypatch):
 
         asyncio.run(_lifespan())
         assert closed is True
+
+
+def test_request_model_no_parameters():
+    module = importlib.import_module("mcp_plex.server")
+
+    async def _noop() -> None:
+        return None
+
+    assert module._request_model("noop", _noop) is None
+
+
+def test_find_records_handles_retrieve_error(monkeypatch):
+    with _load_server(monkeypatch) as module:
+        async def fail_retrieve(*args, **kwargs):
+            raise RuntimeError("boom")
+
+        async def fake_scroll(*args, **kwargs):
+            payload = {"data": {"plex": {"rating_key": "1"}}}
+            return ([types.SimpleNamespace(payload=payload)], None)
+
+        monkeypatch.setattr(module.server.qdrant_client, "retrieve", fail_retrieve)
+        monkeypatch.setattr(module.server.qdrant_client, "scroll", fake_scroll)
+
+        records = asyncio.run(module._find_records("123"))
+        assert records and records[0].payload["data"]["plex"]["rating_key"] == "1"
+
+
+def test_media_resources_cache_hits(monkeypatch):
+    with _load_server(monkeypatch) as module:
+        rating_key = "49915"
+        poster_first = asyncio.run(module.media_poster.fn(identifier=rating_key))
+        poster_cached = asyncio.run(module.media_poster.fn(identifier=rating_key))
+        assert poster_cached == poster_first
+
+        background_first = asyncio.run(module.media_background.fn(identifier=rating_key))
+        background_cached = asyncio.run(module.media_background.fn(identifier=rating_key))
+        assert background_cached == background_first
+
+
+def test_rest_query_media_invalid_json(monkeypatch):
+    with _load_server(monkeypatch) as module:
+        client = TestClient(module.server.http_app())
+        response = client.post(
+            "/rest/query-media",
+            data="not json",
+            headers={"content-type": "application/json"},
+        )
+        assert response.status_code == 200
+
+
+def test_rest_prompt_invalid_json(monkeypatch):
+    with _load_server(monkeypatch) as module:
+        prompt_cls = type(module.server._prompt_manager._prompts["media-info"])
+
+        async def fake_render(self, arguments):
+            assert arguments is None
+            return [module.Message("ok")]
+
+        monkeypatch.setattr(prompt_cls, "render", fake_render)
+        client = TestClient(module.server.http_app())
+        response = client.post(
+            "/rest/prompt/media-info",
+            data="not json",
+            headers={"content-type": "application/json"},
+        )
+        assert response.status_code == 200
+
+
+def test_rest_resource_content_types(monkeypatch):
+    with _load_server(monkeypatch) as module:
+        async def fake_read_resource(formatted: str):
+            if formatted.endswith("binary"):
+                return b"binary"
+            if formatted.endswith("json"):
+                return json.dumps({"value": 1})
+            return "plain"
+
+        monkeypatch.setattr(
+            module.server._resource_manager,
+            "read_resource",
+            fake_read_resource,
+        )
+
+        client = TestClient(module.server.http_app())
+
+        resp = client.get("/rest/resource/media-ids/binary")
+        assert resp.content == b"binary"
+
+        resp = client.get("/rest/resource/media-ids/json")
+        assert resp.json()["value"] == 1
+
+        resp = client.get("/rest/resource/media-ids/plain")
+        assert resp.text == "plain"
+
+
+def test_search_media_without_reranker(monkeypatch):
+    with _load_server(monkeypatch) as module:
+        payload = {
+            "title": "Sample",
+            "summary": "Summary",
+            "plex": {"rating_key": "1", "title": "Sample"},
+        }
+        hits = [types.SimpleNamespace(payload=payload, score=0.2)]
+
+        async def fake_query_points(*args, **kwargs):
+            return types.SimpleNamespace(points=hits)
+
+        async def immediate_to_thread(fn, *args, **kwargs):
+            return fn(*args, **kwargs)
+
+        monkeypatch.setattr(module.server.qdrant_client, "query_points", fake_query_points)
+        monkeypatch.setattr(module.asyncio, "to_thread", immediate_to_thread)
+        monkeypatch.setattr(module.server, "_reranker", None)
+        monkeypatch.setattr(module.server, "_reranker_loaded", True)
+        monkeypatch.setattr(module.server.settings, "use_reranker", False)
+
+        results = asyncio.run(module.search_media.fn(query="test", limit=1))
+        assert results[0]["plex"]["rating_key"] == "1"
+
+
+def test_search_media_with_reranker(monkeypatch):
+    with _load_server(monkeypatch) as module:
+        payload_one = {
+            "title": "First",
+            "summary": "Summary",
+            "plex": {
+                "rating_key": "1",
+                "title": "First",
+                "summary": "First summary",
+                "thumb": "thumb1",
+                "art": "art1",
+                "actors": [{"tag": "Actor Dict"}, "Actor String"],
+            },
+            "tmdb": {"overview": "Overview"},
+            "directors": [{"tag": "Director"}],
+            "writers": "Writer Name",
+            "actors": [{"name": "Actor Dict"}, "Actor Text"],
+            "tagline": ["Line one", "Line two"],
+            "reviews": ["Great", ""],
+        }
+        payload_two = {
+            "title": "Second",
+            "summary": "Another",
+            "plex": {"rating_key": "2", "title": "Second"},
+        }
+        hits = [
+            types.SimpleNamespace(payload=payload_one, score=0.1),
+            types.SimpleNamespace(payload=payload_two, score=0.2),
+        ]
+
+        async def fake_query_points(*args, **kwargs):
+            return types.SimpleNamespace(points=list(hits))
+
+        async def immediate_to_thread(fn, *args, **kwargs):
+            return fn(*args, **kwargs)
+
+        class DummyReranker:
+            def predict(self, pairs):
+                return [0.9, 0.1]
+
+        monkeypatch.setattr(module.server.qdrant_client, "query_points", fake_query_points)
+        monkeypatch.setattr(module.asyncio, "to_thread", immediate_to_thread)
+        monkeypatch.setattr(module.server, "_reranker", DummyReranker())
+        monkeypatch.setattr(module.server, "_reranker_loaded", True)
+        monkeypatch.setattr(module.server.settings, "use_reranker", True)
+
+        results = asyncio.run(module.search_media.fn(query="test", limit=2))
+        assert [r["plex"]["rating_key"] for r in results] == ["1", "2"]
+
+
+def test_query_media_filters(monkeypatch):
+    with _load_server(monkeypatch) as module:
+        captured: dict[str, object] = {}
+
+        async def fake_query_points(*args, **kwargs):
+            captured.update(kwargs)
+            payload = {"title": "Result", "plex": {"rating_key": "1"}}
+            return types.SimpleNamespace(points=[types.SimpleNamespace(payload=payload, score=1.0)])
+
+        monkeypatch.setattr(module.server.qdrant_client, "query_points", fake_query_points)
+
+        result = asyncio.run(
+            module.query_media.fn(
+                dense_query="dense",
+                sparse_query="sparse",
+                title="Title",
+                type="movie",
+                year=2024,
+                year_from=2020,
+                year_to=2025,
+                added_after=10,
+                added_before=20,
+                actors="Actor",
+                directors=["Director"],
+                writers=("Writer",),
+                genres=["Action"],
+                collections=["Collection"],
+                show_title="Show",
+                season_number=1,
+                episode_number=2,
+                summary="summary",
+                overview="overview",
+                plot="plot",
+                tagline="tagline",
+                reviews="review",
+                plex_rating_key="49915",
+                imdb_id="tt1",
+                tmdb_id=123,
+                limit=2,
+            )
+        )
+
+        assert result and result[0]["plex"]["rating_key"] == "1"
+        query_filter = captured["query_filter"]
+        assert query_filter is not None
+        assert len(query_filter.must) >= 10
+        assert isinstance(captured["query"], models.FusionQuery)
+
+
+def test_openapi_schema_tool_without_params(monkeypatch):
+    module = importlib.import_module("mcp_plex.server")
+
+    @module.server.tool("coverage-noop")
+    async def _coverage_noop() -> None:
+        return None
+
+    try:
+        schema = module._build_openapi_schema()
+        assert "/rest/coverage-noop" in schema["paths"]
+    finally:
+        module.server._tool_manager._tools.pop("coverage-noop", None)
+        if hasattr(module, "_coverage_noop"):
+            delattr(module, "_coverage_noop")
