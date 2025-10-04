@@ -132,9 +132,11 @@ async def _iter_gather_in_batches(
 ) -> AsyncIterator[T]:
     """Yield results from awaitable tasks in fixed-size batches."""
 
-    if batch_size <= 0:
+    try:
+        _require_positive(batch_size, name="batch_size")
+    except ValueError:
         _close_coroutines(tasks)
-    _require_positive(batch_size, name="batch_size")
+        raise
 
     total = len(tasks)
     for i in range(0, total, batch_size):
