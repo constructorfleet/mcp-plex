@@ -35,6 +35,7 @@ def test_run_logs_upsert(monkeypatch, caplog):
         asyncio.run(loader.run(None, None, None, sample_dir, None, None))
     assert "Loaded 2 items" in caplog.text
     assert "Upserting 2 points" in caplog.text
+    assert "using batches of up to" in caplog.text
 
 
 def test_run_logs_no_points(monkeypatch, caplog):
@@ -88,10 +89,10 @@ def test_run_limits_concurrent_upserts(monkeypatch):
         run_task = asyncio.create_task(
             loader.run(None, None, None, sample_dir, None, None, upsert_buffer_size=1)
         )
-        await started.get()
-        release_queue.put_nowait(None)
-        await started.get()
-        release_queue.put_nowait(None)
+        await asyncio.wait_for(started.get(), timeout=1)
+        await release_queue.put(None)
+        await asyncio.wait_for(started.get(), timeout=1)
+        await release_queue.put(None)
         await run_task
 
     asyncio.run(invoke())
