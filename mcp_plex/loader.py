@@ -48,6 +48,15 @@ _imdb_retry_queue: "_IMDbRetryQueue" | None = None
 _imdb_batch_limit: int = 5
 _qdrant_batch_size: int = 1000
 _qdrant_upsert_buffer_size: int = 200
+_qdrant_max_concurrent_upserts: int = 4
+
+
+def _require_positive(value: int, *, name: str) -> int:
+    """Return *value* if positive, otherwise raise a ``ValueError``."""
+
+    if value <= 0:
+        raise ValueError(f"{name} must be positive")
+    return value
 
 
 class _IMDbRetryQueue(asyncio.Queue[str]):
@@ -98,8 +107,7 @@ async def _iter_gather_in_batches(
 ) -> AsyncIterator[T]:
     """Yield results from awaitable tasks in fixed-size batches."""
 
-    if batch_size <= 0:
-        raise ValueError("batch_size must be positive")
+    _require_positive(batch_size, name="batch_size")
 
     total = len(tasks)
     for i in range(0, total, batch_size):
@@ -836,8 +844,7 @@ async def run(
     else:
         _imdb_retry_queue = _IMDbRetryQueue()
 
-    if upsert_buffer_size <= 0:
-        raise ValueError("upsert_buffer_size must be positive")
+    _require_positive(upsert_buffer_size, name="upsert_buffer_size")
 
     dense_size, dense_distance = _resolve_dense_model_params(dense_model_name)
     if qdrant_url is None and qdrant_host is None:
@@ -876,6 +883,18 @@ async def run(
 
     points_buffer: List[models.PointStruct] = []
     upsert_tasks: list[asyncio.Task[None]] = []
+    max_concurrent_upserts = _require_positive(
+        _qdrant_max_concurrent_upserts, name="max_concurrent_upserts"
+    )
+    upsert_semaphore = asyncio.Semaphore(max_concurrent_upserts)
+
+    async def _run_upsert(batch: List[models.PointStruct]) -> None:
+        async with upsert_semaphore:
+            await _upsert_in_batches(
+                client,
+                collection_name,
+                batch,
+            )
 
     def _schedule_upsert(batch: List[models.PointStruct]) -> None:
         logger.info(
@@ -884,15 +903,7 @@ async def run(
             collection_name,
             _qdrant_batch_size,
         )
-        upsert_tasks.append(
-            asyncio.create_task(
-                _upsert_in_batches(
-                    client,
-                    collection_name,
-                    batch,
-                )
-            )
-        )
+        upsert_tasks.append(asyncio.create_task(_run_upsert(batch)))
 
     async for item in item_iter:
         items.append(item)

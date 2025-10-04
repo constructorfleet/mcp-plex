@@ -1,6 +1,6 @@
 [project]
 name = "mcp-plex"
-version = "0.26.39"
+version = "0.26.40"
 requires-python = ">=3.11,<3.13"
 dependencies = [
   "fastmcp>=2.11.2",
