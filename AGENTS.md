@@ -60,7 +60,7 @@ The project should handle natural-language searches and recommendations such as:
 
 ## Checks
 - Run linting with `uv run ruff check .`.
-- Run the test suite with `uv run pytest` and ensure it passes before committing.
+- Run the test suite with `uv run pytest`, ensure it passes, and address any warnings emitted by the run before committing.
 
 ## Testing Practices
 - Use realistic (or as realistic as possible) data in tests; avoid meaningless placeholder values.

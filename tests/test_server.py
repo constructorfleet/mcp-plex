@@ -434,7 +434,7 @@ def test_rest_query_media_invalid_json(monkeypatch):
         client = TestClient(module.server.http_app())
         response = client.post(
             "/rest/query-media",
-            data="not json",
+            content="not json",
             headers={"content-type": "application/json"},
         )
         assert response.status_code == 200
@@ -452,7 +452,7 @@ def test_rest_prompt_invalid_json(monkeypatch):
         client = TestClient(module.server.http_app())
         response = client.post(
             "/rest/prompt/media-info",
-            data="not json",
+            content="not json",
             headers={"content-type": "application/json"},
         )
         assert response.status_code == 200
