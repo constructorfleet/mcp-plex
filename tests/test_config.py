@@ -20,12 +20,15 @@ def test_settings_invalid_cache_size(monkeypatch):
 def test_settings_player_aliases(monkeypatch):
     monkeypatch.setenv(
         "PLEX_PLAYER_ALIASES",
-        "{\"machine-1\": \"Living Room\", \"client-2\": \"Bedroom\"}",
+        (
+            "{\"machine-1\": [\"Living Room TV\", \"Living Room\"],"
+            " \"client-2\": \"Bedroom\"}"
+        ),
     )
     settings = Settings()
     assert settings.plex_player_aliases == {
-        "machine-1": "Living Room",
-        "client-2": "Bedroom",
+        "machine-1": ["Living Room TV", "Living Room"],
+        "client-2": ["Bedroom"],
     }
 
 

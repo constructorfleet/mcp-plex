@@ -10,11 +10,13 @@ from pathlib import Path
 
 import builtins
 from typing import Any
-from qdrant_client import models
+
 import pytest
+from qdrant_client import models
 from starlette.testclient import TestClient
 
 from mcp_plex import loader
+from mcp_plex import server as server_module
 
 
 @contextmanager
@@ -195,9 +197,9 @@ def test_play_media_with_alias(monkeypatch):
         "PLEX_PLAYER_ALIASES",
         json.dumps(
             {
-                "machine-123": "Living Room",
+                "machine-123": ["Living Room", "Movie Room"],
                 "client-abc": "Living Room",
-                "machine-123:client-abc": "Living Room",
+                "machine-123:client-abc": ["Living Room"],
             }
         ),
     )
@@ -290,6 +292,46 @@ def test_play_media_requires_player_capability(monkeypatch):
             asyncio.run(
                 server.play_media.fn(identifier="49915", player="machine-999")
             )
+
+
+def test_match_player_fuzzy_alias_resolution():
+    players = [
+        {
+            "display_name": "Movie Room TV",
+            "name": "Plex for Apple TV",
+            "product": "Apple TV",
+            "machine_identifier": "machine-1",
+            "client_identifier": "client-1",
+            "friendly_names": ["Movie Room", "Movie Room TV"],
+        },
+        {
+            "display_name": "Bedroom TV",
+            "name": "Plex for Roku",
+            "product": "Roku",
+            "machine_identifier": "machine-2",
+            "client_identifier": "client-2",
+            "friendly_names": ["Bedroom"],
+        },
+    ]
+
+    matched = server_module._match_player("movie rm", players)
+    assert matched is players[0]
+
+
+def test_match_player_unknown_raises():
+    players = [
+        {
+            "display_name": "Bedroom TV",
+            "name": "Plex for Roku",
+            "product": "Roku",
+            "machine_identifier": "machine-2",
+            "client_identifier": "client-2",
+            "friendly_names": ["Bedroom"],
+        }
+    ]
+
+    with pytest.raises(ValueError):
+        server_module._match_player("Kitchen", players)
 
 
 def test_reranker_import_failure(monkeypatch):

@@ -24,6 +24,8 @@ from qdrant_client.async_qdrant_client import AsyncQdrantClient
 from starlette.requests import Request
 from starlette.responses import JSONResponse, PlainTextResponse, Response
 
+from rapidfuzz import fuzz, process
+
 from .cache import MediaCache
 from .config import Settings
 
@@ -293,9 +295,9 @@ async def _get_plex_players() -> list[dict[str, Any]]:
         def _collect_alias(identifier: str | None) -> None:
             if not identifier:
                 return
-            alias = aliases.get(identifier)
-            if alias and alias not in friendly_names:
-                friendly_names.append(alias)
+            for alias in aliases.get(identifier, []):
+                if alias and alias not in friendly_names:
+                    friendly_names.append(alias)
 
         _collect_alias(machine_id)
         _collect_alias(client_id)
@@ -330,10 +332,18 @@ async def _get_plex_players() -> list[dict[str, Any]]:
     return players
 
 
+_FUZZY_MATCH_THRESHOLD = 70
+
+
 def _match_player(query: str, players: Sequence[dict[str, Any]]) -> dict[str, Any]:
     """Locate a Plex player by friendly name or identifier."""
 
-    normalized = query.strip().lower()
+    normalized_query = query.strip()
+    normalized = normalized_query.lower()
+    if not normalized_query:
+        raise ValueError("Player '' not found")
+    candidate_strings: list[str] = []
+    candidate_players: list[dict[str, Any]] = []
     for player in players:
         candidates = {
             player.get("display_name"),
@@ -348,8 +358,26 @@ def _match_player(query: str, players: Sequence[dict[str, Any]]) -> dict[str, An
         if machine_id and client_id:
             candidates.add(f"{machine_id}:{client_id}")
         for candidate in candidates:
-            if candidate and candidate.lower() == normalized:
+            if not candidate:
+                continue
+            candidate_str = str(candidate).strip()
+            if not candidate_str:
+                continue
+            candidate_strings.append(candidate_str)
+            candidate_players.append(player)
+            if candidate_str.lower() == normalized:
                 return player
+    match = process.extractOne(
+        normalized_query,
+        candidate_strings,
+        scorer=fuzz.WRatio,
+        processor=str.lower,
+        score_cutoff=_FUZZY_MATCH_THRESHOLD,
+    )
+    if match:
+        _, _, index = match
+        if index is not None:
+            return candidate_players[index]
     raise ValueError(f"Player '{query}' not found")
 
 
