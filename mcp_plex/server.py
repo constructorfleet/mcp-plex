@@ -3,9 +3,11 @@ from __future__ import annotations
 
 import argparse
 import asyncio
+import importlib.metadata
 import inspect
 import json
 import os
+import uuid
 from typing import Annotated, Any, Callable, Sequence
 
 from fastapi import FastAPI
@@ -14,6 +16,8 @@ from fastapi.openapi.utils import get_openapi
 from fastmcp.prompts import Message
 from fastmcp.server import FastMCP
 from fastmcp.server.context import Context as FastMCPContext
+from plexapi.exceptions import PlexApiException
+from plexapi.server import PlexServer as PlexServerClient
 from pydantic import BaseModel, Field, create_model
 from qdrant_client import models
 from qdrant_client.async_qdrant_client import AsyncQdrantClient
@@ -30,6 +34,12 @@ except Exception:
 
 
 settings = Settings()
+
+
+try:
+    __version__ = importlib.metadata.version("mcp-plex")
+except importlib.metadata.PackageNotFoundError:
+    __version__ = "0.0.0"
 
 
 class PlexServer(FastMCP):
@@ -73,9 +83,15 @@ class PlexServer(FastMCP):
         self._reranker: CrossEncoder | None = None
         self._reranker_loaded = False
         self.cache = MediaCache(self.settings.cache_size)
+        self.client_identifier = uuid.uuid4().hex
+        self._plex_identity: dict[str, Any] | None = None
+        self._plex_client: PlexServerClient | None = None
+        self._plex_client_lock = asyncio.Lock()
 
     async def close(self) -> None:
         await self.qdrant_client.close()
+        self._plex_client = None
+        self._plex_identity = None
 
     @property
     def settings(self) -> Settings:  # type: ignore[override]
@@ -94,6 +110,12 @@ class PlexServer(FastMCP):
                 self._reranker = None
             self._reranker_loaded = True
         return self._reranker
+
+    def clear_plex_identity_cache(self) -> None:
+        """Reset cached Plex identity metadata."""
+
+        self._plex_identity = None
+        self._plex_client = None
 
 
 server = PlexServer(settings=settings)
@@ -197,6 +219,219 @@ async def _get_media_data(identifier: str) -> dict[str, Any]:
         if art:
             server.cache.set_background(rating_key, art)
     return payload
+
+
+def _ensure_plex_configuration() -> None:
+    """Ensure Plex playback settings are provided."""
+
+    if not server.settings.plex_url or not server.settings.plex_token:
+        raise RuntimeError("PLEX_URL and PLEX_TOKEN must be configured for playback")
+
+
+async def _get_plex_client() -> PlexServerClient:
+    """Return a cached Plex API client instance."""
+
+    _ensure_plex_configuration()
+    async with server._plex_client_lock:
+        if server._plex_client is None:
+            base_url = str(server.settings.plex_url)
+
+            def _connect() -> PlexServerClient:
+                return PlexServerClient(base_url, server.settings.plex_token)
+
+            server._plex_client = await asyncio.to_thread(_connect)
+        return server._plex_client
+
+
+async def _fetch_plex_identity() -> dict[str, Any]:
+    """Fetch and cache Plex server identity details."""
+
+    if server._plex_identity is not None:
+        return server._plex_identity
+    plex_client = await _get_plex_client()
+    machine_identifier = getattr(plex_client, "machineIdentifier", None)
+    if not machine_identifier:
+        raise RuntimeError("Unable to determine Plex server machine identifier")
+    server._plex_identity = {"machineIdentifier": machine_identifier}
+    return server._plex_identity
+
+
+async def _get_plex_players() -> list[dict[str, Any]]:
+    """Return Plex players available for playback commands."""
+
+    plex_client = await _get_plex_client()
+
+    def _load_clients() -> list[Any]:
+        return list(plex_client.clients())
+
+    raw_clients = await asyncio.to_thread(_load_clients)
+    aliases = server.settings.plex_player_aliases
+    players: list[dict[str, Any]] = []
+
+    for client in raw_clients:
+        provides_raw = getattr(client, "provides", "")
+        if isinstance(provides_raw, str):
+            provides_iterable = provides_raw.split(",")
+        elif isinstance(provides_raw, (list, tuple, set)):
+            provides_iterable = provides_raw
+        else:
+            provides_iterable = []
+        provides = {
+            str(capability).strip().lower()
+            for capability in provides_iterable
+            if str(capability).strip()
+        }
+        machine_id = getattr(client, "machineIdentifier", None)
+        client_id = getattr(client, "clientIdentifier", None)
+        address = getattr(client, "address", None)
+        port = getattr(client, "port", None)
+        name = getattr(client, "title", None) or getattr(client, "name", None)
+        product = getattr(client, "product", None) or getattr(client, "device", None)
+
+        friendly_names: list[str] = []
+
+        def _collect_alias(identifier: str | None) -> None:
+            if not identifier:
+                return
+            alias = aliases.get(identifier)
+            if alias and alias not in friendly_names:
+                friendly_names.append(alias)
+
+        _collect_alias(machine_id)
+        _collect_alias(client_id)
+        if machine_id and client_id:
+            _collect_alias(f"{machine_id}:{client_id}")
+
+        display_name = (
+            friendly_names[0]
+            if friendly_names
+            else name
+            or product
+            or machine_id
+            or client_id
+            or "Unknown player"
+        )
+
+        players.append(
+            {
+                "name": name,
+                "product": product,
+                "display_name": display_name,
+                "friendly_names": friendly_names,
+                "machine_identifier": machine_id,
+                "client_identifier": client_id,
+                "address": address,
+                "port": port,
+                "provides": provides,
+                "client": client,
+            }
+        )
+
+    return players
+
+
+def _match_player(query: str, players: Sequence[dict[str, Any]]) -> dict[str, Any]:
+    """Locate a Plex player by friendly name or identifier."""
+
+    normalized = query.strip().lower()
+    for player in players:
+        candidates = {
+            player.get("display_name"),
+            player.get("name"),
+            player.get("product"),
+            player.get("machine_identifier"),
+            player.get("client_identifier"),
+        }
+        candidates.update(player.get("friendly_names", []))
+        machine_id = player.get("machine_identifier")
+        client_id = player.get("client_identifier")
+        if machine_id and client_id:
+            candidates.add(f"{machine_id}:{client_id}")
+        for candidate in candidates:
+            if candidate and candidate.lower() == normalized:
+                return player
+    raise ValueError(f"Player '{query}' not found")
+
+
+async def _start_playback(
+    rating_key: str, player: dict[str, Any], offset_seconds: int
+) -> None:
+    """Send a playback command to the selected player."""
+
+    if "player" not in player.get("provides", set()):
+        raise ValueError(
+            f"Player '{player.get('display_name')}' cannot be controlled for playback"
+        )
+    plex_client = player.get("client")
+    if plex_client is None:
+        raise ValueError(
+            f"Player '{player.get('display_name')}' is missing a Plex client instance"
+        )
+
+    plex_server = await _get_plex_client()
+    identity = await _fetch_plex_identity()
+    offset_ms = max(offset_seconds, 0) * 1000
+
+    def _play() -> None:
+        media = plex_server.fetchItem(f"/library/metadata/{rating_key}")
+        plex_client.playMedia(
+            media,
+            offset=offset_ms,
+            machineIdentifier=identity["machineIdentifier"],
+        )
+
+    try:
+        await asyncio.to_thread(_play)
+    except PlexApiException as exc:
+        raise RuntimeError("Failed to start playback via plexapi") from exc
+
+
+@server.tool("play-media")
+async def play_media(
+    identifier: Annotated[
+        str,
+        Field(
+            description="Rating key, IMDb/TMDb ID, or media title",
+            examples=["49915", "tt8367814", "The Gentlemen"],
+        ),
+    ],
+    player: Annotated[
+        str,
+        Field(
+            description=(
+                "Friendly name, machine identifier, or client identifier of the"
+                " Plex player"
+            ),
+            examples=["Living Room", "machine-123"],
+        ),
+    ],
+    offset_seconds: Annotated[
+        int | None,
+        Field(
+            description="Start playback at the specified offset (seconds)",
+            ge=0,
+            examples=[0],
+        ),
+    ] = 0,
+) -> dict[str, Any]:
+    """Play a media item on a specific Plex player."""
+
+    media = await _get_media_data(identifier)
+    plex_info = media.get("plex") or {}
+    rating_key = plex_info.get("rating_key")
+    if not rating_key:
+        raise ValueError("Media item is missing a Plex rating key")
+
+    players = await _get_plex_players()
+    target = _match_player(player, players)
+    await _start_playback(str(rating_key), target, offset_seconds or 0)
+
+    return {
+        "player": target.get("display_name"),
+        "rating_key": str(rating_key),
+        "title": plex_info.get("title") or media.get("title"),
+        "offset_seconds": offset_seconds or 0,
+    }
 
 
 @server.tool("get-media")
