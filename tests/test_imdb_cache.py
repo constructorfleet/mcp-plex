@@ -1,7 +1,7 @@
 import json
 from pathlib import Path
 
-from mcp_plex.imdb_cache import IMDbCache
+from mcp_plex.loader.imdb_cache import IMDbCache
 
 
 def test_imdb_cache_loads_existing_and_persists(tmp_path: Path):

@@ -1,4 +1,4 @@
-from mcp_plex.cache import MediaCache
+from mcp_plex.common import MediaCache
 
 
 def test_media_cache_eviction_and_clear():

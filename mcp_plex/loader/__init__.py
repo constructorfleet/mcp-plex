@@ -17,7 +17,7 @@ from qdrant_client import models
 from qdrant_client.async_qdrant_client import AsyncQdrantClient
 
 from .imdb_cache import IMDbCache
-from .types import (
+from ..common.types import (
     AggregatedItem,
     ExternalIDs,
     IMDbTitle,

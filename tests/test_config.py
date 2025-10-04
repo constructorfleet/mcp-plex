@@ -2,7 +2,7 @@ import pytest
 from pydantic import ValidationError
 from pydantic_settings import SettingsError
 
-from mcp_plex.config import Settings
+from mcp_plex.server.config import Settings
 
 
 def test_settings_env_override(monkeypatch):

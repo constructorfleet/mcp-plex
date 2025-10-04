@@ -4,7 +4,7 @@ import types
 import httpx
 from urllib.parse import urlparse
 from mcp_plex import loader
-from mcp_plex.types import TMDBShow
+from mcp_plex.common.types import TMDBShow
 
 
 def test_load_from_plex(monkeypatch):

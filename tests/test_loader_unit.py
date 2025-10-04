@@ -13,7 +13,7 @@ from qdrant_client import models
 import pytest
 
 from mcp_plex import loader
-from mcp_plex.imdb_cache import IMDbCache
+from mcp_plex.loader.imdb_cache import IMDbCache
 from mcp_plex.loader import (
     _build_plex_item,
     _extract_external_ids,
@@ -29,7 +29,7 @@ from mcp_plex.loader import (
     _resolve_dense_model_params,
     resolve_tmdb_season_number,
 )
-from mcp_plex.types import (
+from mcp_plex.common.types import (
     AggregatedItem,
     IMDbName,
     IMDbRating,
