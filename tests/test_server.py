@@ -9,6 +9,7 @@ from contextlib import contextmanager
 from pathlib import Path
 
 import builtins
+from typing import Any
 from qdrant_client import models
 import pytest
 from starlette.testclient import TestClient
@@ -177,6 +178,118 @@ def test_actor_movies(monkeypatch):
             )
         )
         assert none == []
+
+
+def test_play_media_requires_configuration(monkeypatch):
+    with _load_server(monkeypatch) as server:
+        with pytest.raises(RuntimeError):
+            asyncio.run(
+                server.play_media.fn(identifier="49915", player="Living Room")
+            )
+
+
+def test_play_media_with_alias(monkeypatch):
+    monkeypatch.setenv("PLEX_URL", "http://plex.test:32400")
+    monkeypatch.setenv("PLEX_TOKEN", "token")
+    monkeypatch.setenv(
+        "PLEX_PLAYER_ALIASES",
+        json.dumps(
+            {
+                "machine-123": "Living Room",
+                "client-abc": "Living Room",
+                "machine-123:client-abc": "Living Room",
+            }
+        ),
+    )
+
+    class FakeMedia:
+        def __init__(self, key: str) -> None:
+            self.key = key
+
+    play_requests: list[dict[str, Any]] = []
+    fetch_requests: list[str] = []
+
+    class FakeClient:
+        def __init__(self) -> None:
+            self.machineIdentifier = "machine-123"
+            self.clientIdentifier = "client-abc"
+            self.provides = "player,controller"
+            self.address = "10.0.0.5"
+            self.port = 32500
+            self.product = "Plex for Apple TV"
+            self.title = "Plex for Apple TV"
+
+        def playMedia(self, media: FakeMedia, **kwargs: Any) -> None:
+            play_requests.append({"media": media, "kwargs": kwargs})
+
+    class FakePlex:
+        def __init__(self, baseurl: str, token: str) -> None:
+            assert baseurl.rstrip("/") == "http://plex.test:32400"
+            assert token == "token"
+            self.machineIdentifier = "server-001"
+            self._client = FakeClient()
+
+        def clients(self) -> list[FakeClient]:
+            return [self._client]
+
+        def fetchItem(self, key: str) -> FakeMedia:
+            fetch_requests.append(key)
+            return FakeMedia(key)
+
+    with _load_server(monkeypatch) as server:
+        monkeypatch.setattr(server, "PlexServerClient", FakePlex)
+
+        result = asyncio.run(
+            server.play_media.fn(identifier="49915", player="Living Room")
+        )
+
+        assert result["player"] == "Living Room"
+        assert result["rating_key"] == "49915"
+        assert fetch_requests == ["/library/metadata/49915"]
+        assert play_requests, "Expected plexapi playMedia call"
+        play_call = play_requests[0]
+        assert isinstance(play_call["media"], FakeMedia)
+        assert play_call["media"].key == "/library/metadata/49915"
+        assert play_call["kwargs"]["machineIdentifier"] == "server-001"
+        assert play_call["kwargs"]["offset"] == 0
+
+
+def test_play_media_requires_player_capability(monkeypatch):
+    monkeypatch.setenv("PLEX_URL", "http://plex.test:32400")
+    monkeypatch.setenv("PLEX_TOKEN", "token")
+
+    class FakeClient:
+        def __init__(self) -> None:
+            self.machineIdentifier = "machine-999"
+            self.clientIdentifier = "client-999"
+            self.provides = "controller"
+            self.address = "10.0.0.10"
+            self.port = 32500
+            self.product = "Controller Only"
+            self.title = "Controller Only"
+
+        def playMedia(self, *args: Any, **kwargs: Any) -> None:
+            raise AssertionError("Playback should not be attempted")
+
+    class FakePlex:
+        def __init__(self, baseurl: str, token: str) -> None:
+            assert baseurl.rstrip("/") == "http://plex.test:32400"
+            assert token == "token"
+            self.machineIdentifier = "server-001"
+            self._client = FakeClient()
+
+        def clients(self) -> list[FakeClient]:
+            return [self._client]
+
+        def fetchItem(self, key: str) -> Any:
+            raise AssertionError("fetchItem should not be called")
+
+    with _load_server(monkeypatch) as server:
+        monkeypatch.setattr(server, "PlexServerClient", FakePlex)
+        with pytest.raises(ValueError, match="cannot be controlled for playback"):
+            asyncio.run(
+                server.play_media.fn(identifier="49915", player="machine-999")
+            )
 
 
 def test_reranker_import_failure(monkeypatch):
