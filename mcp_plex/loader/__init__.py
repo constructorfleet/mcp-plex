@@ -918,6 +918,7 @@ async def run(
     batches_enqueued = 0
     worker_error: Exception | None = None
     worker_error_tb: TracebackType | None = None
+    worker_error_lock = asyncio.Lock()
 
     async def _upsert_worker() -> None:
         nonlocal worker_error, worker_error_tb
@@ -940,9 +941,10 @@ async def run(
                     retry_queue=qdrant_retry_queue,
                 )
             except Exception as exc:  # defensive guard
-                if worker_error is None:
-                    worker_error = exc
-                    worker_error_tb = exc.__traceback__
+                async with worker_error_lock:
+                    if worker_error is None:
+                        worker_error = exc
+                        worker_error_tb = exc.__traceback__
                 logger.exception("Unexpected error upserting batch")
             finally:
                 upsert_queue.task_done()
