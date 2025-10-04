@@ -107,13 +107,14 @@ def test_load_from_plex(monkeypatch):
     )
 
     calls = []
-    orig_batch = loader._gather_in_batches
+    orig_batch = loader._iter_gather_in_batches
 
     async def fake_batch(tasks, batch_size):
         calls.append((len(tasks), batch_size))
-        return await orig_batch(tasks, batch_size)
+        async for result in orig_batch(tasks, batch_size):
+            yield result
 
-    monkeypatch.setattr(loader, "_gather_in_batches", fake_batch)
+    monkeypatch.setattr(loader, "_iter_gather_in_batches", fake_batch)
 
     items = asyncio.run(loader._load_from_plex(server, "key", batch_size=1))
     assert calls == [(1, 1), (2, 1)]

@@ -7,7 +7,7 @@ import logging
 import sys
 from collections import deque
 from pathlib import Path
-from typing import Awaitable, Iterable, List, Optional, Sequence, TypeVar
+from typing import AsyncIterator, Awaitable, Iterable, List, Optional, Sequence, TypeVar
 
 import click
 import httpx
@@ -47,6 +47,16 @@ _imdb_backoff: float = 1.0
 _imdb_retry_queue: "_IMDbRetryQueue" | None = None
 _imdb_batch_limit: int = 5
 _qdrant_batch_size: int = 1000
+_qdrant_upsert_buffer_size: int = 200
+_qdrant_max_concurrent_upserts: int = 4
+
+
+def _require_positive(value: int, *, name: str) -> int:
+    """Return *value* if positive, otherwise raise a ``ValueError``."""
+
+    if value <= 0:
+        raise ValueError(f"{name} must be positive")
+    return value
 
 
 class _IMDbRetryQueue(asyncio.Queue[str]):
@@ -92,18 +102,27 @@ _DENSE_MODEL_PARAMS: dict[str, tuple[int, models.Distance]] = {
 }
 
 
+async def _iter_gather_in_batches(
+    tasks: Sequence[Awaitable[T]], batch_size: int
+) -> AsyncIterator[T]:
+    """Yield results from awaitable tasks in fixed-size batches."""
+
+    _require_positive(batch_size, name="batch_size")
+
+    total = len(tasks)
+    for i in range(0, total, batch_size):
+        batch = tasks[i : i + batch_size]
+        for result in await asyncio.gather(*batch):
+            yield result
+        logger.info("Processed %d/%d items", min(i + batch_size, total), total)
+
+
 async def _gather_in_batches(
     tasks: Sequence[Awaitable[T]], batch_size: int
 ) -> List[T]:
     """Gather awaitable tasks in fixed-size batches."""
 
-    results: List[T] = []
-    total = len(tasks)
-    for i in range(0, total, batch_size):
-        batch = tasks[i : i + batch_size]
-        results.extend(await asyncio.gather(*batch))
-        logger.info("Processed %d/%d items", min(i + batch_size, total), total)
-    return results
+    return [result async for result in _iter_gather_in_batches(tasks, batch_size)]
 
 
 def _resolve_dense_model_params(model_name: str) -> tuple[int, models.Distance]:
@@ -272,6 +291,135 @@ async def _upsert_in_batches(
             logger.info(
                 "Upserted %d/%d points", min(i + len(batch), total), total
             )
+
+
+async def _ensure_collection(
+    client: AsyncQdrantClient,
+    collection_name: str,
+    *,
+    dense_size: int,
+    dense_distance: models.Distance,
+) -> None:
+    """Create the collection and payload indexes if they do not already exist."""
+
+    created_collection = False
+    if not await client.collection_exists(collection_name):
+        await client.create_collection(
+            collection_name=collection_name,
+            vectors_config={"dense": models.VectorParams(size=dense_size, distance=dense_distance)},
+            sparse_vectors_config={"sparse": models.SparseVectorParams()},
+        )
+        created_collection = True
+
+    if not created_collection:
+        return
+
+    text_index = models.TextIndexParams(
+        type=models.PayloadSchemaType.TEXT,
+        tokenizer=models.TokenizerType.WORD,
+        min_token_len=2,
+        lowercase=True,
+    )
+    await client.create_payload_index(
+        collection_name=collection_name,
+        field_name="title",
+        field_schema=text_index,
+    )
+    await client.create_payload_index(
+        collection_name=collection_name,
+        field_name="type",
+        field_schema=models.PayloadSchemaType.KEYWORD,
+    )
+    await client.create_payload_index(
+        collection_name=collection_name,
+        field_name="year",
+        field_schema=models.PayloadSchemaType.INTEGER,
+    )
+    await client.create_payload_index(
+        collection_name=collection_name,
+        field_name="added_at",
+        field_schema=models.PayloadSchemaType.INTEGER,
+    )
+    await client.create_payload_index(
+        collection_name=collection_name,
+        field_name="actors",
+        field_schema=models.PayloadSchemaType.KEYWORD,
+    )
+    await client.create_payload_index(
+        collection_name=collection_name,
+        field_name="directors",
+        field_schema=models.PayloadSchemaType.KEYWORD,
+    )
+    await client.create_payload_index(
+        collection_name=collection_name,
+        field_name="writers",
+        field_schema=models.PayloadSchemaType.KEYWORD,
+    )
+    await client.create_payload_index(
+        collection_name=collection_name,
+        field_name="genres",
+        field_schema=models.PayloadSchemaType.KEYWORD,
+    )
+    await client.create_payload_index(
+        collection_name=collection_name,
+        field_name="show_title",
+        field_schema=models.PayloadSchemaType.KEYWORD,
+    )
+    await client.create_payload_index(
+        collection_name=collection_name,
+        field_name="season_number",
+        field_schema=models.PayloadSchemaType.INTEGER,
+    )
+    await client.create_payload_index(
+        collection_name=collection_name,
+        field_name="episode_number",
+        field_schema=models.PayloadSchemaType.INTEGER,
+    )
+    await client.create_payload_index(
+        collection_name=collection_name,
+        field_name="collections",
+        field_schema=models.PayloadSchemaType.KEYWORD,
+    )
+    await client.create_payload_index(
+        collection_name=collection_name,
+        field_name="summary",
+        field_schema=text_index,
+    )
+    await client.create_payload_index(
+        collection_name=collection_name,
+        field_name="overview",
+        field_schema=text_index,
+    )
+    await client.create_payload_index(
+        collection_name=collection_name,
+        field_name="plot",
+        field_schema=text_index,
+    )
+    await client.create_payload_index(
+        collection_name=collection_name,
+        field_name="tagline",
+        field_schema=text_index,
+    )
+    await client.create_payload_index(
+        collection_name=collection_name,
+        field_name="reviews",
+        field_schema=text_index,
+    )
+    await client.create_payload_index(
+        collection_name=collection_name,
+        field_name="data.plex.rating_key",
+        field_schema=models.PayloadSchemaType.KEYWORD,
+    )
+    await client.create_payload_index(
+        collection_name=collection_name,
+        field_name="data.imdb.id",
+        field_schema=models.PayloadSchemaType.KEYWORD,
+    )
+    await client.create_payload_index(
+        collection_name=collection_name,
+        field_name="data.tmdb.id",
+        field_schema=models.PayloadSchemaType.INTEGER,
+    )
 
 
 async def _fetch_tmdb_movie(
@@ -467,11 +615,11 @@ def _build_plex_item(item: PlexPartialObject) -> PlexItem:
     )
 
 
-async def _load_from_plex(
+async def _iter_from_plex(
     server: PlexServer, tmdb_api_key: str, *, batch_size: int = 50
-) -> List[AggregatedItem]:
-    """Load items from a live Plex server."""
-    results: List[AggregatedItem] = []
+) -> AsyncIterator[AggregatedItem]:
+    """Yield items from a live Plex server as they are enriched."""
+
     async with httpx.AsyncClient(timeout=30) as client:
         movie_section = server.library.section("Movies")
         movie_keys = [int(m.ratingKey) for m in movie_section.all()]
@@ -495,7 +643,8 @@ async def _load_from_plex(
 
         movie_tasks = [_augment_movie(movie) for movie in movies]
         if movie_tasks:
-            results.extend(await _gather_in_batches(movie_tasks, batch_size))
+            async for result in _iter_gather_in_batches(movie_tasks, batch_size):
+                yield result
 
         show_section = server.library.section("TV Shows")
         show_keys = [int(s.ratingKey) for s in show_section.all()]
@@ -535,8 +684,16 @@ async def _load_from_plex(
 
             episode_tasks = [_augment_episode(ep) for ep in episodes]
             if episode_tasks:
-                results.extend(await _gather_in_batches(episode_tasks, batch_size))
-    return results
+                async for result in _iter_gather_in_batches(episode_tasks, batch_size):
+                    yield result
+
+
+async def _load_from_plex(
+    server: PlexServer, tmdb_api_key: str, *, batch_size: int = 50
+) -> List[AggregatedItem]:
+    """Retain list-based API for tests by consuming :func:`_iter_from_plex`."""
+
+    return [item async for item in _iter_from_plex(server, tmdb_api_key, batch_size=batch_size)]
 
 
 def _load_from_sample(sample_dir: Path) -> List[AggregatedItem]:
@@ -647,6 +804,13 @@ def _load_from_sample(sample_dir: Path) -> List[AggregatedItem]:
     return results
 
 
+async def _iter_from_sample(sample_dir: Path) -> AsyncIterator[AggregatedItem]:
+    """Yield sample data items for streaming pipelines."""
+
+    for item in _load_from_sample(sample_dir):
+        yield item
+
+
 async def run(
     plex_url: Optional[str],
     plex_token: Optional[str],
@@ -665,6 +829,7 @@ async def run(
     imdb_max_retries: int = 3,
     imdb_backoff: float = 1.0,
     imdb_queue_path: Path | None = None,
+    upsert_buffer_size: int = _qdrant_upsert_buffer_size,
 ) -> None:
     """Core execution logic for the CLI."""
 
@@ -679,10 +844,32 @@ async def run(
     else:
         _imdb_retry_queue = _IMDbRetryQueue()
 
-    items: List[AggregatedItem]
+    _require_positive(upsert_buffer_size, name="upsert_buffer_size")
+
+    dense_size, dense_distance = _resolve_dense_model_params(dense_model_name)
+    if qdrant_url is None and qdrant_host is None:
+        qdrant_url = ":memory:"
+    client = AsyncQdrantClient(
+        location=qdrant_url,
+        api_key=qdrant_api_key,
+        host=qdrant_host,
+        port=qdrant_port,
+        grpc_port=qdrant_grpc_port,
+        https=qdrant_https,
+        prefer_grpc=qdrant_prefer_grpc,
+    )
+    collection_name = "media-items"
+    await _ensure_collection(
+        client,
+        collection_name,
+        dense_size=dense_size,
+        dense_distance=dense_distance,
+    )
+
+    items: List[AggregatedItem] = []
     if sample_dir is not None:
         logger.info("Loading sample data from %s", sample_dir)
-        items = _load_from_sample(sample_dir)
+        item_iter = _iter_from_sample(sample_dir)
     else:
         if PlexServer is None:
             raise RuntimeError("plexapi is required for live loading")
@@ -692,12 +879,39 @@ async def run(
             raise RuntimeError("TMDB_API_KEY must be provided")
         logger.info("Loading data from Plex server %s", plex_url)
         server = PlexServer(plex_url, plex_token)
-        items = await _load_from_plex(server, tmdb_api_key)
-    logger.info("Loaded %d items", len(items))
+        item_iter = _iter_from_plex(server, tmdb_api_key)
 
-    # Assemble points with server-side embeddings
-    points: List[models.PointStruct] = []
-    for item in items:
+    points_buffer: List[models.PointStruct] = []
+    upsert_tasks: set[asyncio.Task[None]] = set()
+    max_concurrent_upserts = _require_positive(
+        _qdrant_max_concurrent_upserts, name="max_concurrent_upserts"
+    )
+
+    async def _schedule_upsert(batch: List[models.PointStruct]) -> None:
+        logger.info(
+            "Upserting %d points into Qdrant collection %s in batches of %d",
+            len(batch),
+            collection_name,
+            _qdrant_batch_size,
+        )
+        task = asyncio.create_task(
+            _upsert_in_batches(
+                client,
+                collection_name,
+                batch,
+            )
+        )
+        upsert_tasks.add(task)
+        if len(upsert_tasks) >= max_concurrent_upserts:
+            done, _ = await asyncio.wait(
+                upsert_tasks, return_when=asyncio.FIRST_COMPLETED
+            )
+            for finished in done:
+                upsert_tasks.discard(finished)
+                finished.result()
+
+    async for item in item_iter:
+        items.append(item)
         primary_title = item.plex.title
         if item.plex.type == "episode":
             title_bits: list[str] = []
@@ -791,7 +1005,7 @@ async def run(
             if item.plex.rating_key.isdigit()
             else item.plex.rating_key
         )
-        points.append(
+        points_buffer.append(
             models.PointStruct(
                 id=point_id,
                 vector={
@@ -802,144 +1016,20 @@ async def run(
             )
         )
 
-    dense_size, dense_distance = _resolve_dense_model_params(dense_model_name)
-    if qdrant_url is None and qdrant_host is None:
-        qdrant_url = ":memory:"
-    client = AsyncQdrantClient(
-        location=qdrant_url,
-        api_key=qdrant_api_key,
-        host=qdrant_host,
-        port=qdrant_port,
-        grpc_port=qdrant_grpc_port,
-        https=qdrant_https,
-        prefer_grpc=qdrant_prefer_grpc,
-    )
-    collection_name = "media-items"
-    created_collection = False
-    if not await client.collection_exists(collection_name):
-        await client.create_collection(
-            collection_name=collection_name,
-            vectors_config={"dense": models.VectorParams(size=dense_size, distance=dense_distance)},
-            sparse_vectors_config={"sparse": models.SparseVectorParams()},
-        )
-        created_collection = True
+        if len(points_buffer) >= upsert_buffer_size:
+            batch = list(points_buffer)
+            points_buffer.clear()
+            await _schedule_upsert(batch)
 
-    if created_collection:
-        text_index = models.TextIndexParams(
-            type=models.PayloadSchemaType.TEXT,
-            tokenizer=models.TokenizerType.WORD,
-            min_token_len=2,
-            lowercase=True,
-        )
-        await client.create_payload_index(
-            collection_name=collection_name,
-            field_name="title",
-            field_schema=text_index,
-        )
-        await client.create_payload_index(
-            collection_name=collection_name,
-            field_name="type",
-            field_schema=models.PayloadSchemaType.KEYWORD,
-        )
-        await client.create_payload_index(
-            collection_name=collection_name,
-            field_name="year",
-            field_schema=models.PayloadSchemaType.INTEGER,
-        )
-        await client.create_payload_index(
-            collection_name=collection_name,
-            field_name="added_at",
-            field_schema=models.PayloadSchemaType.INTEGER,
-        )
-        await client.create_payload_index(
-            collection_name=collection_name,
-            field_name="actors",
-            field_schema=models.PayloadSchemaType.KEYWORD,
-        )
-        await client.create_payload_index(
-            collection_name=collection_name,
-            field_name="directors",
-            field_schema=models.PayloadSchemaType.KEYWORD,
-        )
-        await client.create_payload_index(
-            collection_name=collection_name,
-            field_name="writers",
-            field_schema=models.PayloadSchemaType.KEYWORD,
-        )
-        await client.create_payload_index(
-            collection_name=collection_name,
-            field_name="genres",
-            field_schema=models.PayloadSchemaType.KEYWORD,
-        )
-        await client.create_payload_index(
-            collection_name=collection_name,
-            field_name="show_title",
-            field_schema=models.PayloadSchemaType.KEYWORD,
-        )
-        await client.create_payload_index(
-            collection_name=collection_name,
-            field_name="season_number",
-            field_schema=models.PayloadSchemaType.INTEGER,
-        )
-        await client.create_payload_index(
-            collection_name=collection_name,
-            field_name="episode_number",
-            field_schema=models.PayloadSchemaType.INTEGER,
-        )
-        await client.create_payload_index(
-            collection_name=collection_name,
-            field_name="collections",
-            field_schema=models.PayloadSchemaType.KEYWORD,
-        )
-        await client.create_payload_index(
-            collection_name=collection_name,
-            field_name="summary",
-            field_schema=text_index,
-        )
-        await client.create_payload_index(
-            collection_name=collection_name,
-            field_name="overview",
-            field_schema=text_index,
-        )
-        await client.create_payload_index(
-            collection_name=collection_name,
-            field_name="plot",
-            field_schema=text_index,
-        )
-        await client.create_payload_index(
-            collection_name=collection_name,
-            field_name="tagline",
-            field_schema=text_index,
-        )
-        await client.create_payload_index(
-            collection_name=collection_name,
-            field_name="reviews",
-            field_schema=text_index,
-        )
-        await client.create_payload_index(
-            collection_name=collection_name,
-            field_name="data.plex.rating_key",
-            field_schema=models.PayloadSchemaType.KEYWORD,
-        )
-        await client.create_payload_index(
-            collection_name=collection_name,
-            field_name="data.imdb.id",
-            field_schema=models.PayloadSchemaType.KEYWORD,
-        )
-        await client.create_payload_index(
-            collection_name=collection_name,
-            field_name="data.tmdb.id",
-            field_schema=models.PayloadSchemaType.INTEGER,
-        )
+    logger.info("Loaded %d items", len(items))
 
-    if points:
-        logger.info(
-            "Upserting %d points into Qdrant collection %s in batches of %d",
-            len(points),
-            collection_name,
-            _qdrant_batch_size,
-        )
-        await _upsert_in_batches(client, collection_name, points)
+    if points_buffer:
+        batch = list(points_buffer)
+        points_buffer.clear()
+        await _schedule_upsert(batch)
+
+    if upsert_tasks:
+        await asyncio.gather(*upsert_tasks)
     else:
         logger.info("No points to upsert")
 
@@ -1034,6 +1124,15 @@ async def run(
     help="Prefer gRPC when connecting to Qdrant",
 )
 @click.option(
+    "--upsert-buffer-size",
+    envvar="QDRANT_UPSERT_BUFFER_SIZE",
+    show_envvar=True,
+    type=int,
+    default=_qdrant_upsert_buffer_size,
+    show_default=True,
+    help="Number of media items to buffer before scheduling an async upsert",
+)
+@click.option(
     "--dense-model",
     envvar="DENSE_MODEL",
     show_envvar=True,
@@ -1113,6 +1212,7 @@ def main(
     qdrant_grpc_port: int,
     qdrant_https: bool,
     qdrant_prefer_grpc: bool,
+    upsert_buffer_size: int,
     dense_model: str,
     sparse_model: str,
     continuous: bool,
@@ -1145,6 +1245,7 @@ def main(
             imdb_max_retries,
             imdb_backoff,
             imdb_queue,
+            upsert_buffer_size,
         )
     )
 
@@ -1169,6 +1270,7 @@ async def load_media(
     imdb_max_retries: int,
     imdb_backoff: float,
     imdb_queue: Path,
+    upsert_buffer_size: int,
 ) -> None:
     """Orchestrate one or more runs of :func:`run`."""
 
@@ -1191,6 +1293,7 @@ async def load_media(
             imdb_max_retries,
             imdb_backoff,
             imdb_queue,
+            upsert_buffer_size,
         )
         if not continuous:
             break

@@ -30,6 +30,9 @@
 - Qdrant model metadata is tracked locally in a supported mapping so the loader
   no longer depends on the private `_get_model_params` helper removed in newer
   clients.
+- Qdrant collection setup now happens before media ingestion and loader
+  streaming schedules asynchronous upsert tasks once the configurable buffer is
+  filled so fetching can continue while points are written.
 
 ## User Queries
 The project should handle natural-language searches and recommendations such as:
