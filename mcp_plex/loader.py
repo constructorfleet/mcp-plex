@@ -425,11 +425,32 @@ def _build_plex_item(item: PlexPartialObject) -> PlexItem:
         )
         for a in getattr(item, "actors", []) or getattr(item, "roles", []) or []
     ]
+    genres = [
+        str(getattr(g, "tag", ""))
+        for g in getattr(item, "genres", []) or []
+        if getattr(g, "tag", None)
+    ]
+    collections = [
+        str(getattr(c, "tag", ""))
+        for c in getattr(item, "collections", []) or []
+        if getattr(c, "tag", None)
+    ]
+    season_number = getattr(item, "parentIndex", None)
+    if isinstance(season_number, str):
+        season_number = int(season_number) if season_number.isdigit() else None
+    episode_number = getattr(item, "index", None)
+    if isinstance(episode_number, str):
+        episode_number = int(episode_number) if episode_number.isdigit() else None
+
     return PlexItem(
         rating_key=str(getattr(item, "ratingKey", "")),
         guid=str(getattr(item, "guid", "")),
         type=str(getattr(item, "type", "")),
         title=str(getattr(item, "title", "")),
+        show_title=getattr(item, "grandparentTitle", None),
+        season_title=getattr(item, "parentTitle", None),
+        season_number=season_number,
+        episode_number=episode_number,
         summary=getattr(item, "summary", None),
         year=getattr(item, "year", None),
         added_at=getattr(item, "addedAt", None),
@@ -441,6 +462,8 @@ def _build_plex_item(item: PlexPartialObject) -> PlexItem:
         directors=directors,
         writers=writers,
         actors=actors,
+        genres=genres,
+        collections=collections,
     )
 
 
@@ -556,6 +579,13 @@ def _load_from_sample(sample_dir: Path) -> List[AggregatedItem]:
             )
             for a in movie_data.get("Role", [])
         ],
+        genres=[g.get("tag", "") for g in movie_data.get("Genre", []) if g.get("tag")],
+        collections=[
+            c.get("tag", "")
+            for key in ("Collection", "Collections")
+            for c in movie_data.get(key, []) or []
+            if c.get("tag")
+        ],
     )
     with (movie_dir / "imdb.json").open("r", encoding="utf-8") as f:
         imdb_movie = IMDbTitle.model_validate(json.load(f))
@@ -571,6 +601,10 @@ def _load_from_sample(sample_dir: Path) -> List[AggregatedItem]:
         guid=str(episode_data.get("guid", "")),
         type=episode_data.get("type", "episode"),
         title=episode_data.get("title", ""),
+        show_title=episode_data.get("grandparentTitle"),
+        season_title=episode_data.get("parentTitle"),
+        season_number=episode_data.get("parentIndex"),
+        episode_number=episode_data.get("index"),
         summary=episode_data.get("summary"),
         year=episode_data.get("year"),
         added_at=episode_data.get("addedAt"),
@@ -595,6 +629,13 @@ def _load_from_sample(sample_dir: Path) -> List[AggregatedItem]:
                 thumb=a.get("thumb"),
             )
             for a in episode_data.get("Role", [])
+        ],
+        genres=[g.get("tag", "") for g in episode_data.get("Genre", []) if g.get("tag")],
+        collections=[
+            c.get("tag", "")
+            for key in ("Collection", "Collections")
+            for c in episode_data.get(key, []) or []
+            if c.get("tag")
         ],
     )
     with (episode_dir / "imdb.tv.json").open("r", encoding="utf-8") as f:
@@ -657,15 +698,43 @@ async def run(
     # Assemble points with server-side embeddings
     points: List[models.PointStruct] = []
     for item in items:
+        primary_title = item.plex.title
+        if item.plex.type == "episode":
+            title_bits: list[str] = []
+            if item.plex.show_title:
+                title_bits.append(item.plex.show_title)
+            se_parts: list[str] = []
+            if item.plex.season_number is not None:
+                se_parts.append(f"S{item.plex.season_number:02d}")
+            if item.plex.episode_number is not None:
+                se_parts.append(f"E{item.plex.episode_number:02d}")
+            if se_parts:
+                title_bits.append("".join(se_parts))
+            if item.plex.title:
+                title_bits.append(item.plex.title)
+            if title_bits:
+                primary_title = " - ".join(title_bits)
         parts = [
-            item.plex.title,
+            primary_title,
             item.plex.summary or "",
             item.tmdb.overview if item.tmdb and hasattr(item.tmdb, "overview") else "",
             item.imdb.plot if item.imdb else "",
-            " ".join(p.tag for p in item.plex.directors),
-            " ".join(p.tag for p in item.plex.writers),
-            " ".join(p.tag for p in item.plex.actors),
         ]
+        directors_text = ", ".join(p.tag for p in item.plex.directors if p.tag)
+        writers_text = ", ".join(p.tag for p in item.plex.writers if p.tag)
+        actors_text = ", ".join(p.tag for p in item.plex.actors if p.tag)
+        if directors_text:
+            parts.append(f"Directed by {directors_text}")
+        if writers_text:
+            parts.append(f"Written by {writers_text}")
+        if actors_text:
+            parts.append(f"Starring {actors_text}")
+        if item.plex.tagline:
+            parts.append(item.plex.tagline)
+        if item.tmdb and hasattr(item.tmdb, "tagline"):
+            tagline = getattr(item.tmdb, "tagline", None)
+            if tagline:
+                parts.append(tagline)
         if item.tmdb and hasattr(item.tmdb, "reviews"):
             parts.extend(r.get("content", "") for r in getattr(item.tmdb, "reviews", []))
         text = "\n".join(p for p in parts if p)
@@ -674,8 +743,45 @@ async def run(
             "title": item.plex.title,
             "type": item.plex.type,
         }
+        if item.plex.type == "episode":
+            if item.plex.show_title:
+                payload["show_title"] = item.plex.show_title
+            if item.plex.season_title:
+                payload["season_title"] = item.plex.season_title
+            if item.plex.season_number is not None:
+                payload["season_number"] = item.plex.season_number
+            if item.plex.episode_number is not None:
+                payload["episode_number"] = item.plex.episode_number
         if item.plex.actors:
-            payload["actors"] = [p.tag for p in item.plex.actors]
+            payload["actors"] = [p.tag for p in item.plex.actors if p.tag]
+        if item.plex.directors:
+            payload["directors"] = [p.tag for p in item.plex.directors if p.tag]
+        if item.plex.writers:
+            payload["writers"] = [p.tag for p in item.plex.writers if p.tag]
+        if item.plex.genres:
+            payload["genres"] = item.plex.genres
+        if item.plex.collections:
+            payload["collections"] = item.plex.collections
+        summary = item.plex.summary
+        if summary:
+            payload["summary"] = summary
+        overview = getattr(item.tmdb, "overview", None) if item.tmdb else None
+        if overview:
+            payload["overview"] = overview
+        plot = item.imdb.plot if item.imdb else None
+        if plot:
+            payload["plot"] = plot
+        taglines = [item.plex.tagline]
+        if item.tmdb and hasattr(item.tmdb, "tagline"):
+            taglines.append(getattr(item.tmdb, "tagline", None))
+        taglines = [t for t in taglines if t]
+        if taglines:
+            payload["tagline"] = "\n".join(dict.fromkeys(taglines))
+        if item.tmdb and hasattr(item.tmdb, "reviews"):
+            review_texts = [r.get("content", "") for r in getattr(item.tmdb, "reviews", [])]
+            review_texts = [r for r in review_texts if r]
+            if review_texts:
+                payload["reviews"] = review_texts
         if item.plex.year is not None:
             payload["year"] = item.plex.year
         if item.plex.added_at is not None:
@@ -719,15 +825,16 @@ async def run(
         created_collection = True
 
     if created_collection:
+        text_index = models.TextIndexParams(
+            type=models.PayloadSchemaType.TEXT,
+            tokenizer=models.TokenizerType.WORD,
+            min_token_len=2,
+            lowercase=True,
+        )
         await client.create_payload_index(
             collection_name=collection_name,
             field_name="title",
-            field_schema=models.TextIndexParams(
-                type=models.PayloadSchemaType.TEXT,
-                tokenizer=models.TokenizerType.WORD,
-                min_token_len=2,
-                lowercase=True,
-            ),
+            field_schema=text_index,
         )
         await client.create_payload_index(
             collection_name=collection_name,
@@ -748,6 +855,66 @@ async def run(
             collection_name=collection_name,
             field_name="actors",
             field_schema=models.PayloadSchemaType.KEYWORD,
+        )
+        await client.create_payload_index(
+            collection_name=collection_name,
+            field_name="directors",
+            field_schema=models.PayloadSchemaType.KEYWORD,
+        )
+        await client.create_payload_index(
+            collection_name=collection_name,
+            field_name="writers",
+            field_schema=models.PayloadSchemaType.KEYWORD,
+        )
+        await client.create_payload_index(
+            collection_name=collection_name,
+            field_name="genres",
+            field_schema=models.PayloadSchemaType.KEYWORD,
+        )
+        await client.create_payload_index(
+            collection_name=collection_name,
+            field_name="show_title",
+            field_schema=models.PayloadSchemaType.KEYWORD,
+        )
+        await client.create_payload_index(
+            collection_name=collection_name,
+            field_name="season_number",
+            field_schema=models.PayloadSchemaType.INTEGER,
+        )
+        await client.create_payload_index(
+            collection_name=collection_name,
+            field_name="episode_number",
+            field_schema=models.PayloadSchemaType.INTEGER,
+        )
+        await client.create_payload_index(
+            collection_name=collection_name,
+            field_name="collections",
+            field_schema=models.PayloadSchemaType.KEYWORD,
+        )
+        await client.create_payload_index(
+            collection_name=collection_name,
+            field_name="summary",
+            field_schema=text_index,
+        )
+        await client.create_payload_index(
+            collection_name=collection_name,
+            field_name="overview",
+            field_schema=text_index,
+        )
+        await client.create_payload_index(
+            collection_name=collection_name,
+            field_name="plot",
+            field_schema=text_index,
+        )
+        await client.create_payload_index(
+            collection_name=collection_name,
+            field_name="tagline",
+            field_schema=text_index,
+        )
+        await client.create_payload_index(
+            collection_name=collection_name,
+            field_name="reviews",
+            field_schema=text_index,
         )
         await client.create_payload_index(
             collection_name=collection_name,

@@ -127,6 +127,10 @@ class PlexItem(BaseModel):
     guid: str
     type: Literal["movie", "episode"]
     title: str
+    show_title: Optional[str] = None
+    season_title: Optional[str] = None
+    season_number: Optional[int] = None
+    episode_number: Optional[int] = None
     summary: Optional[str] = None
     year: Optional[int] = None
     added_at: Optional[datetime] = None
@@ -138,6 +142,8 @@ class PlexItem(BaseModel):
     directors: List[PlexPerson] = Field(default_factory=list)
     writers: List[PlexPerson] = Field(default_factory=list)
     actors: List[PlexPerson] = Field(default_factory=list)
+    genres: List[str] = Field(default_factory=list)
+    collections: List[str] = Field(default_factory=list)
 
 
 class AggregatedItem(BaseModel):
