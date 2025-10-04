@@ -341,43 +341,50 @@ def _match_player(query: str, players: Sequence[dict[str, Any]]) -> dict[str, An
     normalized_query = query.strip()
     normalized = normalized_query.lower()
     if not normalized_query:
-        raise ValueError("Player '' not found")
-    candidate_strings: list[str] = []
-    candidate_players: list[dict[str, Any]] = []
+        raise ValueError(f"Player '{query}' not found")
+
+    candidate_entries: list[tuple[str, str, dict[str, Any]]] = []
     for player in players:
-        candidates = {
+        candidate_strings = {
             player.get("display_name"),
             player.get("name"),
             player.get("product"),
             player.get("machine_identifier"),
             player.get("client_identifier"),
         }
-        candidates.update(player.get("friendly_names", []))
+        candidate_strings.update(player.get("friendly_names", []))
         machine_id = player.get("machine_identifier")
         client_id = player.get("client_identifier")
         if machine_id and client_id:
-            candidates.add(f"{machine_id}:{client_id}")
-        for candidate in candidates:
+            candidate_strings.add(f"{machine_id}:{client_id}")
+        for candidate in candidate_strings:
             if not candidate:
                 continue
             candidate_str = str(candidate).strip()
             if not candidate_str:
                 continue
-            candidate_strings.append(candidate_str)
-            candidate_players.append(player)
-            if candidate_str.lower() == normalized:
+            candidate_lower = candidate_str.lower()
+            candidate_entries.append((candidate_str, candidate_lower, player))
+            if candidate_lower == normalized:
                 return player
+    def _process_choice(
+        choice: str | tuple[str, str, dict[str, Any]]
+    ) -> str:
+        if isinstance(choice, tuple):
+            return choice[1]
+        return str(choice).strip().lower()
+
     match = process.extractOne(
         normalized_query,
-        candidate_strings,
+        candidate_entries,
         scorer=fuzz.WRatio,
-        processor=str.lower,
+        processor=_process_choice,
         score_cutoff=_FUZZY_MATCH_THRESHOLD,
     )
     if match:
-        _, _, index = match
-        if index is not None:
-            return candidate_players[index]
+        choice, _, _ = match
+        if choice is not None:
+            return choice[2]
     raise ValueError(f"Player '{query}' not found")
 
 

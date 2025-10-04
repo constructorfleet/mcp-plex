@@ -334,6 +334,15 @@ def test_match_player_unknown_raises():
         server_module._match_player("Kitchen", players)
 
 
+def test_match_player_whitespace_query_preserves_original_input():
+    query = "   "
+
+    with pytest.raises(ValueError) as exc:
+        server_module._match_player(query, [])
+
+    assert str(exc.value) == "Player '   ' not found"
+
+
 def test_reranker_import_failure(monkeypatch):
     monkeypatch.setenv("USE_RERANKER", "1")
     orig_import = builtins.__import__
