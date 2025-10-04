@@ -3,10 +3,14 @@ from __future__ import annotations
 
 import argparse
 import asyncio
+import importlib.metadata
 import inspect
 import json
 import os
+import uuid
 from typing import Annotated, Any, Callable, Sequence
+from urllib.parse import urlparse
+from xml.etree import ElementTree
 
 from fastapi import FastAPI
 from fastapi.openapi.docs import get_swagger_ui_html
@@ -14,6 +18,7 @@ from fastapi.openapi.utils import get_openapi
 from fastmcp.prompts import Message
 from fastmcp.server import FastMCP
 from fastmcp.server.context import Context as FastMCPContext
+import httpx
 from pydantic import BaseModel, Field, create_model
 from qdrant_client import models
 from qdrant_client.async_qdrant_client import AsyncQdrantClient
@@ -30,6 +35,12 @@ except Exception:
 
 
 settings = Settings()
+
+
+try:
+    __version__ = importlib.metadata.version("mcp-plex")
+except importlib.metadata.PackageNotFoundError:
+    __version__ = "0.0.0"
 
 
 class PlexServer(FastMCP):
@@ -73,6 +84,8 @@ class PlexServer(FastMCP):
         self._reranker: CrossEncoder | None = None
         self._reranker_loaded = False
         self.cache = MediaCache(self.settings.cache_size)
+        self.client_identifier = uuid.uuid4().hex
+        self._plex_identity: dict[str, Any] | None = None
 
     async def close(self) -> None:
         await self.qdrant_client.close()
@@ -94,6 +107,11 @@ class PlexServer(FastMCP):
                 self._reranker = None
             self._reranker_loaded = True
         return self._reranker
+
+    def clear_plex_identity_cache(self) -> None:
+        """Reset cached Plex identity metadata."""
+
+        self._plex_identity = None
 
 
 server = PlexServer(settings=settings)
@@ -197,6 +215,237 @@ async def _get_media_data(identifier: str) -> dict[str, Any]:
         if art:
             server.cache.set_background(rating_key, art)
     return payload
+
+
+def _ensure_plex_configuration() -> None:
+    """Ensure Plex playback settings are provided."""
+
+    if not server.settings.plex_url or not server.settings.plex_token:
+        raise RuntimeError("PLEX_URL and PLEX_TOKEN must be configured for playback")
+
+
+def _plex_headers(extra: dict[str, str] | None = None) -> dict[str, str]:
+    """Return headers required for Plex API requests."""
+
+    _ensure_plex_configuration()
+    headers = {
+        "X-Plex-Token": server.settings.plex_token or "",
+        "X-Plex-Client-Identifier": server.client_identifier,
+        "X-Plex-Product": "mcp-plex",
+        "X-Plex-Version": __version__,
+    }
+    if extra:
+        headers.update(extra)
+    return headers
+
+
+def _server_connection_details() -> tuple[str, int, str]:
+    """Return server address, port, and protocol for playback requests."""
+
+    _ensure_plex_configuration()
+    parsed = urlparse(str(server.settings.plex_url))
+    host = parsed.hostname or "localhost"
+    if parsed.port is not None:
+        port = parsed.port
+    elif parsed.scheme == "https":
+        port = 443
+    else:
+        port = 80
+    protocol = parsed.scheme or "http"
+    return host, port, protocol
+
+
+async def _fetch_plex_identity() -> dict[str, Any]:
+    """Fetch and cache Plex server identity details."""
+
+    if server._plex_identity is not None:
+        return server._plex_identity
+    _ensure_plex_configuration()
+    base = str(server.settings.plex_url).rstrip("/")
+    url = f"{base}/"
+    async with httpx.AsyncClient(timeout=30) as client:
+        response = await client.get(url, headers=_plex_headers())
+    response.raise_for_status()
+    container = ElementTree.fromstring(response.text)
+    machine_identifier = container.attrib.get("machineIdentifier")
+    if not machine_identifier:
+        raise RuntimeError("Unable to determine Plex server machine identifier")
+    server._plex_identity = {"machineIdentifier": machine_identifier}
+    return server._plex_identity
+
+
+async def _get_plex_players() -> list[dict[str, Any]]:
+    """Return Plex players available for playback commands."""
+
+    _ensure_plex_configuration()
+    base = str(server.settings.plex_url).rstrip("/")
+    url = f"{base}/clients"
+    async with httpx.AsyncClient(timeout=30) as client:
+        response = await client.get(url, headers=_plex_headers())
+    response.raise_for_status()
+    container = ElementTree.fromstring(response.text)
+    aliases = server.settings.plex_player_aliases
+    players: list[dict[str, Any]] = []
+
+    for element in container:
+        if element.tag not in {"Server", "Device"}:
+            continue
+        provides = {
+            capability.strip().lower()
+            for capability in (element.get("provides") or "").split(",")
+            if capability.strip()
+        }
+        machine_id = element.get("machineIdentifier")
+        client_id = element.get("clientIdentifier")
+        address = element.get("address")
+        port_str = element.get("port")
+        port = int(port_str) if port_str and port_str.isdigit() else None
+        name = element.get("name")
+        product = element.get("product")
+
+        friendly_names: list[str] = []
+
+        def _collect_alias(identifier: str | None) -> None:
+            if not identifier:
+                return
+            alias = aliases.get(identifier)
+            if alias and alias not in friendly_names:
+                friendly_names.append(alias)
+
+        _collect_alias(machine_id)
+        _collect_alias(client_id)
+        if machine_id and client_id:
+            _collect_alias(f"{machine_id}:{client_id}")
+
+        display_name = (
+            friendly_names[0]
+            if friendly_names
+            else name
+            or product
+            or machine_id
+            or client_id
+            or "Unknown player"
+        )
+
+        players.append(
+            {
+                "name": name,
+                "product": product,
+                "display_name": display_name,
+                "friendly_names": friendly_names,
+                "machine_identifier": machine_id,
+                "client_identifier": client_id,
+                "address": address,
+                "port": port,
+                "provides": provides,
+            }
+        )
+
+    return players
+
+
+def _match_player(query: str, players: Sequence[dict[str, Any]]) -> dict[str, Any]:
+    """Locate a Plex player by friendly name or identifier."""
+
+    normalized = query.strip().lower()
+    for player in players:
+        candidates = {
+            player.get("display_name"),
+            player.get("name"),
+            player.get("product"),
+            player.get("machine_identifier"),
+            player.get("client_identifier"),
+        }
+        candidates.update(player.get("friendly_names", []))
+        machine_id = player.get("machine_identifier")
+        client_id = player.get("client_identifier")
+        if machine_id and client_id:
+            candidates.add(f"{machine_id}:{client_id}")
+        for candidate in candidates:
+            if candidate and candidate.lower() == normalized:
+                return player
+    raise ValueError(f"Player '{query}' not found")
+
+
+async def _start_playback(
+    rating_key: str, player: dict[str, Any], offset_seconds: int
+) -> None:
+    """Send a playback command to the selected player."""
+
+    if "player" not in player.get("provides", set()):
+        raise ValueError(
+            f"Player '{player.get('display_name')}' cannot be controlled for playback"
+        )
+    client_identifier = player.get("client_identifier")
+    if not client_identifier:
+        raise ValueError(
+            f"Player '{player.get('display_name')}' is missing a client identifier"
+        )
+
+    identity = await _fetch_plex_identity()
+    host, port, protocol = _server_connection_details()
+    base = str(server.settings.plex_url).rstrip("/")
+    play_url = f"{base}/player/playback/playMedia"
+    params = {
+        "key": f"/library/metadata/{rating_key}",
+        "machineIdentifier": identity["machineIdentifier"],
+        "address": host,
+        "port": port,
+        "protocol": protocol,
+        "offset": max(offset_seconds, 0) * 1000,
+    }
+    headers = _plex_headers({"X-Plex-Target-Client-Identifier": client_identifier})
+    async with httpx.AsyncClient(timeout=30) as client:
+        response = await client.post(play_url, headers=headers, params=params)
+    response.raise_for_status()
+
+
+@server.tool("play-media")
+async def play_media(
+    identifier: Annotated[
+        str,
+        Field(
+            description="Rating key, IMDb/TMDb ID, or media title",
+            examples=["49915", "tt8367814", "The Gentlemen"],
+        ),
+    ],
+    player: Annotated[
+        str,
+        Field(
+            description=(
+                "Friendly name, machine identifier, or client identifier of the"
+                " Plex player"
+            ),
+            examples=["Living Room", "machine-123"],
+        ),
+    ],
+    offset_seconds: Annotated[
+        int | None,
+        Field(
+            description="Start playback at the specified offset (seconds)",
+            ge=0,
+            examples=[0],
+        ),
+    ] = 0,
+) -> dict[str, Any]:
+    """Play a media item on a specific Plex player."""
+
+    media = await _get_media_data(identifier)
+    plex_info = media.get("plex") or {}
+    rating_key = plex_info.get("rating_key")
+    if not rating_key:
+        raise ValueError("Media item is missing a Plex rating key")
+
+    players = await _get_plex_players()
+    target = _match_player(player, players)
+    await _start_playback(str(rating_key), target, offset_seconds or 0)
+
+    return {
+        "player": target.get("display_name"),
+        "rating_key": str(rating_key),
+        "title": plex_info.get("title") or media.get("title"),
+        "offset_seconds": offset_seconds or 0,
+    }
 
 
 @server.tool("get-media")

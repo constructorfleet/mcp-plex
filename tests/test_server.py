@@ -9,6 +9,7 @@ from contextlib import contextmanager
 from pathlib import Path
 
 import builtins
+import httpx
 from qdrant_client import models
 import pytest
 from starlette.testclient import TestClient
@@ -177,6 +178,125 @@ def test_actor_movies(monkeypatch):
             )
         )
         assert none == []
+
+
+def test_play_media_requires_configuration(monkeypatch):
+    with _load_server(monkeypatch) as server:
+        with pytest.raises(RuntimeError):
+            asyncio.run(
+                server.play_media.fn(identifier="49915", player="Living Room")
+            )
+
+
+def test_play_media_with_alias(monkeypatch):
+    monkeypatch.setenv("PLEX_URL", "http://plex.test:32400")
+    monkeypatch.setenv("PLEX_TOKEN", "token")
+    monkeypatch.setenv(
+        "PLEX_PLAYER_ALIASES",
+        json.dumps(
+            {
+                "machine-123": "Living Room",
+                "client-abc": "Living Room",
+                "machine-123:client-abc": "Living Room",
+            }
+        ),
+    )
+
+    class MockAsyncClient:
+        def __init__(self, *args, **kwargs):
+            self.requests = request_log
+
+        async def __aenter__(self):
+            return self
+
+        async def __aexit__(self, exc_type, exc, tb):
+            return False
+
+        async def get(self, url, *, headers=None, params=None):
+            request_log.append(("GET", url, headers, params))
+            if url.endswith("/clients"):
+                body = (
+                    "<MediaContainer size=\"1\">"
+                    "<Server name=\"Plex for Apple TV\" product=\"Plex for Apple TV\""
+                    " address=\"10.0.0.5\" port=\"32500\""
+                    " machineIdentifier=\"machine-123\""
+                    " clientIdentifier=\"client-abc\""
+                    " provides=\"player,controller\"/>"
+                    "</MediaContainer>"
+                )
+                return httpx.Response(
+                    200, text=body, request=httpx.Request("GET", url)
+                )
+            if url.endswith("/"):
+                body = "<MediaContainer machineIdentifier=\"server-001\"/>"
+                return httpx.Response(
+                    200, text=body, request=httpx.Request("GET", url)
+                )
+            raise AssertionError(f"Unexpected GET {url}")
+
+        async def post(self, url, *, headers=None, params=None):
+            request_log.append(("POST", url, headers, params))
+            return httpx.Response(200, request=httpx.Request("POST", url))
+
+    request_log: list[tuple[str, str, dict | None, dict | None]] = []
+
+    with _load_server(monkeypatch) as server:
+        monkeypatch.setattr(server.httpx, "AsyncClient", MockAsyncClient)
+
+        result = asyncio.run(
+            server.play_media.fn(identifier="49915", player="Living Room")
+        )
+
+        assert result["player"] == "Living Room"
+        assert result["rating_key"] == "49915"
+        post_requests = [req for req in request_log if req[0] == "POST"]
+        assert post_requests, "Expected playback POST request"
+        _, url, headers, params = post_requests[0]
+        assert url.endswith("/player/playback/playMedia")
+        assert headers["X-Plex-Target-Client-Identifier"] == "client-abc"
+        assert params["key"] == "/library/metadata/49915"
+        assert params["machineIdentifier"] == "server-001"
+
+
+def test_play_media_requires_player_capability(monkeypatch):
+    monkeypatch.setenv("PLEX_URL", "http://plex.test:32400")
+    monkeypatch.setenv("PLEX_TOKEN", "token")
+
+    class MockAsyncClient:
+        def __init__(self, *args, **kwargs):
+            pass
+
+        async def __aenter__(self):
+            return self
+
+        async def __aexit__(self, exc_type, exc, tb):
+            return False
+
+        async def get(self, url, *, headers=None, params=None):
+            if url.endswith("/clients"):
+                body = (
+                    "<MediaContainer size=\"1\">"
+                    "<Server name=\"Controller Only\""
+                    " machineIdentifier=\"machine-999\""
+                    " clientIdentifier=\"client-999\""
+                    " provides=\"controller\"/>"
+                    "</MediaContainer>"
+                )
+                return httpx.Response(
+                    200, text=body, request=httpx.Request("GET", url)
+                )
+            body = "<MediaContainer machineIdentifier=\"server-001\"/>"
+            return httpx.Response(200, text=body, request=httpx.Request("GET", url))
+
+        async def post(self, url, *, headers=None, params=None):
+            raise AssertionError("Playback should not be attempted")
+
+    with _load_server(monkeypatch) as server:
+        monkeypatch.setattr(server.httpx, "AsyncClient", MockAsyncClient)
+        with pytest.raises(ValueError, match="cannot be controlled for playback"):
+            asyncio.run(
+                server.play_media.fn(identifier="49915", player="machine-999")
+            )
 
 
 def test_reranker_import_failure(monkeypatch):
