@@ -9,7 +9,7 @@ from contextlib import contextmanager
 from pathlib import Path
 
 import builtins
-import httpx
+from typing import Any
 from qdrant_client import models
 import pytest
 from starlette.testclient import TestClient
@@ -202,46 +202,42 @@ def test_play_media_with_alias(monkeypatch):
         ),
     )
 
-    class MockAsyncClient:
-        def __init__(self, *args, **kwargs):
-            self.requests = request_log
+    class FakeMedia:
+        def __init__(self, key: str) -> None:
+            self.key = key
 
-        async def __aenter__(self):
-            return self
+    play_requests: list[dict[str, Any]] = []
+    fetch_requests: list[str] = []
 
-        async def __aexit__(self, exc_type, exc, tb):
-            return False
+    class FakeClient:
+        def __init__(self) -> None:
+            self.machineIdentifier = "machine-123"
+            self.clientIdentifier = "client-abc"
+            self.provides = "player,controller"
+            self.address = "10.0.0.5"
+            self.port = 32500
+            self.product = "Plex for Apple TV"
+            self.title = "Plex for Apple TV"
 
-        async def get(self, url, *, headers=None, params=None):
-            request_log.append(("GET", url, headers, params))
-            if url.endswith("/clients"):
-                body = (
-                    "<MediaContainer size=\"1\">"
-                    "<Server name=\"Plex for Apple TV\" product=\"Plex for Apple TV\""
-                    " address=\"10.0.0.5\" port=\"32500\""
-                    " machineIdentifier=\"machine-123\""
-                    " clientIdentifier=\"client-abc\""
-                    " provides=\"player,controller\"/>"
-                    "</MediaContainer>"
-                )
-                return httpx.Response(
-                    200, text=body, request=httpx.Request("GET", url)
-                )
-            if url.endswith("/"):
-                body = "<MediaContainer machineIdentifier=\"server-001\"/>"
-                return httpx.Response(
-                    200, text=body, request=httpx.Request("GET", url)
-                )
-            raise AssertionError(f"Unexpected GET {url}")
+        def playMedia(self, media: FakeMedia, **kwargs: Any) -> None:
+            play_requests.append({"media": media, "kwargs": kwargs})
 
-        async def post(self, url, *, headers=None, params=None):
-            request_log.append(("POST", url, headers, params))
-            return httpx.Response(200, request=httpx.Request("POST", url))
+    class FakePlex:
+        def __init__(self, baseurl: str, token: str) -> None:
+            assert baseurl.rstrip("/") == "http://plex.test:32400"
+            assert token == "token"
+            self.machineIdentifier = "server-001"
+            self._client = FakeClient()
 
-    request_log: list[tuple[str, str, dict | None, dict | None]] = []
+        def clients(self) -> list[FakeClient]:
+            return [self._client]
+
+        def fetchItem(self, key: str) -> FakeMedia:
+            fetch_requests.append(key)
+            return FakeMedia(key)
 
     with _load_server(monkeypatch) as server:
-        monkeypatch.setattr(server.httpx, "AsyncClient", MockAsyncClient)
+        monkeypatch.setattr(server, "PlexServerClient", FakePlex)
 
         result = asyncio.run(
             server.play_media.fn(identifier="49915", player="Living Room")
@@ -249,50 +245,47 @@ def test_play_media_with_alias(monkeypatch):
 
         assert result["player"] == "Living Room"
         assert result["rating_key"] == "49915"
-        post_requests = [req for req in request_log if req[0] == "POST"]
-        assert post_requests, "Expected playback POST request"
-        _, url, headers, params = post_requests[0]
-        assert url.endswith("/player/playback/playMedia")
-        assert headers["X-Plex-Target-Client-Identifier"] == "client-abc"
-        assert params["key"] == "/library/metadata/49915"
-        assert params["machineIdentifier"] == "server-001"
+        assert fetch_requests == ["/library/metadata/49915"]
+        assert play_requests, "Expected plexapi playMedia call"
+        play_call = play_requests[0]
+        assert isinstance(play_call["media"], FakeMedia)
+        assert play_call["media"].key == "/library/metadata/49915"
+        assert play_call["kwargs"]["machineIdentifier"] == "server-001"
+        assert play_call["kwargs"]["offset"] == 0
 
 
 def test_play_media_requires_player_capability(monkeypatch):
     monkeypatch.setenv("PLEX_URL", "http://plex.test:32400")
     monkeypatch.setenv("PLEX_TOKEN", "token")
 
-    class MockAsyncClient:
-        def __init__(self, *args, **kwargs):
-            pass
+    class FakeClient:
+        def __init__(self) -> None:
+            self.machineIdentifier = "machine-999"
+            self.clientIdentifier = "client-999"
+            self.provides = "controller"
+            self.address = "10.0.0.10"
+            self.port = 32500
+            self.product = "Controller Only"
+            self.title = "Controller Only"
 
-        async def __aenter__(self):
-            return self
-
-        async def __aexit__(self, exc_type, exc, tb):
-            return False
-
-        async def get(self, url, *, headers=None, params=None):
-            if url.endswith("/clients"):
-                body = (
-                    "<MediaContainer size=\"1\">"
-                    "<Server name=\"Controller Only\""
-                    " machineIdentifier=\"machine-999\""
-                    " clientIdentifier=\"client-999\""
-                    " provides=\"controller\"/>"
-                    "</MediaContainer>"
-                )
-                return httpx.Response(
-                    200, text=body, request=httpx.Request("GET", url)
-                )
-            body = "<MediaContainer machineIdentifier=\"server-001\"/>"
-            return httpx.Response(200, text=body, request=httpx.Request("GET", url))
-
-        async def post(self, url, *, headers=None, params=None):
+        def playMedia(self, *args: Any, **kwargs: Any) -> None:
             raise AssertionError("Playback should not be attempted")
 
+    class FakePlex:
+        def __init__(self, baseurl: str, token: str) -> None:
+            assert baseurl.rstrip("/") == "http://plex.test:32400"
+            assert token == "token"
+            self.machineIdentifier = "server-001"
+            self._client = FakeClient()
+
+        def clients(self) -> list[FakeClient]:
+            return [self._client]
+
+        def fetchItem(self, key: str) -> Any:
+            raise AssertionError("fetchItem should not be called")
+
     with _load_server(monkeypatch) as server:
-        monkeypatch.setattr(server.httpx, "AsyncClient", MockAsyncClient)
+        monkeypatch.setattr(server, "PlexServerClient", FakePlex)
         with pytest.raises(ValueError, match="cannot be controlled for playback"):
             asyncio.run(
                 server.play_media.fn(identifier="49915", player="machine-999")
