@@ -3,6 +3,7 @@ from __future__ import annotations
 import asyncio
 import json
 from pathlib import Path
+from typing import Any
 
 from qdrant_client.async_qdrant_client import AsyncQdrantClient
 from qdrant_client import models
@@ -15,6 +16,7 @@ class CaptureClient(AsyncQdrantClient):
     instance: "CaptureClient" | None = None
     captured_points: list[models.PointStruct] = []
     upsert_calls: int = 0
+    created_indexes: list[tuple[str, Any]] = []
 
     def __init__(self, *args, **kwargs):
         super().__init__(*args, **kwargs)
@@ -25,6 +27,21 @@ class CaptureClient(AsyncQdrantClient):
         CaptureClient.captured_points.extend(points)
         return await super().upsert(
             collection_name=collection_name, points=points, **kwargs
+        )
+
+    async def create_payload_index(
+        self,
+        collection_name: str,
+        field_name: str,
+        field_schema: models.PayloadSchemaType | models.TextIndexParams,
+        wait: bool | None = None,
+    ) -> models.UpdateResult:
+        CaptureClient.created_indexes.append((field_name, field_schema))
+        return await super().create_payload_index(
+            collection_name=collection_name,
+            field_name=field_name,
+            field_schema=field_schema,
+            wait=wait,
         )
 
 
@@ -43,10 +60,15 @@ def test_run_writes_points(monkeypatch):
     monkeypatch.setattr(loader, "AsyncQdrantClient", CaptureClient)
     CaptureClient.captured_points = []
     CaptureClient.upsert_calls = 0
+    CaptureClient.created_indexes = []
     sample_dir = Path(__file__).resolve().parents[1] / "sample-data"
     asyncio.run(_run_loader(sample_dir))
     client = CaptureClient.instance
     assert client is not None
+    index_map = {name: schema for name, schema in CaptureClient.created_indexes}
+    assert index_map.get("show_title") == models.PayloadSchemaType.KEYWORD
+    assert index_map.get("season_number") == models.PayloadSchemaType.INTEGER
+    assert index_map.get("episode_number") == models.PayloadSchemaType.INTEGER
     points, _ = asyncio.run(client.scroll("media-items", limit=10, with_payload=True))
     assert len(points) == 2
     assert all("title" in p.payload and "type" in p.payload for p in points)
@@ -59,6 +81,28 @@ def test_run_writes_points(monkeypatch):
         p.vector["sparse"].model == "Qdrant/bm42-all-minilm-l6-v2-attentions"
         for p in captured
     )
+    texts = [p.vector["dense"].text for p in captured]
+    assert any("Directed by" in t for t in texts)
+    assert any("Starring" in t for t in texts)
+    movie_point = next(p for p in points if p.payload["type"] == "movie")
+    assert "directors" in movie_point.payload and "Guy Ritchie" in movie_point.payload["directors"]
+    assert "writers" in movie_point.payload and movie_point.payload["writers"]
+    assert "genres" in movie_point.payload and movie_point.payload["genres"]
+    assert movie_point.payload.get("summary")
+    assert movie_point.payload.get("overview")
+    assert movie_point.payload.get("plot")
+    assert movie_point.payload.get("tagline")
+    assert movie_point.payload.get("reviews")
+    episode_point = next(p for p in points if p.payload["type"] == "episode")
+    assert episode_point.payload.get("show_title") == "Alien: Earth"
+    assert episode_point.payload.get("season_title") == "Season 1"
+    assert episode_point.payload.get("season_number") == 1
+    assert episode_point.payload.get("episode_number") == 4
+    episode_vector = next(
+        p for p in captured if p.payload.get("type") == "episode"
+    ).vector["dense"].text
+    assert "Alien: Earth" in episode_vector
+    assert "S01E04" in episode_vector
 
 
 def test_run_processes_imdb_queue(monkeypatch, tmp_path):

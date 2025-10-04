@@ -82,6 +82,11 @@ def test_server_tools(monkeypatch):
         res = asyncio.run(server.get_media.fn(identifier="tt8367814"))
         assert res and res[0]["plex"]["rating_key"] == movie_id
 
+        episode = asyncio.run(server.get_media.fn(identifier="61960"))
+        assert episode and episode[0]["show_title"] == "Alien: Earth"
+        assert episode[0]["season_number"] == 1
+        assert episode[0]["episode_number"] == 4
+
         poster = asyncio.run(server.media_poster.fn(identifier=movie_id))
         assert isinstance(poster, str) and "thumb" in poster
         assert server.server.cache.get_poster(movie_id) == poster
@@ -104,6 +109,30 @@ def test_server_tools(monkeypatch):
             server.search_media.fn(query="Matthew McConaughey crime movie", limit=1)
         )
         assert res and res[0]["plex"]["title"] == "The Gentlemen"
+
+        structured = asyncio.run(
+            server.query_media.fn(
+                dense_query="crime comedy",
+                title="Gentlemen",
+                type="movie",
+                directors=["Guy Ritchie"],
+                limit=1,
+            )
+        )
+        assert structured and structured[0]["plex"]["title"] == "The Gentlemen"
+        assert "directors" in structured[0]
+
+        episode_structured = asyncio.run(
+            server.query_media.fn(
+                type="episode",
+                show_title="Alien: Earth",
+                season_number=1,
+                episode_number=4,
+                limit=1,
+            )
+        )
+        assert episode_structured and episode_structured[0]["plex"]["rating_key"] == "61960"
+        assert episode_structured[0]["show_title"] == "Alien: Earth"
 
         rec = asyncio.run(server.recommend_media.fn(identifier=movie_id, limit=1))
         assert rec and rec[0]["plex"]["rating_key"] == "61960"
@@ -129,6 +158,9 @@ def test_new_media_tools(monkeypatch):
         shows = asyncio.run(server.new_shows.fn(limit=1))
         assert shows and shows[0]["plex"]["type"] == "episode"
         assert shows[0]["plex"]["added_at"] is not None
+        assert shows[0]["show_title"] == "Alien: Earth"
+        assert shows[0]["season_number"] == 1
+        assert shows[0]["episode_number"] == 4
 
 
 def test_actor_movies(monkeypatch):

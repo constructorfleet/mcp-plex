@@ -6,7 +6,7 @@ import asyncio
 import inspect
 import json
 import os
-from typing import Annotated, Any, Callable
+from typing import Annotated, Any, Callable, Sequence
 
 from fastapi import FastAPI
 from fastapi.openapi.docs import get_swagger_ui_html
@@ -166,6 +166,17 @@ async def _find_records(identifier: str, limit: int = 5) -> list[models.Record]:
     return points
 
 
+def _flatten_payload(payload: dict[str, Any]) -> dict[str, Any]:
+    """Merge top-level payload fields with the nested data block."""
+
+    data = dict(payload.get("data", {}))
+    for key, value in payload.items():
+        if key == "data":
+            continue
+        data[key] = value
+    return data
+
+
 async def _get_media_data(identifier: str) -> dict[str, Any]:
     """Return the first matching media record's payload."""
     cached = server.cache.get_payload(identifier)
@@ -174,17 +185,18 @@ async def _get_media_data(identifier: str) -> dict[str, Any]:
     records = await _find_records(identifier, limit=1)
     if not records:
         raise ValueError("Media item not found")
-    data = records[0].payload["data"]
+    payload = _flatten_payload(records[0].payload)
+    data = payload
     rating_key = str(data.get("plex", {}).get("rating_key"))
     if rating_key:
-        server.cache.set_payload(rating_key, data)
+        server.cache.set_payload(rating_key, payload)
         thumb = data.get("plex", {}).get("thumb")
         if thumb:
             server.cache.set_poster(rating_key, thumb)
         art = data.get("plex", {}).get("art")
         if art:
             server.cache.set_background(rating_key, art)
-    return data
+    return payload
 
 
 @server.tool("get-media")
@@ -199,7 +211,7 @@ async def get_media(
 ) -> list[dict[str, Any]]:
     """Retrieve media items by rating key, IMDb/TMDb ID or title."""
     records = await _find_records(identifier, limit=10)
-    return [r.payload["data"] for r in records]
+    return [_flatten_payload(r.payload) for r in records]
 
 
 @server.tool("search-media")
@@ -248,7 +260,7 @@ async def search_media(
     hits = res.points
 
     async def _prefetch(hit: models.ScoredPoint) -> None:
-        data = hit.payload["data"]
+        data = _flatten_payload(hit.payload)
         rating_key = str(data.get("plex", {}).get("rating_key"))
         if rating_key:
             server.cache.set_payload(rating_key, data)
@@ -266,7 +278,7 @@ async def search_media(
             return hits
         docs: list[str] = []
         for h in hits:
-            data = h.payload["data"]
+            data = _flatten_payload(h.payload)
             parts = [
                 data.get("title"),
                 data.get("summary"),
@@ -274,6 +286,40 @@ async def search_media(
                 data.get("plex", {}).get("summary"),
                 data.get("tmdb", {}).get("overview"),
             ]
+            directors = data.get("directors") or data.get("plex", {}).get("directors")
+            writers = data.get("writers") or data.get("plex", {}).get("writers")
+            actors = data.get("actors") or data.get("plex", {}).get("actors")
+
+            def _join_people(values: Any) -> str:
+                if isinstance(values, list):
+                    names = []
+                    for val in values:
+                        if isinstance(val, str) and val:
+                            names.append(val)
+                        elif isinstance(val, dict):
+                            tag = val.get("tag") or val.get("name")
+                            if tag:
+                                names.append(str(tag))
+                    return ", ".join(names)
+                if isinstance(values, str):
+                    return values
+                return ""
+
+            director_names = _join_people(directors)
+            writer_names = _join_people(writers)
+            actor_names = _join_people(actors)
+            if director_names:
+                parts.append(f"Directed by {director_names}")
+            if writer_names:
+                parts.append(f"Written by {writer_names}")
+            if actor_names:
+                parts.append(f"Starring {actor_names}")
+            tagline = data.get("tagline") or data.get("plex", {}).get("tagline")
+            if tagline:
+                parts.append(tagline if isinstance(tagline, str) else "\n".join(tagline))
+            reviews = data.get("reviews")
+            if isinstance(reviews, list):
+                parts.extend(str(r) for r in reviews if r)
             docs.append(" ".join(p for p in parts if p))
         pairs = [(query, d) for d in docs]
         scores = reranker.predict(pairs)
@@ -284,7 +330,299 @@ async def search_media(
 
     reranked = await asyncio.to_thread(_rerank, hits)
     await prefetch_task
-    return [h.payload["data"] for h in reranked[:limit]]
+    return [_flatten_payload(h.payload) for h in reranked[:limit]]
+
+
+@server.tool("query-media")
+async def query_media(
+    dense_query: Annotated[
+        str | None,
+        Field(
+            description="Text used to generate a dense vector query",
+            examples=["british crime comedy"],
+        ),
+    ] = None,
+    sparse_query: Annotated[
+        str | None,
+        Field(
+            description="Text used to generate a sparse vector query",
+            examples=["british crime comedy"],
+        ),
+    ] = None,
+    title: Annotated[
+        str | None,
+        Field(description="Full-text title match", examples=["The Gentlemen"]),
+    ] = None,
+    type: Annotated[
+        str | None,
+        Field(
+            description="Filter by media type",
+            examples=["movie"],
+        ),
+    ] = None,
+    year: Annotated[
+        int | None,
+        Field(description="Exact release year", examples=[2020]),
+    ] = None,
+    year_from: Annotated[
+        int | None,
+        Field(description="Minimum release year", examples=[2018]),
+    ] = None,
+    year_to: Annotated[
+        int | None,
+        Field(description="Maximum release year", examples=[2024]),
+    ] = None,
+    added_after: Annotated[
+        int | None,
+        Field(
+            description="Minimum added_at timestamp (seconds since epoch)",
+            examples=[1_700_000_000],
+        ),
+    ] = None,
+    added_before: Annotated[
+        int | None,
+        Field(
+            description="Maximum added_at timestamp (seconds since epoch)",
+            examples=[1_760_000_000],
+        ),
+    ] = None,
+    actors: Annotated[
+        Sequence[str] | None,
+        Field(description="Match actors by name", examples=[["Matthew McConaughey"]]),
+    ] = None,
+    directors: Annotated[
+        Sequence[str] | None,
+        Field(description="Match directors by name", examples=[["Guy Ritchie"]]),
+    ] = None,
+    writers: Annotated[
+        Sequence[str] | None,
+        Field(description="Match writers by name", examples=[["Guy Ritchie"]]),
+    ] = None,
+    genres: Annotated[
+        Sequence[str] | None,
+        Field(description="Match genre tags", examples=[["Action", "Comedy"]]),
+    ] = None,
+    collections: Annotated[
+        Sequence[str] | None,
+        Field(description="Match Plex collection names", examples=[["John Wick Collection"]]),
+    ] = None,
+    show_title: Annotated[
+        str | None,
+        Field(description="Match the parent show title", examples=["Alien: Earth"]),
+    ] = None,
+    season_number: Annotated[
+        int | None,
+        Field(description="Match the season number", examples=[1]),
+    ] = None,
+    episode_number: Annotated[
+        int | None,
+        Field(description="Match the episode number", examples=[4]),
+    ] = None,
+    summary: Annotated[
+        str | None,
+        Field(description="Full-text search within Plex summaries", examples=["marijuana empire"]),
+    ] = None,
+    overview: Annotated[
+        str | None,
+        Field(description="Full-text search within TMDb overviews", examples=["criminal underworld"]),
+    ] = None,
+    plot: Annotated[
+        str | None,
+        Field(description="Full-text search within IMDb plots", examples=["drug lord"]),
+    ] = None,
+    tagline: Annotated[
+        str | None,
+        Field(description="Full-text search within taglines", examples=["criminal class"]),
+    ] = None,
+    reviews: Annotated[
+        str | None,
+        Field(description="Full-text search within review content", examples=["hilarious"]),
+    ] = None,
+    plex_rating_key: Annotated[
+        str | None,
+        Field(
+            description="Match a specific Plex rating key",
+            examples=["49915"],
+        ),
+    ] = None,
+    imdb_id: Annotated[
+        str | None,
+        Field(description="Match an IMDb identifier", examples=["tt8367814"]),
+    ] = None,
+    tmdb_id: Annotated[
+        int | None,
+        Field(description="Match a TMDb identifier", examples=[568467]),
+    ] = None,
+    limit: Annotated[
+        int,
+        Field(description="Maximum number of results to return", ge=1, le=50, examples=[5]),
+    ] = 5,
+) -> list[dict[str, Any]]:
+    """Run a structured query against indexed payload fields and optional vector searches."""
+
+    def _listify(value: Sequence[str] | str | None) -> list[str]:
+        if value is None:
+            return []
+        if isinstance(value, str):
+            return [value]
+        return [v for v in value if isinstance(v, str) and v]
+
+    vector_queries: list[tuple[str, models.Document]] = []
+    if dense_query:
+        vector_queries.append(
+            (
+                "dense",
+                models.Document(text=dense_query, model=server.settings.dense_model),
+            )
+        )
+    if sparse_query:
+        vector_queries.append(
+            (
+                "sparse",
+                models.Document(text=sparse_query, model=server.settings.sparse_model),
+            )
+        )
+
+    prefetch_entries: list[models.Prefetch] = []
+    for name, doc in vector_queries:
+        prefetch_entries.append(
+            models.Prefetch(
+                query=models.NearestQuery(nearest=doc),
+                using=name,
+                limit=limit,
+            )
+        )
+
+    if len(prefetch_entries) > 1:
+        candidate_limit = limit * 3
+        prefetch_entries = [
+            models.Prefetch(query=p.query, using=p.using, limit=candidate_limit)
+            for p in prefetch_entries
+        ]
+        query_obj: models.Query = models.FusionQuery(fusion=models.Fusion.RRF)
+        using_param = None
+        prefetch_param: Sequence[models.Prefetch] | None = prefetch_entries
+    elif prefetch_entries:
+        query_obj = prefetch_entries[0].query
+        using_param = prefetch_entries[0].using
+        prefetch_param = None
+    else:
+        query_obj = None
+        using_param = None
+        prefetch_param = None
+
+    must: list[models.FieldCondition] = []
+
+    if title:
+        must.append(models.FieldCondition(key="title", match=models.MatchText(text=title)))
+    media_type = type
+    if media_type:
+        must.append(
+            models.FieldCondition(key="type", match=models.MatchValue(value=media_type))
+        )
+    if year is not None:
+        must.append(models.FieldCondition(key="year", match=models.MatchValue(value=year)))
+    if year_from is not None or year_to is not None:
+        rng: dict[str, int] = {}
+        if year_from is not None:
+            rng["gte"] = year_from
+        if year_to is not None:
+            rng["lte"] = year_to
+        must.append(models.FieldCondition(key="year", range=models.Range(**rng)))
+    if added_after is not None or added_before is not None:
+        rng_at: dict[str, int] = {}
+        if added_after is not None:
+            rng_at["gte"] = added_after
+        if added_before is not None:
+            rng_at["lte"] = added_before
+        must.append(models.FieldCondition(key="added_at", range=models.Range(**rng_at)))
+
+    for actor in _listify(actors):
+        must.append(models.FieldCondition(key="actors", match=models.MatchValue(value=actor)))
+    for director in _listify(directors):
+        must.append(
+            models.FieldCondition(key="directors", match=models.MatchValue(value=director))
+        )
+    for writer in _listify(writers):
+        must.append(
+            models.FieldCondition(key="writers", match=models.MatchValue(value=writer))
+        )
+    for genre in _listify(genres):
+        must.append(models.FieldCondition(key="genres", match=models.MatchValue(value=genre)))
+    for collection in _listify(collections):
+        must.append(
+            models.FieldCondition(
+                key="collections", match=models.MatchValue(value=collection)
+            )
+        )
+
+    if show_title:
+        must.append(
+            models.FieldCondition(
+                key="show_title", match=models.MatchValue(value=show_title)
+            )
+        )
+    if season_number is not None:
+        must.append(
+            models.FieldCondition(
+                key="season_number", match=models.MatchValue(value=season_number)
+            )
+        )
+    if episode_number is not None:
+        must.append(
+            models.FieldCondition(
+                key="episode_number", match=models.MatchValue(value=episode_number)
+            )
+        )
+
+    if summary:
+        must.append(models.FieldCondition(key="summary", match=models.MatchText(text=summary)))
+    if overview:
+        must.append(models.FieldCondition(key="overview", match=models.MatchText(text=overview)))
+    if plot:
+        must.append(models.FieldCondition(key="plot", match=models.MatchText(text=plot)))
+    if tagline:
+        must.append(models.FieldCondition(key="tagline", match=models.MatchText(text=tagline)))
+    if reviews:
+        must.append(models.FieldCondition(key="reviews", match=models.MatchText(text=reviews)))
+
+    if plex_rating_key:
+        must.append(
+            models.FieldCondition(
+                key="data.plex.rating_key",
+                match=models.MatchValue(value=plex_rating_key),
+            )
+        )
+    if imdb_id:
+        must.append(
+            models.FieldCondition(
+                key="data.imdb.id", match=models.MatchValue(value=imdb_id)
+            )
+        )
+    if tmdb_id is not None:
+        must.append(
+            models.FieldCondition(
+                key="data.tmdb.id", match=models.MatchValue(value=tmdb_id)
+            )
+        )
+
+    filter_obj: models.Filter | None = None
+    if must:
+        filter_obj = models.Filter(must=must)
+
+    if query_obj is None:
+        query_obj = models.SampleQuery(sample=models.Sample.RANDOM)
+
+    res = await server.qdrant_client.query_points(
+        collection_name="media-items",
+        query=query_obj,
+        using=using_param,
+        prefetch=prefetch_param,
+        query_filter=filter_obj,
+        limit=limit,
+        with_payload=True,
+    )
+    return [_flatten_payload(p.payload) for p in res.points]
 
 
 @server.tool("recommend-media")
@@ -320,7 +658,7 @@ async def recommend_media(
         with_payload=True,
         using="dense",
     )
-    return [r.payload["data"] for r in recs]
+    return [_flatten_payload(r.payload) for r in recs]
 
 
 @server.tool("new-movies")
@@ -353,7 +691,7 @@ async def new_movies(
         limit=limit,
         with_payload=True,
     )
-    return [p.payload["data"] for p in res.points]
+    return [_flatten_payload(p.payload) for p in res.points]
 
 
 @server.tool("new-shows")
@@ -386,7 +724,7 @@ async def new_shows(
         limit=limit,
         with_payload=True,
     )
-    return [p.payload["data"] for p in res.points]
+    return [_flatten_payload(p.payload) for p in res.points]
 
 
 @server.tool("actor-movies")
@@ -439,7 +777,7 @@ async def actor_movies(
         limit=limit,
         with_payload=True,
     )
-    return [p.payload["data"] for p in res.points]
+    return [_flatten_payload(p.payload) for p in res.points]
 
 
 @server.resource("resource://media-item/{identifier}")
