@@ -503,6 +503,68 @@ def test_upsert_in_batches_handles_errors(monkeypatch):
     assert client.calls == 3
 
 
+def test_upsert_in_batches_enqueues_retry_batches(monkeypatch):
+    class DummyClient:
+        def __init__(self):
+            self.calls = 0
+
+        async def upsert(self, collection_name: str, points, **kwargs):
+            self.calls += 1
+            if self.calls == 1:
+                raise httpx.ReadTimeout("timeout", request=httpx.Request("POST", ""))
+
+    client = DummyClient()
+    points = [models.PointStruct(id=i, vector={}, payload={}) for i in range(2)]
+    retry_queue: asyncio.Queue[list[models.PointStruct]] = asyncio.Queue()
+    monkeypatch.setattr(loader, "_qdrant_batch_size", 1)
+
+    async def main() -> None:
+        await loader._upsert_in_batches(
+            client,
+            "collection",
+            points,
+            retry_queue=retry_queue,
+        )
+
+    asyncio.run(main())
+    assert retry_queue.qsize() == 1
+
+
+def test_process_qdrant_retry_queue_retries_batches(monkeypatch):
+    class DummyClient:
+        def __init__(self):
+            self.calls = 0
+
+        async def upsert(self, collection_name: str, points, **kwargs):
+            self.calls += 1
+            if self.calls < 2:
+                raise httpx.ReadTimeout("timeout", request=httpx.Request("POST", ""))
+
+    client = DummyClient()
+    retry_queue: asyncio.Queue[list[models.PointStruct]] = asyncio.Queue()
+
+    async def main() -> None:
+        retry_queue.put_nowait(
+            [models.PointStruct(id=1, vector={}, payload={})]
+        )
+        monkeypatch.setattr(loader, "_qdrant_retry_attempts", 2)
+        monkeypatch.setattr(loader, "_qdrant_retry_backoff", 0.01)
+
+        sleeps: list[float] = []
+
+        async def fake_sleep(delay: float) -> None:
+            sleeps.append(delay)
+
+        monkeypatch.setattr(loader.asyncio, "sleep", fake_sleep)
+
+        await loader._process_qdrant_retry_queue(client, "collection", retry_queue)
+        assert sleeps == [0.02]
+
+    asyncio.run(main())
+    assert client.calls == 2
+    assert retry_queue.empty()
+
+
 def test_resolve_dense_model_params_known_model():
     size, distance = _resolve_dense_model_params("BAAI/bge-small-en-v1.5")
     assert size == 384
@@ -676,7 +738,7 @@ def test_run_live_loader_builds_payload_with_collections(monkeypatch):
 
     recorded_batches: list[list[models.PointStruct]] = []
 
-    async def record_upsert(client, collection_name: str, points):
+    async def record_upsert(client, collection_name: str, points, **kwargs):
         recorded_batches.append(list(points))
 
     monkeypatch.setattr(loader, "_upsert_in_batches", record_upsert)

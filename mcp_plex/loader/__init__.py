@@ -57,6 +57,8 @@ _imdb_batch_limit: int = 5
 _qdrant_batch_size: int = 1000
 _qdrant_upsert_buffer_size: int = 200
 _qdrant_max_concurrent_upserts: int = 4
+_qdrant_retry_attempts: int = 3
+_qdrant_retry_backoff: float = 1.0
 
 
 def _require_positive(value: int, *, name: str) -> int:
@@ -304,6 +306,8 @@ async def _upsert_in_batches(
     client: AsyncQdrantClient,
     collection_name: str,
     points: Sequence[models.PointStruct],
+    *,
+    retry_queue: asyncio.Queue[list[models.PointStruct]] | None = None,
 ) -> None:
     """Upsert points into Qdrant in batches, logging HTTP errors."""
 
@@ -316,10 +320,59 @@ async def _upsert_in_batches(
             logger.exception(
                 "Failed to upsert batch %d-%d", i, i + len(batch)
             )
+            if retry_queue is not None:
+                await retry_queue.put(list(batch))
         else:
             logger.info(
                 "Upserted %d/%d points", min(i + len(batch), total), total
             )
+
+
+async def _process_qdrant_retry_queue(
+    client: AsyncQdrantClient,
+    collection_name: str,
+    retry_queue: asyncio.Queue[list[models.PointStruct]],
+) -> None:
+    """Retry failed Qdrant batches with exponential backoff."""
+
+    if retry_queue.empty():
+        return
+
+    pending = retry_queue.qsize()
+    logger.info("Retrying %d failed Qdrant batches", pending)
+    while not retry_queue.empty():
+        batch = await retry_queue.get()
+        attempt = 1
+        while attempt <= _qdrant_retry_attempts:
+            try:
+                await client.upsert(
+                    collection_name=collection_name,
+                    points=batch,
+                )
+            except Exception:
+                logger.exception(
+                    "Retry %d/%d failed for Qdrant batch of %d points",
+                    attempt,
+                    _qdrant_retry_attempts,
+                    len(batch),
+                )
+                attempt += 1
+                if attempt > _qdrant_retry_attempts:
+                    logger.error(
+                        "Giving up on Qdrant batch after %d attempts; %d points were not indexed",
+                        _qdrant_retry_attempts,
+                        len(batch),
+                    )
+                    break
+                await asyncio.sleep(_qdrant_retry_backoff * attempt)
+                continue
+            else:
+                logger.info(
+                    "Successfully retried Qdrant batch of %d points on attempt %d",
+                    len(batch),
+                    attempt,
+                )
+                break
 
 
 async def _ensure_collection(
@@ -857,6 +910,7 @@ async def run(
 
     points_buffer: List[models.PointStruct] = []
     upsert_tasks: set[asyncio.Task[None]] = set()
+    qdrant_retry_queue: asyncio.Queue[list[models.PointStruct]] = asyncio.Queue()
     max_concurrent_upserts = _require_positive(
         _qdrant_max_concurrent_upserts, name="max_concurrent_upserts"
     )
@@ -873,6 +927,7 @@ async def run(
                 client,
                 collection_name,
                 batch,
+                retry_queue=qdrant_retry_queue,
             )
         )
         upsert_tasks.add(task)
@@ -1006,6 +1061,8 @@ async def run(
         await asyncio.gather(*upsert_tasks)
     else:
         logger.info("No points to upsert")
+
+    await _process_qdrant_retry_queue(client, collection_name, qdrant_retry_queue)
 
     if imdb_queue_path:
         _persist_imdb_retry_queue(imdb_queue_path)

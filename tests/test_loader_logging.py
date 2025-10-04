@@ -75,7 +75,7 @@ def test_run_limits_concurrent_upserts(monkeypatch):
     started = asyncio.Queue()
     release_queue = asyncio.Queue()
 
-    async def fake_upsert(client, collection_name, points):
+    async def fake_upsert(client, collection_name, points, **kwargs):
         concurrency["current"] += 1
         concurrency["max"] = max(concurrency["max"], concurrency["current"])
         await started.put(None)
@@ -113,7 +113,7 @@ def test_run_ensures_collection_before_loading(monkeypatch):
         async for item in orig_iter(sample_dir):
             yield item
 
-    async def fake_upsert(client, collection_name, points):
+    async def fake_upsert(client, collection_name, points, **kwargs):
         return None
 
     monkeypatch.setattr(loader, "_ensure_collection", fake_ensure)
