@@ -2,7 +2,7 @@ import asyncio
 import types
 
 import httpx
-
+from urllib.parse import urlparse
 from mcp_plex import loader
 from mcp_plex.types import TMDBShow
 
@@ -60,7 +60,8 @@ def test_load_from_plex(monkeypatch):
 
     async def handler(request):
         url = str(request.url)
-        if "themoviedb.org" in url:
+        hostname = urlparse(url).hostname
+        if hostname and (hostname == "themoviedb.org" or hostname.endswith(".themoviedb.org")):
             assert request.headers.get("Authorization") == "Bearer key"
         if "titles:batchGet" in url:
             ids = request.url.params.get_list("titleIds")
