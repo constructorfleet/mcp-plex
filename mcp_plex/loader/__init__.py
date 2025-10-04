@@ -9,6 +9,7 @@ import sys
 import warnings
 from collections import deque
 from pathlib import Path
+from types import TracebackType
 from typing import AsyncIterator, Awaitable, Iterable, List, Optional, Sequence, TypeVar
 
 import click
@@ -909,35 +910,51 @@ async def run(
         item_iter = _iter_from_plex(server, tmdb_api_key)
 
     points_buffer: List[models.PointStruct] = []
-    upsert_tasks: set[asyncio.Task[None]] = set()
     qdrant_retry_queue: asyncio.Queue[list[models.PointStruct]] = asyncio.Queue()
     max_concurrent_upserts = _require_positive(
         _qdrant_max_concurrent_upserts, name="max_concurrent_upserts"
     )
+    upsert_queue: asyncio.Queue[List[models.PointStruct] | None] = asyncio.Queue()
+    upsert_capacity = asyncio.Semaphore(max_concurrent_upserts)
+    batches_enqueued = 0
+    worker_error: Exception | None = None
+    worker_error_tb: TracebackType | None = None
+    worker_error_lock = asyncio.Lock()
 
-    async def _schedule_upsert(batch: List[models.PointStruct]) -> None:
-        logger.info(
-            "Upserting %d points into Qdrant collection %s in batches of %d",
-            len(batch),
-            collection_name,
-            _qdrant_batch_size,
-        )
-        task = asyncio.create_task(
-            _upsert_in_batches(
-                client,
+    async def _upsert_worker() -> None:
+        nonlocal worker_error, worker_error_tb
+        while True:
+            batch = await upsert_queue.get()
+            if batch is None:
+                upsert_queue.task_done()
+                break
+            logger.info(
+                "Upserting %d points into Qdrant collection %s using batches of up to %d",
+                len(batch),
                 collection_name,
-                batch,
-                retry_queue=qdrant_retry_queue,
+                _qdrant_batch_size,
             )
-        )
-        upsert_tasks.add(task)
-        if len(upsert_tasks) >= max_concurrent_upserts:
-            done, _ = await asyncio.wait(
-                upsert_tasks, return_when=asyncio.FIRST_COMPLETED
-            )
-            for finished in done:
-                upsert_tasks.discard(finished)
-                finished.result()
+            try:
+                await _upsert_in_batches(
+                    client,
+                    collection_name,
+                    batch,
+                    retry_queue=qdrant_retry_queue,
+                )
+            except Exception as exc:  # defensive guard
+                async with worker_error_lock:
+                    if worker_error is None:
+                        worker_error = exc
+                        worker_error_tb = exc.__traceback__
+                logger.exception("Unexpected error upserting batch")
+            finally:
+                upsert_queue.task_done()
+                if batch is not None:
+                    upsert_capacity.release()
+
+    upsert_workers = [
+        asyncio.create_task(_upsert_worker()) for _ in range(max_concurrent_upserts)
+    ]
 
     async for item in item_iter:
         items.append(item)
@@ -1048,19 +1065,40 @@ async def run(
         if len(points_buffer) >= upsert_buffer_size:
             batch = list(points_buffer)
             points_buffer.clear()
-            await _schedule_upsert(batch)
+            batches_enqueued += 1
+            await upsert_capacity.acquire()
+            try:
+                await upsert_queue.put(batch)
+            except BaseException:
+                upsert_capacity.release()
+                raise
 
     logger.info("Loaded %d items", len(items))
 
     if points_buffer:
         batch = list(points_buffer)
         points_buffer.clear()
-        await _schedule_upsert(batch)
+        batches_enqueued += 1
+        await upsert_capacity.acquire()
+        try:
+            await upsert_queue.put(batch)
+        except BaseException:
+            upsert_capacity.release()
+            raise
 
-    if upsert_tasks:
-        await asyncio.gather(*upsert_tasks)
-    else:
-        logger.info("No points to upsert")
+    try:
+        await upsert_queue.join()
+        if batches_enqueued == 0:
+            logger.info("No points to upsert")
+    finally:
+        for _ in range(max_concurrent_upserts):
+            await upsert_queue.put(None)
+        await asyncio.gather(*upsert_workers)
+
+    if worker_error is not None:
+        if worker_error_tb is not None:
+            raise worker_error.with_traceback(worker_error_tb)
+        raise worker_error
 
     await _process_qdrant_retry_queue(client, collection_name, qdrant_retry_queue)
 

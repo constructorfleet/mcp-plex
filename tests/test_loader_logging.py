@@ -35,6 +35,7 @@ def test_run_logs_upsert(monkeypatch, caplog):
         asyncio.run(loader.run(None, None, None, sample_dir, None, None))
     assert "Loaded 2 items" in caplog.text
     assert "Upserting 2 points" in caplog.text
+    assert "using batches of up to" in caplog.text
 
 
 def test_run_logs_no_points(monkeypatch, caplog):
@@ -74,6 +75,15 @@ def test_run_limits_concurrent_upserts(monkeypatch):
     concurrency = {"current": 0, "max": 0}
     started = asyncio.Queue()
     release_queue = asyncio.Queue()
+    third_requested = asyncio.Event()
+
+    base_items = list(loader._load_from_sample(sample_dir))
+
+    async def fake_iter(sample_dir):
+        for idx, item in enumerate(base_items + base_items[:1]):
+            if idx == 2:
+                third_requested.set()
+            yield item
 
     async def fake_upsert(client, collection_name, points, **kwargs):
         concurrency["current"] += 1
@@ -83,20 +93,25 @@ def test_run_limits_concurrent_upserts(monkeypatch):
         concurrency["current"] -= 1
 
     monkeypatch.setattr(loader, "_upsert_in_batches", fake_upsert)
+    monkeypatch.setattr(loader, "_iter_from_sample", fake_iter)
 
     async def invoke():
         run_task = asyncio.create_task(
             loader.run(None, None, None, sample_dir, None, None, upsert_buffer_size=1)
         )
-        await started.get()
-        release_queue.put_nowait(None)
-        await started.get()
-        release_queue.put_nowait(None)
+        await asyncio.wait_for(started.get(), timeout=1)
+        assert not third_requested.is_set()
+        await release_queue.put(None)
+        await asyncio.wait_for(started.get(), timeout=1)
+        await release_queue.put(None)
+        await asyncio.wait_for(started.get(), timeout=1)
+        await release_queue.put(None)
         await run_task
 
     asyncio.run(invoke())
 
     assert concurrency["max"] == 1
+    assert third_requested.is_set()
 
 
 def test_run_ensures_collection_before_loading(monkeypatch):
