@@ -4,6 +4,8 @@
 - The project is organized into dedicated `loader`, `server`, and `common` packages under `mcp_plex/`.
 - Package-specific architectural notes live alongside the code in `mcp_plex/loader/AGENTS.md`, `mcp_plex/server/AGENTS.md`, and `mcp_plex/common/AGENTS.md`.
 - Update this file when repo-wide conventions or folder-level guidelines change.
+- Review the Architecture Decision Records in `docs/adr/` before implementing changes that affect system design, and document
+  new architectural decisions with an ADR.
 
 ## User Queries
 The project should handle natural-language searches and recommendations such as:
