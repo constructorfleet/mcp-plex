@@ -34,8 +34,9 @@ def test_run_logs_upsert(monkeypatch, caplog):
     with caplog.at_level(logging.INFO, logger="mcp_plex.loader"):
         asyncio.run(loader.run(None, None, None, sample_dir, None, None))
     assert "Loaded 2 items" in caplog.text
-    assert "Upserting 2 points" in caplog.text
-    assert "using batches of up to" in caplog.text
+    assert "Upsert worker" in caplog.text
+    assert "handling 2 points" in caplog.text
+    assert "processed 2 items" in caplog.text
 
 
 def test_run_logs_no_points(monkeypatch, caplog):
@@ -76,24 +77,27 @@ def test_run_limits_concurrent_upserts(monkeypatch):
     started = asyncio.Queue()
     release_queue = asyncio.Queue()
     third_requested = asyncio.Event()
-
     base_items = list(loader._load_from_sample(sample_dir))
 
-    async def fake_iter(sample_dir):
-        for idx, item in enumerate(base_items + base_items[:1]):
-            if idx == 2:
-                third_requested.set()
-            yield item
+    monkeypatch.setattr(
+        loader,
+        "_load_from_sample",
+        lambda _: base_items + base_items[:1],
+    )
+
+    upsert_calls = {"count": 0}
 
     async def fake_upsert(client, collection_name, points, **kwargs):
+        upsert_calls["count"] += 1
+        if upsert_calls["count"] == 3:
+            third_requested.set()
         concurrency["current"] += 1
         concurrency["max"] = max(concurrency["max"], concurrency["current"])
-        await started.put(None)
+        await started.put(upsert_calls["count"])
         await release_queue.get()
         concurrency["current"] -= 1
 
     monkeypatch.setattr(loader, "_upsert_in_batches", fake_upsert)
-    monkeypatch.setattr(loader, "_iter_from_sample", fake_iter)
 
     async def invoke():
         run_task = asyncio.create_task(
@@ -103,6 +107,7 @@ def test_run_limits_concurrent_upserts(monkeypatch):
         assert not third_requested.is_set()
         await release_queue.put(None)
         await asyncio.wait_for(started.get(), timeout=1)
+        assert not third_requested.is_set()
         await release_queue.put(None)
         await asyncio.wait_for(started.get(), timeout=1)
         await release_queue.put(None)
@@ -121,22 +126,19 @@ def test_run_ensures_collection_before_loading(monkeypatch):
     async def fake_ensure(*args, **kwargs):
         order.append("ensure")
 
-    orig_iter = loader._iter_from_sample
-
-    async def fake_iter(sample_dir):
-        order.append("iter")
-        async for item in orig_iter(sample_dir):
-            yield item
-
-    async def fake_upsert(client, collection_name, points, **kwargs):
-        return None
-
     monkeypatch.setattr(loader, "_ensure_collection", fake_ensure)
-    monkeypatch.setattr(loader, "_iter_from_sample", fake_iter)
-    monkeypatch.setattr(loader, "_upsert_in_batches", fake_upsert)
-
     sample_dir = Path(__file__).resolve().parents[1] / "sample-data"
+    original_execute = loader.LoaderPipeline.execute
+
+    async def fake_execute(self):
+        order.append("execute")
+        self._items = []
+
+    monkeypatch.setattr(loader.LoaderPipeline, "execute", fake_execute)
+
     asyncio.run(loader.run(None, None, None, sample_dir, None, None))
 
     assert order and order[0] == "ensure"
-    assert order.count("iter") >= 1
+    assert "execute" in order
+
+    monkeypatch.setattr(loader.LoaderPipeline, "execute", original_execute)
