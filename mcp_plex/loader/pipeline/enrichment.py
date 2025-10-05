@@ -19,8 +19,6 @@ from typing import Any
 
 import httpx
 
-LOGGER = logging.getLogger(__name__)
-
 from .channels import (
     EpisodeBatch,
     IMDbRetryQueue,
@@ -43,6 +41,9 @@ from .. import (
     resolve_tmdb_season_number,
 )
 from ..imdb_cache import IMDbCache
+
+
+LOGGER = logging.getLogger(__name__)
 
 
 class EnrichmentStage:
