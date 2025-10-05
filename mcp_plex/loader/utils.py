@@ -4,7 +4,7 @@ from __future__ import annotations
 import asyncio
 import inspect
 import logging
-from typing import AsyncIterator, Awaitable, Iterable, List, Sequence, TypeVar
+from typing import AsyncIterator, Awaitable, List, Sequence, TypeVar
 
 from qdrant_client import models
 from qdrant_client.async_qdrant_client import AsyncQdrantClient
