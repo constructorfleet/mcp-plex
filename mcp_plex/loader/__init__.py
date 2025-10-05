@@ -8,8 +8,6 @@ import logging
 import sys
 import time
 import warnings
-from collections import deque
-from dataclasses import dataclass
 from pathlib import Path
 from typing import (
     AsyncIterator,
@@ -27,6 +25,15 @@ from qdrant_client import models
 from qdrant_client.async_qdrant_client import AsyncQdrantClient
 
 from .imdb_cache import IMDbCache
+from .pipeline.channels import (
+    IMDbRetryQueue,
+    IngestBatch,
+    MovieBatch,
+    EpisodeBatch,
+    SampleBatch,
+    chunk_sequence,
+    require_positive,
+)
 from ..common.types import (
     AggregatedItem,
     ExternalIDs,
@@ -70,46 +77,14 @@ _qdrant_max_concurrent_upserts: int = 4
 _qdrant_retry_attempts: int = 3
 _qdrant_retry_backoff: float = 1.0
 
-
-@dataclass(slots=True)
-class _MovieBatch:
-    """Batch of Plex movie items pending metadata enrichment."""
-
-    movies: list[PlexPartialObject]
-
-
-@dataclass(slots=True)
-class _EpisodeBatch:
-    """Batch of Plex episodes along with their parent show."""
-
-    show: PlexPartialObject
-    episodes: list[PlexPartialObject]
-
-
-@dataclass(slots=True)
-class _SampleBatch:
-    """Batch of pre-enriched items used by sample mode."""
-
-    items: list[AggregatedItem]
-
-
-_IngestBatch = _MovieBatch | _EpisodeBatch | _SampleBatch
-
-
-def _require_positive(value: int, *, name: str) -> int:
-    """Return *value* if positive, otherwise raise a ``ValueError``."""
-
-    if value <= 0:
-        raise ValueError(f"{name} must be positive")
-    return value
-
-
-def _chunk_sequence(items: Sequence[T], size: int) -> Iterable[Sequence[T]]:
-    """Yield ``items`` in chunks of at most ``size`` elements."""
-
-    size = _require_positive(int(size), name="size")
-    for start in range(0, len(items), size):
-        yield items[start : start + size]
+# Backwards-compatible aliases while callers migrate to shared pipeline exports.
+_MovieBatch = MovieBatch
+_EpisodeBatch = EpisodeBatch
+_SampleBatch = SampleBatch
+_IngestBatch = IngestBatch
+_require_positive = require_positive
+_chunk_sequence = chunk_sequence
+_IMDbRetryQueue = IMDbRetryQueue
 
 
 def _is_local_qdrant(client: AsyncQdrantClient) -> bool:
@@ -120,37 +95,6 @@ def _is_local_qdrant(client: AsyncQdrantClient) -> bool:
         "qdrant_client.local"
     )
 
-
-class _IMDbRetryQueue(asyncio.Queue[str]):
-    """Queue that tracks items in a deque for safe serialization."""
-
-    def __init__(self, initial: Iterable[str] | None = None):
-        super().__init__()
-        self._items: deque[str] = deque()
-        if initial:
-            for imdb_id in initial:
-                imdb_id_str = str(imdb_id)
-                super().put_nowait(imdb_id_str)
-                self._items.append(imdb_id_str)
-
-    def put_nowait(self, item: str) -> None:  # type: ignore[override]
-        super().put_nowait(item)
-        self._items.append(item)
-
-    def get_nowait(self) -> str:  # type: ignore[override]
-        if not self._items:
-            raise RuntimeError("Desynchronization: Queue is not empty but self._items is empty.")
-        try:
-            item = super().get_nowait()
-        except asyncio.QueueEmpty:
-            raise RuntimeError("Desynchronization: self._items is not empty but asyncio.Queue is empty.")
-        self._items.popleft()
-        return item
-
-    def snapshot(self) -> list[str]:
-        """Return a list of the current queue contents."""
-
-        return list(self._items)
 
 # Known Qdrant-managed dense embedding models with their dimensionality and
 # similarity metric. To support a new server-side embedding model, add an entry
