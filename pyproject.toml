@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "mcp-plex"
-version = "0.26.63"
+version = "0.26.64"
 
 description = "Plex-Oriented Model Context Protocol Server"
 requires-python = ">=3.11,<3.13"
