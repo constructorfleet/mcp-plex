@@ -14,6 +14,7 @@ from mcp_plex.loader.pipeline.channels import (
     EpisodeBatch,
     IMDbRetryQueue,
     INGEST_DONE,
+    PERSIST_DONE,
     MovieBatch,
     SampleBatch,
 )
@@ -238,7 +239,7 @@ def test_enrichment_stage_enriches_movie_batches_and_emits_chunks(monkeypatch):
         while True:
             payload = await persistence_queue.get()
             emitted.append(payload)
-            if payload is None:
+            if payload in (None, PERSIST_DONE):
                 break
         return emitted
 
@@ -252,7 +253,7 @@ def test_enrichment_stage_enriches_movie_batches_and_emits_chunks(monkeypatch):
     first, second, sentinel = emitted_batches
     assert isinstance(first, list)
     assert isinstance(second, list)
-    assert sentinel is None
+    assert sentinel is PERSIST_DONE
     assert [item.plex.rating_key for item in first] == ["1", "2"]
     assert [item.plex.rating_key for item in second] == ["3"]
     assert all(item.imdb is not None for item in first + second)
@@ -420,7 +421,7 @@ def test_enrichment_stage_caches_tmdb_show_results(monkeypatch):
         while True:
             payload = await persistence_queue.get()
             payloads.append(payload)
-            if payload is None:
+            if payload in (None, PERSIST_DONE):
                 break
         return payloads
 
@@ -431,7 +432,7 @@ def test_enrichment_stage_caches_tmdb_show_results(monkeypatch):
 
     assert len(payloads) == 3
     first, second, sentinel = payloads
-    assert sentinel is None
+    assert sentinel is PERSIST_DONE
     assert [item.plex.rating_key for item in first] == ["e1", "e2"]
     assert [item.plex.rating_key for item in second] == ["e3"]
     assert all(item.tmdb for item in first + second)
@@ -489,7 +490,7 @@ def test_enrichment_stage_sample_batches_pass_through(monkeypatch):
         while True:
             payload = await persistence_queue.get()
             payloads.append(payload)
-            if payload is None:
+            if payload in (None, PERSIST_DONE):
                 break
         return payloads, persistence_queue.put_payloads, items
 
@@ -498,11 +499,11 @@ def test_enrichment_stage_sample_batches_pass_through(monkeypatch):
     assert any("Processed sample batch" in message for message in handler.messages)
     assert len(payloads) == 2
     batch, sentinel = payloads
-    assert sentinel is None
+    assert sentinel is PERSIST_DONE
     assert isinstance(batch, list)
     assert batch == items
     assert put_payloads[0] == batch
-    assert put_payloads[-1] is None
+    assert put_payloads[-1] is PERSIST_DONE
 
 
 def test_enrichment_stage_retries_imdb_queue_when_idle(monkeypatch):
@@ -601,7 +602,7 @@ def test_enrichment_stage_idle_retry_emits_updated_items(monkeypatch):
         while True:
             payload = await persistence_queue.get()
             payloads.append(payload)
-            if payload is None:
+            if payload in (None, PERSIST_DONE):
                 break
         return payloads, retry_queue.qsize(), calls
 
@@ -611,7 +612,7 @@ def test_enrichment_stage_idle_retry_emits_updated_items(monkeypatch):
     assert remaining == 0
     assert len(payloads) == 3
     first_batch, second_batch, sentinel = payloads
-    assert sentinel is None
+    assert sentinel is PERSIST_DONE
     assert isinstance(first_batch, list)
     assert isinstance(second_batch, list)
     assert first_batch[0].imdb is None

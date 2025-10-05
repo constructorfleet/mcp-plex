@@ -28,6 +28,7 @@ from .imdb_cache import IMDbCache
 from .pipeline.channels import (
     IMDbRetryQueue,
     INGEST_DONE,
+    PERSIST_DONE,
     IngestBatch,
     IngestQueue,
     MovieBatch,
@@ -1035,7 +1036,7 @@ class LoaderPipeline:
                 error = exc
             finally:
                 for _ in range(self._max_concurrent_upserts):
-                    await self._points_queue.put(None)
+                    await self._points_queue.put(PERSIST_DONE)
                 upsert_results = await asyncio.gather(
                     *upsert_tasks, return_exceptions=True
                 )

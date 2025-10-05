@@ -32,6 +32,9 @@ The loader currently places ``None`` on ingestion queues in addition to this
 sentinel so legacy listeners that only check for ``None`` continue to work.
 """
 
+PERSIST_DONE: Final = object()
+"""Sentinel object signaling that persistence has completed."""
+
 if TYPE_CHECKING:
     PersistencePayload: TypeAlias = list[models.PointStruct]
 else:  # pragma: no cover - runtime fallback for typing-only alias
@@ -63,7 +66,7 @@ class SampleBatch:
 IngestBatch = MovieBatch | EpisodeBatch | SampleBatch
 
 IngestQueueItem: TypeAlias = IngestBatch | None | object
-PersistenceQueueItem: TypeAlias = PersistencePayload | None
+PersistenceQueueItem: TypeAlias = PersistencePayload | None | object
 
 IngestQueue: TypeAlias = asyncio.Queue[IngestQueueItem]
 PersistenceQueue: TypeAlias = asyncio.Queue[PersistenceQueueItem]
@@ -127,6 +130,7 @@ _EpisodeBatch = EpisodeBatch
 _SampleBatch = SampleBatch
 _IngestBatch = IngestBatch
 _INGEST_DONE = INGEST_DONE
+_PERSIST_DONE = PERSIST_DONE
 _IngestQueue = IngestQueue
 _PersistenceQueue = PersistenceQueue
 _require_positive = require_positive
@@ -139,6 +143,7 @@ __all__ = [
     "SampleBatch",
     "IngestBatch",
     "INGEST_DONE",
+    "PERSIST_DONE",
     "IngestQueue",
     "PersistenceQueue",
     "require_positive",
@@ -149,6 +154,7 @@ __all__ = [
     "_SampleBatch",
     "_IngestBatch",
     "_INGEST_DONE",
+    "_PERSIST_DONE",
     "_IngestQueue",
     "_PersistenceQueue",
     "_require_positive",

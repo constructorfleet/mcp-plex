@@ -6,7 +6,12 @@ import asyncio
 import logging
 from typing import TYPE_CHECKING, Any, Awaitable, Callable, Sequence
 
-from .channels import PersistenceQueue, chunk_sequence, require_positive
+from .channels import (
+    PERSIST_DONE,
+    PersistenceQueue,
+    chunk_sequence,
+    require_positive,
+)
 
 if TYPE_CHECKING:  # pragma: no cover - typing helpers only
     from qdrant_client import AsyncQdrantClient, models
@@ -47,6 +52,7 @@ class PersistenceStage:
         self._upsert_fn = upsert_fn
         self._on_batch_complete = on_batch_complete
         self._logger = logging.getLogger("mcp_plex.loader.persistence")
+        self._retry_flush_attempted = False
 
     @property
     def logger(self) -> logging.Logger:
@@ -102,6 +108,51 @@ class PersistenceStage:
 
         return self._upsert_buffer_size
 
+    async def _flush_retry_queue(self) -> int:
+        """Re-enqueue retry batches so they are persisted before shutdown."""
+
+        drained_count = 0
+        while True:
+            try:
+                retry_payload = self._retry_queue.get_nowait()
+            except asyncio.QueueEmpty:
+                break
+
+            drained_count += 1
+            try:
+                await self.enqueue_points(retry_payload)
+            finally:
+                self._retry_queue.task_done()
+
+        if drained_count:
+            self._logger.debug(
+                "Re-enqueued %d retry batch(es) before persistence shutdown.",
+                drained_count,
+            )
+
+        return drained_count
+
+    def _drain_additional_sentinels(self) -> int:
+        """Remove queued sentinel tokens so payloads run before shutdown."""
+
+        drained = 0
+        while True:
+            try:
+                queued_item = self._persistence_queue.get_nowait()
+            except asyncio.QueueEmpty:
+                break
+
+            if queued_item in (None, PERSIST_DONE):
+                drained += 1
+                self._persistence_queue.task_done()
+                continue
+
+            # Non-sentinel payload encountered; put it back and stop draining.
+            self._persistence_queue.put_nowait(queued_item)
+            break
+
+        return drained
+
     async def enqueue_points(
         self, points: Sequence["models.PointStruct"]
     ) -> None:
@@ -127,11 +178,30 @@ class PersistenceStage:
         while True:
             payload = await self._persistence_queue.get()
             try:
-                if payload is None:
+                if payload is None or payload is PERSIST_DONE:
+                    sentinel_budget = 1 + self._drain_additional_sentinels()
+                    drained_retry = 0
+                    if not self._retry_flush_attempted:
+                        drained_retry = await self._flush_retry_queue()
+                        if drained_retry:
+                            self._retry_flush_attempted = True
+                            for _ in range(sentinel_budget):
+                                await self._persistence_queue.put(PERSIST_DONE)
+                            continue
+
+                    remaining_tokens = max(sentinel_budget - 1, 0)
+                    if remaining_tokens:
+                        for _ in range(remaining_tokens):
+                            await self._persistence_queue.put(PERSIST_DONE)
                     self._logger.debug(
                         "Persistence queue sentinel received; finishing run for worker %d.",
                         worker_id,
                     )
+                    if drained_retry and not self._retry_queue.empty():
+                        self._logger.warning(
+                            "Retry queue still contains %d batch(es) after flush.",
+                            self._retry_queue.qsize(),
+                        )
                     return
 
                 queue_size = self._persistence_queue.qsize()
@@ -148,5 +218,5 @@ class PersistenceStage:
                     )
             finally:
                 self._persistence_queue.task_done()
-                if payload is not None:
+                if payload not in (None, PERSIST_DONE):
                     self._upsert_semaphore.release()

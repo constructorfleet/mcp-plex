@@ -23,6 +23,7 @@ from .channels import (
     EpisodeBatch,
     IMDbRetryQueue,
     INGEST_DONE,
+    PERSIST_DONE,
     IngestQueue,
     MovieBatch,
     PersistenceQueue,
@@ -155,7 +156,7 @@ class EnrichmentStage:
                 if got_item:
                     self._ingest_queue.task_done()
 
-        await self._persistence_queue.put(None)
+        await self._persistence_queue.put(PERSIST_DONE)
 
     async def _handle_movie_batch(self, batch: MovieBatch) -> None:
         """Enrich and forward Plex movie batches to the persistence stage."""
