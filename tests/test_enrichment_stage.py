@@ -1,11 +1,21 @@
 import asyncio
+import logging
 from typing import Any
 
-from mcp_plex.common.types import AggregatedItem, IMDbTitle, TMDBMovie
+from mcp_plex.common.types import (
+    AggregatedItem,
+    IMDbTitle,
+    PlexItem,
+    TMDBEpisode,
+    TMDBMovie,
+    TMDBShow,
+)
 from mcp_plex.loader.pipeline.channels import (
+    EpisodeBatch,
     IMDbRetryQueue,
     INGEST_DONE,
     MovieBatch,
+    SampleBatch,
 )
 from mcp_plex.loader.pipeline.enrichment import EnrichmentStage
 
@@ -93,6 +103,55 @@ class _FakeMovie:
             self.guids.append(_FakeGuid(f"imdb://{imdb_id}"))
         if tmdb_id:
             self.guids.append(_FakeGuid(f"tmdb://{tmdb_id}"))
+        self.directors: list[Any] = []
+        self.writers: list[Any] = []
+        self.actors: list[Any] = []
+        self.roles: list[Any] = []
+        self.genres: list[Any] = []
+        self.collections: list[Any] = []
+
+
+class _FakeShow:
+    def __init__(self, rating_key: str, *, tmdb_id: str | None = None) -> None:
+        self.ratingKey = rating_key
+        self.guid = f"plex://show/{rating_key}"
+        self.type = "show"
+        self.title = f"Show {rating_key}"
+        self.summary = f"Show summary {rating_key}"
+        self.year = 2010
+        self.addedAt = None
+        self.guids = []
+        if tmdb_id:
+            self.guids.append(_FakeGuid(f"tmdb://{tmdb_id}"))
+        self.genres: list[Any] = []
+        self.collections: list[Any] = []
+
+
+class _FakeEpisode:
+    def __init__(
+        self,
+        rating_key: str,
+        *,
+        show: _FakeShow,
+        season_index: int,
+        episode_index: int,
+        imdb_id: str | None = None,
+    ) -> None:
+        self.ratingKey = rating_key
+        self.guid = f"plex://episode/{rating_key}"
+        self.type = "episode"
+        self.title = f"Episode {rating_key}"
+        self.summary = f"Episode summary {rating_key}"
+        self.year = 2020
+        self.parentIndex = season_index
+        self.parentTitle = f"Season {season_index}"
+        self.parentYear = 2020
+        self.index = episode_index
+        self.addedAt = None
+        self.grandparentTitle = show.title
+        self.guids = []
+        if imdb_id:
+            self.guids.append(_FakeGuid(f"imdb://{imdb_id}"))
         self.directors: list[Any] = []
         self.writers: list[Any] = []
         self.actors: list[Any] = []
@@ -254,3 +313,189 @@ def test_enrichment_stage_handles_missing_external_ids(monkeypatch):
     assert tmdb_requests == ["201"]
     assert aggregated[0].imdb is not None and aggregated[0].tmdb is not None
     assert aggregated[1].imdb is None and aggregated[1].tmdb is None
+
+
+class _ListHandler(logging.Handler):
+    def __init__(self) -> None:
+        super().__init__()
+        self.messages: list[str] = []
+
+    def emit(self, record: logging.LogRecord) -> None:  # pragma: no cover - tiny shim
+        self.messages.append(record.getMessage())
+
+
+class _RecordingQueue(asyncio.Queue):
+    def __init__(self) -> None:
+        super().__init__()
+        self.put_payloads: list[Any] = []
+
+    async def put(self, item: Any) -> None:  # type: ignore[override]
+        self.put_payloads.append(item)
+        await super().put(item)
+
+
+def test_enrichment_stage_caches_tmdb_show_results(monkeypatch):
+    show_requests: list[tuple[str, str]] = []
+    episode_requests: list[tuple[int, int, int, str]] = []
+
+    async def fake_fetch_tmdb_show(client, tmdb_id, api_key):
+        show_requests.append((tmdb_id, api_key))
+        return TMDBShow.model_validate(
+            {
+                "id": int(tmdb_id),
+                "name": f"Show {tmdb_id}",
+                "seasons": [
+                    {"season_number": 1, "name": "Season 1", "air_date": "2020-01-01"}
+                ],
+            }
+        )
+
+    async def fake_fetch_tmdb_episode(client, show_id, season, episode, api_key):
+        episode_requests.append((show_id, season, episode, api_key))
+        return TMDBEpisode.model_validate(
+            {
+                "id": show_id * 1000 + season * 100 + episode,
+                "name": f"Episode {episode}",
+                "season_number": season,
+                "episode_number": episode,
+            }
+        )
+
+    async def fake_fetch_imdb_batch(client, imdb_ids):
+        return {
+            imdb_id: IMDbTitle(
+                id=imdb_id,
+                type="tvEpisode",
+                primaryTitle=f"IMDb {imdb_id}",
+            )
+            for imdb_id in imdb_ids
+        }
+
+    monkeypatch.setattr(
+        "mcp_plex.loader.pipeline.enrichment._fetch_tmdb_show",
+        fake_fetch_tmdb_show,
+    )
+    monkeypatch.setattr(
+        "mcp_plex.loader.pipeline.enrichment._fetch_tmdb_episode",
+        fake_fetch_tmdb_episode,
+    )
+    monkeypatch.setattr(
+        "mcp_plex.loader.pipeline.enrichment._fetch_imdb_batch",
+        fake_fetch_imdb_batch,
+    )
+
+    async def scenario() -> list[list[AggregatedItem] | None]:
+        ingest_queue: asyncio.Queue = asyncio.Queue()
+        persistence_queue: asyncio.Queue = asyncio.Queue()
+        stage = EnrichmentStage(
+            http_client_factory=lambda: object(),
+            tmdb_api_key="token",
+            ingest_queue=ingest_queue,
+            persistence_queue=persistence_queue,
+            imdb_retry_queue=IMDbRetryQueue(),
+            movie_batch_size=3,
+            episode_batch_size=2,
+        )
+
+        show = _FakeShow("show", tmdb_id="301")
+        episodes_first = [
+            _FakeEpisode("e1", show=show, season_index=1, episode_index=1, imdb_id="ttA"),
+            _FakeEpisode("e2", show=show, season_index=1, episode_index=2, imdb_id="ttB"),
+        ]
+        episodes_second = [
+            _FakeEpisode("e3", show=show, season_index=1, episode_index=3, imdb_id="ttC"),
+        ]
+
+        await ingest_queue.put(EpisodeBatch(show=show, episodes=episodes_first))
+        await ingest_queue.put(EpisodeBatch(show=show, episodes=episodes_second))
+        await ingest_queue.put(INGEST_DONE)
+
+        await stage.run()
+
+        payloads: list[list[AggregatedItem] | None] = []
+        while True:
+            payload = await persistence_queue.get()
+            payloads.append(payload)
+            if payload is None:
+                break
+        return payloads
+
+    payloads = asyncio.run(scenario())
+
+    assert show_requests == [("301", "token")]
+    assert episode_requests == [(301, 1, 1, "token"), (301, 1, 2, "token"), (301, 1, 3, "token")]
+
+    assert len(payloads) == 3
+    first, second, sentinel = payloads
+    assert sentinel is None
+    assert [item.plex.rating_key for item in first] == ["e1", "e2"]
+    assert [item.plex.rating_key for item in second] == ["e3"]
+    assert all(item.tmdb for item in first + second)
+    assert [item.tmdb.episode_number for item in first + second if isinstance(item.tmdb, TMDBEpisode)] == [1, 2, 3]
+
+
+def test_enrichment_stage_sample_batches_pass_through(monkeypatch):
+    handler = _ListHandler()
+
+    async def scenario() -> tuple[list[list[AggregatedItem] | None], list[Any], list[AggregatedItem]]:
+        ingest_queue: asyncio.Queue = asyncio.Queue()
+        persistence_queue: _RecordingQueue = _RecordingQueue()
+
+        logger = logging.getLogger("test.enrichment.sample")
+        logger.setLevel(logging.INFO)
+        logger.handlers = [handler]
+        logger.propagate = False
+
+        stage = EnrichmentStage(
+            http_client_factory=lambda: object(),
+            tmdb_api_key="",
+            ingest_queue=ingest_queue,
+            persistence_queue=persistence_queue,
+            imdb_retry_queue=IMDbRetryQueue(),
+            movie_batch_size=2,
+            episode_batch_size=2,
+            logger=logger,
+        )
+
+        items = [
+            AggregatedItem(
+                plex=PlexItem(
+                    rating_key="1",
+                    guid="plex://1",
+                    type="movie",
+                    title="Sample 1",
+                )
+            ),
+            AggregatedItem(
+                plex=PlexItem(
+                    rating_key="2",
+                    guid="plex://2",
+                    type="movie",
+                    title="Sample 2",
+                )
+            ),
+        ]
+
+        await ingest_queue.put(SampleBatch(items=list(items)))
+        await ingest_queue.put(INGEST_DONE)
+
+        await stage.run()
+
+        payloads: list[list[AggregatedItem] | None] = []
+        while True:
+            payload = await persistence_queue.get()
+            payloads.append(payload)
+            if payload is None:
+                break
+        return payloads, persistence_queue.put_payloads, items
+
+    payloads, put_payloads, items = asyncio.run(scenario())
+
+    assert any("Processed sample batch" in message for message in handler.messages)
+    assert len(payloads) == 2
+    batch, sentinel = payloads
+    assert sentinel is None
+    assert isinstance(batch, list)
+    assert batch == items
+    assert put_payloads[0] == batch
+    assert put_payloads[-1] is None
