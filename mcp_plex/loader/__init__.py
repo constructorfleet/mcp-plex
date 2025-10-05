@@ -1,4 +1,11 @@
-"""Utilities for loading Plex metadata with IMDb and TMDb details."""
+"""Loader orchestration utilities and legacy pipeline helpers.
+
+This package now centres its public API on :class:`LoaderOrchestrator`,
+the coordination layer for the ingestion, enrichment, and persistence
+stages. The historical pipeline implementation remains available as
+``LegacyLoaderPipeline`` for the CLI while the original ``LoaderPipeline``
+name resolves to the orchestrator with a deprecation warning.
+"""
 from __future__ import annotations
 
 import asyncio
@@ -38,6 +45,7 @@ from .pipeline.channels import (
     chunk_sequence,
     require_positive,
 )
+from .pipeline.orchestrator import LoaderOrchestrator
 from .pipeline.persistence import PersistenceStage as _PersistenceStage
 from ..common.types import (
     AggregatedItem,
@@ -1335,6 +1343,29 @@ class LoaderPipeline:
             self._upsert_start,
             queue_size,
         )
+
+
+# Preserve the legacy pipeline implementation for the CLI while exposing the
+# orchestrator as the public API moving forward.
+LegacyLoaderPipeline = LoaderPipeline
+del LoaderPipeline
+
+
+def __getattr__(name: str) -> Any:
+    """Provide deprecated access to :class:`LoaderOrchestrator`."""
+
+    if name == "LoaderPipeline":
+        warnings.warn(
+            "LoaderPipeline has been renamed to LoaderOrchestrator; import "
+            "mcp_plex.loader.LoaderOrchestrator instead.",
+            DeprecationWarning,
+            stacklevel=2,
+        )
+        globals()[name] = LoaderOrchestrator
+        return LoaderOrchestrator
+    raise AttributeError(f"module {__name__!r} has no attribute {name!r}")
+
+
 async def run(
     plex_url: Optional[str],
     plex_token: Optional[str],
@@ -1415,7 +1446,7 @@ async def run(
     if sample_dir is not None:
         logger.info("Loading sample data from %s", sample_dir)
         sample_items = _load_from_sample(sample_dir)
-        pipeline = LoaderPipeline(
+        pipeline = LegacyLoaderPipeline(
             client=client,
             collection_name=collection_name,
             dense_model_name=dense_model_name,
@@ -1438,7 +1469,7 @@ async def run(
             raise RuntimeError("TMDB_API_KEY must be provided")
         logger.info("Loading data from Plex server %s", plex_url)
         server = PlexServer(plex_url, plex_token)
-        pipeline = LoaderPipeline(
+        pipeline = LegacyLoaderPipeline(
             client=client,
             collection_name=collection_name,
             dense_model_name=dense_model_name,
