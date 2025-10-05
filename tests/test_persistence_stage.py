@@ -4,7 +4,7 @@ from typing import Any
 import pytest
 
 from mcp_plex.loader import _upsert_in_batches
-from mcp_plex.loader.pipeline.channels import PersistenceQueue
+from mcp_plex.loader.pipeline.channels import PERSIST_DONE, PersistenceQueue
 from mcp_plex.loader.pipeline.persistence import PersistenceStage
 
 
@@ -117,7 +117,7 @@ def test_persistence_stage_upserts_batches() -> None:
         await persistence_queue.join()
 
         for _ in workers:
-            await persistence_queue.put(None)
+            await persistence_queue.put(PERSIST_DONE)
 
         await asyncio.gather(*workers)
 
@@ -168,8 +168,8 @@ def test_persistence_stage_populates_retry_queue_on_failure() -> None:
 
         await stage.enqueue_points([[1, 2]])
         await persistence_queue.join()
-        await persistence_queue.put(None)
-        await asyncio.gather(worker)
+        await persistence_queue.put(PERSIST_DONE)
+        await asyncio.wait_for(asyncio.gather(worker), timeout=1)
 
         failures: list[list[int]] = []
         while not retry_queue.empty():
@@ -218,3 +218,81 @@ def test_persistence_stage_releases_semaphore_on_upsert_error() -> None:
     semaphore_value = asyncio.run(scenario())
 
     assert semaphore_value == 1
+
+
+def test_persistence_stage_flushes_retry_queue_before_exit() -> None:
+    async def scenario() -> tuple[list[list[int]], bool, bool]:
+        persistence_queue: PersistenceQueue = asyncio.Queue()
+        retry_queue: asyncio.Queue[list[list[int]]] = asyncio.Queue()
+        semaphore = asyncio.Semaphore(1)
+
+        processed: list[list[int]] = []
+
+        async def upsert(batch: list[int]) -> None:
+            processed.append(list(batch))
+
+        stage = PersistenceStage(
+            client=_FakeQdrantClient(),
+            collection_name="media-items",
+            dense_vector_name="dense",
+            sparse_vector_name="sparse",
+            persistence_queue=persistence_queue,
+            retry_queue=retry_queue,
+            upsert_semaphore=semaphore,
+            upsert_buffer_size=5,
+            upsert_fn=upsert,
+            on_batch_complete=None,
+        )
+
+        worker = asyncio.create_task(stage.run(0))
+
+        await retry_queue.put([1, 2, 3])
+        await persistence_queue.put(PERSIST_DONE)
+
+        await asyncio.wait_for(worker, timeout=1)
+
+        return processed, persistence_queue.empty(), retry_queue.empty()
+
+    processed, persistence_empty, retry_empty = asyncio.run(scenario())
+
+    assert processed == [[1, 2, 3]]
+    assert persistence_empty
+    assert retry_empty
+
+
+def test_persistence_stage_leaves_no_lingering_queue_items() -> None:
+    async def scenario() -> tuple[int, int]:
+        persistence_queue: PersistenceQueue = asyncio.Queue()
+        retry_queue: asyncio.Queue[list[int]] = asyncio.Queue()
+        semaphore = asyncio.Semaphore(2)
+
+        async def upsert(batch: list[int]) -> None:
+            await asyncio.sleep(0)
+
+        stage = PersistenceStage(
+            client=_FakeQdrantClient(),
+            collection_name="media-items",
+            dense_vector_name="dense",
+            sparse_vector_name="sparse",
+            persistence_queue=persistence_queue,
+            retry_queue=retry_queue,
+            upsert_semaphore=semaphore,
+            upsert_buffer_size=2,
+            upsert_fn=upsert,
+            on_batch_complete=None,
+        )
+
+        worker = asyncio.create_task(stage.run(0))
+
+        await stage.enqueue_points([1, 2, 3, 4])
+        await asyncio.wait_for(persistence_queue.join(), timeout=1)
+        await persistence_queue.put(PERSIST_DONE)
+
+        await asyncio.wait_for(worker, timeout=1)
+
+        return persistence_queue.qsize(), retry_queue.qsize()
+
+    persistence_remaining, retry_remaining = asyncio.run(scenario())
+
+    assert persistence_remaining == 0
+    assert retry_remaining == 0
