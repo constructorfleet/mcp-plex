@@ -101,6 +101,7 @@ class EnrichmentStage:
         )
         self._logger = logger or logging.getLogger("mcp_plex.loader.enrichment")
         self._show_tmdb_cache: dict[str, TMDBShow | None] = {}
+        self._pending_imdb_items: dict[str, list[AggregatedItem]] = {}
 
     @property
     def logger(self) -> logging.Logger:
@@ -249,8 +250,10 @@ class EnrichmentStage:
 
         movie_ids = [_extract_external_ids(movie) for movie in movies]
         imdb_ids = [ids.imdb for ids in movie_ids if ids.imdb]
-        imdb_map = (
-            await _fetch_imdb_batch(
+        retry_snapshot: set[str] = set()
+        imdb_map = {}
+        if imdb_ids:
+            imdb_map = await _fetch_imdb_batch(
                 client,
                 imdb_ids,
                 cache=self._imdb_cache,
@@ -260,9 +263,7 @@ class EnrichmentStage:
                 retry_queue=self._imdb_retry_queue,
                 batch_limit=self._imdb_batch_limit,
             )
-            if imdb_ids
-            else {}
-        )
+            retry_snapshot = set(self._imdb_retry_queue.snapshot())
 
         tmdb_results: list[Any] = []
         api_key = self._tmdb_api_key
@@ -280,13 +281,14 @@ class EnrichmentStage:
         for movie, ids in zip(movies, movie_ids):
             tmdb = next(tmdb_iter, None) if ids.tmdb else None
             imdb = imdb_map.get(ids.imdb) if ids.imdb else None
-            aggregated.append(
-                AggregatedItem(
-                    plex=_build_plex_item(movie),
-                    imdb=imdb,
-                    tmdb=tmdb,
-                )
+            aggregated_item = AggregatedItem(
+                plex=_build_plex_item(movie),
+                imdb=imdb,
+                tmdb=tmdb,
             )
+            aggregated.append(aggregated_item)
+            if ids.imdb and imdb is None and ids.imdb in retry_snapshot:
+                self._register_pending_imdb(ids.imdb, aggregated_item)
         return aggregated
 
     async def _handle_sample_batch(self, batch: SampleBatch) -> None:
@@ -314,8 +316,10 @@ class EnrichmentStage:
             show_tmdb = await self._get_tmdb_show(client, show_ids.tmdb)
         episode_ids = [_extract_external_ids(ep) for ep in episodes]
         imdb_ids = [ids.imdb for ids in episode_ids if ids.imdb]
-        imdb_map = (
-            await _fetch_imdb_batch(
+        retry_snapshot: set[str] = set()
+        imdb_map = {}
+        if imdb_ids:
+            imdb_map = await _fetch_imdb_batch(
                 client,
                 imdb_ids,
                 cache=self._imdb_cache,
@@ -325,9 +329,7 @@ class EnrichmentStage:
                 retry_queue=self._imdb_retry_queue,
                 batch_limit=self._imdb_batch_limit,
             )
-            if imdb_ids
-            else {}
-        )
+            retry_snapshot = set(self._imdb_retry_queue.snapshot())
 
         tmdb_results: list[TMDBEpisode | None] = []
         if show_tmdb:
@@ -344,13 +346,14 @@ class EnrichmentStage:
             tmdb_episode = next(tmdb_iter, None) if show_tmdb else None
             imdb = imdb_map.get(ids.imdb) if ids.imdb else None
             tmdb_item: TMDBItem | None = tmdb_episode or show_tmdb
-            aggregated.append(
-                AggregatedItem(
-                    plex=_build_plex_item(ep),
-                    imdb=imdb,
-                    tmdb=tmdb_item,
-                )
+            aggregated_item = AggregatedItem(
+                plex=_build_plex_item(ep),
+                imdb=imdb,
+                tmdb=tmdb_item,
             )
+            aggregated.append(aggregated_item)
+            if ids.imdb and imdb is None and ids.imdb in retry_snapshot:
+                self._register_pending_imdb(ids.imdb, aggregated_item)
         return aggregated
 
     async def _get_tmdb_show(
@@ -408,7 +411,7 @@ class EnrichmentStage:
             return False
 
         async with self._acquire_http_client() as client:
-            await _fetch_imdb_batch(
+            imdb_results = await _fetch_imdb_batch(
                 client,
                 imdb_ids,
                 cache=self._imdb_cache,
@@ -419,12 +422,30 @@ class EnrichmentStage:
                 batch_limit=self._imdb_batch_limit,
             )
 
+        updated: list[AggregatedItem] = []
+        for imdb_id in imdb_ids:
+            imdb_title = imdb_results.get(imdb_id)
+            if imdb_title is None:
+                continue
+            pending_items = self._pending_imdb_items.pop(imdb_id, [])
+            for item in pending_items:
+                updated.append(item.model_copy(update={"imdb": imdb_title}))
+
+        if updated:
+            await self._emit_persistence_batch(updated)
+
         self._logger.info(
-            "Retried IMDb batch with %d items (retry queue=%d)",
-            len(imdb_ids),
+            "Retried IMDb batch with %d updates (retry queue=%d)",
+            len(updated),
             self._imdb_retry_queue.qsize(),
         )
         return True
+
+    def _register_pending_imdb(self, imdb_id: str, item: AggregatedItem) -> None:
+        """Track *item* for re-emission once IMDb metadata becomes available."""
+
+        items = self._pending_imdb_items.setdefault(imdb_id, [])
+        items.append(item)
 
 
 class _RequestThrottler:

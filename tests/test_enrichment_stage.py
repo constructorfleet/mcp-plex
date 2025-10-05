@@ -546,6 +546,79 @@ def test_enrichment_stage_retries_imdb_queue_when_idle(monkeypatch):
     assert remaining == 0
 
 
+def test_enrichment_stage_idle_retry_emits_updated_items(monkeypatch):
+    calls: list[list[str]] = []
+    first_call = True
+
+    async def fake_fetch_imdb_batch(client, imdb_ids, **kwargs):
+        nonlocal first_call
+        calls.append(list(imdb_ids))
+        retry_queue: IMDbRetryQueue = kwargs["retry_queue"]
+        if first_call:
+            first_call = False
+            for imdb_id in imdb_ids:
+                retry_queue.put_nowait(imdb_id)
+            return {imdb_id: None for imdb_id in imdb_ids}
+        return {
+            imdb_id: IMDbTitle(
+                id=imdb_id,
+                type="movie",
+                primaryTitle=f"IMDb {imdb_id}",
+            )
+            for imdb_id in imdb_ids
+        }
+
+    monkeypatch.setattr(
+        "mcp_plex.loader.pipeline.enrichment._fetch_imdb_batch",
+        fake_fetch_imdb_batch,
+    )
+
+    async def scenario() -> tuple[list[list[AggregatedItem] | None], int, list[list[str]]]:
+        ingest_queue: asyncio.Queue = asyncio.Queue()
+        persistence_queue: asyncio.Queue = asyncio.Queue()
+        retry_queue = IMDbRetryQueue()
+
+        stage = EnrichmentStage(
+            http_client_factory=lambda: object(),
+            tmdb_api_key="",
+            ingest_queue=ingest_queue,
+            persistence_queue=persistence_queue,
+            imdb_retry_queue=retry_queue,
+            movie_batch_size=2,
+            episode_batch_size=2,
+        )
+
+        run_task = asyncio.create_task(stage.run())
+        await ingest_queue.put(MovieBatch(movies=[_FakeMovie("1", imdb_id="tt1")]))
+        for _ in range(5):
+            await asyncio.sleep(0)
+            if persistence_queue.qsize() >= 2:
+                break
+        await ingest_queue.put(INGEST_DONE)
+        await run_task
+
+        payloads: list[list[AggregatedItem] | None] = []
+        while True:
+            payload = await persistence_queue.get()
+            payloads.append(payload)
+            if payload is None:
+                break
+        return payloads, retry_queue.qsize(), calls
+
+    payloads, remaining, captured_calls = asyncio.run(scenario())
+
+    assert captured_calls == [["tt1"], ["tt1"]]
+    assert remaining == 0
+    assert len(payloads) == 3
+    first_batch, second_batch, sentinel = payloads
+    assert sentinel is None
+    assert isinstance(first_batch, list)
+    assert isinstance(second_batch, list)
+    assert first_batch[0].imdb is None
+    assert second_batch[0].imdb is not None
+    assert second_batch[0].imdb.primaryTitle == "IMDb tt1"
+
+
 class _FakeResponse:
     def __init__(self, status_code: int, payload: dict[str, Any]):
         self.status_code = status_code
