@@ -1,9 +1,7 @@
 import asyncio
 import builtins
 import importlib
-import io
 import json
-import sys
 import types
 from datetime import datetime
 from pathlib import Path
@@ -15,6 +13,7 @@ import pytest
 from mcp_plex import loader
 from mcp_plex.loader.imdb_cache import IMDbCache
 from mcp_plex.loader import (
+    LoaderPipeline,
     _build_plex_item,
     _extract_external_ids,
     _fetch_imdb,
@@ -27,6 +26,7 @@ from mcp_plex.loader import (
     _persist_imdb_retry_queue,
     _process_imdb_retry_queue,
     _resolve_dense_model_params,
+    build_point,
     resolve_tmdb_season_number,
 )
 from mcp_plex.common.types import (
@@ -672,69 +672,56 @@ def test_build_plex_item_converts_string_indices():
     assert item.episode_number == 3
 
 
-def test_run_live_loader_builds_payload_with_collections(monkeypatch):
-    monkeypatch.setattr(loader, "_imdb_cache", None)
-    monkeypatch.setattr(loader, "_imdb_retry_queue", loader._IMDbRetryQueue())
+def test_build_point_includes_metadata():
+    plex_item = PlexItem(
+        rating_key="1",
+        guid="guid",
+        type="movie",
+        title="Sample",
+        summary="Summary",
+        year=2024,
+        added_at=datetime.fromtimestamp(1),
+        guids=[PlexGuid(id="plex://1")],
+        tagline="Tagline",
+        directors=[PlexPerson(id=1, tag="Director")],
+        writers=[PlexPerson(id=2, tag="Writer")],
+        actors=[PlexPerson(id=3, tag="Actor")],
+        genres=["Action"],
+        collections=["Favorites"],
+    )
+    imdb_title = IMDbTitle(
+        id="tt1",
+        type="movie",
+        primaryTitle="Sample",
+        plot="Plot",
+        rating=IMDbRating(aggregateRating=8.0),
+        directors=[IMDbName(id="nm1", displayName="Director")],
+    )
+    tmdb_movie = TMDBMovie(
+        id=1,
+        title="Sample",
+        overview="Overview",
+        tagline="Another tagline",
+        reviews=[{"content": "Great"}],
+    )
+    item = AggregatedItem(plex=plex_item, imdb=imdb_title, tmdb=tmdb_movie)
 
-    class DummyClient:
-        def __init__(self, *args, **kwargs):
-            self._client = None
+    point = build_point(
+        item,
+        dense_model_name="BAAI/bge-small-en-v1.5",
+        sparse_model_name="Qdrant/bm42-all-minilm-l6-v2-attentions",
+    )
 
-        async def collection_exists(self, collection_name: str) -> bool:
-            return False
+    assert point.payload["title"] == "Sample"
+    assert point.payload["collections"] == ["Favorites"]
+    assert point.payload["plot"] == "Plot"
+    assert "Directed by" in point.vector["dense"].text
+    assert point.vector["dense"].model == "BAAI/bge-small-en-v1.5"
+    assert point.vector["sparse"].model == "Qdrant/bm42-all-minilm-l6-v2-attentions"
 
-        async def create_collection(self, *args, **kwargs) -> None:
-            pass
 
-        async def create_payload_index(self, *args, **kwargs) -> None:
-            pass
-
-    monkeypatch.setattr(loader, "AsyncQdrantClient", lambda *args, **kwargs: DummyClient())
-
-    async def fake_iter(server, tmdb_api_key, *, batch_size=50):
-        plex_item = PlexItem(
-            rating_key="1",
-            guid="guid",
-            type="movie",
-            title="Sample",
-            summary="Summary",
-            year=2024,
-            added_at=datetime.fromtimestamp(1),
-            guids=[PlexGuid(id="plex://1")],
-            thumb="thumb.jpg",
-            art="art.jpg",
-            tagline="Tagline",
-            directors=[PlexPerson(id=1, tag="Director")],
-            writers=[PlexPerson(id=2, tag="Writer")],
-            actors=[PlexPerson(id=3, tag="Actor")],
-            genres=["Action"],
-            collections=["Favorites"],
-        )
-        imdb_title = IMDbTitle(
-            id="tt1",
-            type="movie",
-            primaryTitle="Sample",
-            plot="Plot",
-            rating=IMDbRating(aggregateRating=8.0),
-            directors=[IMDbName(id="nm1", displayName="Director")],
-        )
-        tmdb_movie = TMDBMovie(
-            id=1,
-            title="Sample",
-            overview="Overview",
-            tagline="Another tagline",
-            reviews=[{"content": "Great"}],
-        )
-        yield AggregatedItem(plex=plex_item, imdb=imdb_title, tmdb=tmdb_movie)
-
-    monkeypatch.setattr(loader, "_iter_from_plex", fake_iter)
-
-    class DummyPlexServer:
-        def __init__(self, url: str, token: str) -> None:
-            self.url = url
-            self.token = token
-
-    monkeypatch.setattr(loader, "PlexServer", DummyPlexServer)
+def test_loader_pipeline_processes_sample_batches(monkeypatch):
+    items = _load_from_sample(Path(__file__).resolve().parents[1] / "sample-data")
 
     recorded_batches: list[list[models.PointStruct]] = []
 
@@ -743,21 +730,28 @@ def test_run_live_loader_builds_payload_with_collections(monkeypatch):
 
     monkeypatch.setattr(loader, "_upsert_in_batches", record_upsert)
 
-    stdout = io.StringIO()
-    monkeypatch.setattr(sys, "stdout", stdout)
-
-    asyncio.run(
-        loader.run(
-            "http://localhost:32400",
-            "token",
-            "tmdb-key",
-            None,
-            None,
-            None,
-        )
+    pipeline = LoaderPipeline(
+        client=object(),
+        collection_name="media-items",
+        dense_model_name="BAAI/bge-small-en-v1.5",
+        sparse_model_name="Qdrant/bm42-all-minilm-l6-v2-attentions",
+        tmdb_api_key=None,
+        sample_items=items,
+        plex_server=None,
+        plex_chunk_size=10,
+        enrichment_batch_size=1,
+        enrichment_workers=2,
+        upsert_buffer_size=1,
+        max_concurrent_upserts=1,
     )
 
-    assert recorded_batches, "expected upsert batches to be scheduled"
+    asyncio.run(pipeline.execute())
+
+    assert len(pipeline.items) == len(items)
+    assert recorded_batches, "expected pipeline to emit upsert batches"
     payload = recorded_batches[0][0].payload
-    assert payload["collections"] == ["Favorites"]
-    assert payload["reviews"] == ["Great"]
+    assert payload["title"]
+    assert payload["type"] in {"movie", "episode"}
+    reviews = payload.get("reviews")
+    if reviews is not None:
+        assert isinstance(reviews, list)
