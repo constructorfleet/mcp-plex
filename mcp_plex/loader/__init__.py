@@ -26,9 +26,12 @@ from qdrant_client.async_qdrant_client import AsyncQdrantClient
 from .imdb_cache import IMDbCache
 from .pipeline.channels import (
     IMDbRetryQueue,
+    INGEST_DONE,
     IngestBatch,
+    IngestQueue,
     MovieBatch,
     EpisodeBatch,
+    PersistenceQueue,
     SampleBatch,
     chunk_sequence,
     require_positive,
@@ -81,9 +84,12 @@ _MovieBatch = MovieBatch
 _EpisodeBatch = EpisodeBatch
 _SampleBatch = SampleBatch
 _IngestBatch = IngestBatch
+_IngestQueue = IngestQueue
+_PersistenceQueue = PersistenceQueue
 _require_positive = require_positive
 _chunk_sequence = chunk_sequence
 _IMDbRetryQueue = IMDbRetryQueue
+_INGEST_DONE = INGEST_DONE
 
 
 def _is_local_qdrant(client: AsyncQdrantClient) -> bool:
@@ -1000,12 +1006,10 @@ class LoaderPipeline:
         if self._sample_items is None and not self._tmdb_api_key:
             raise RuntimeError("TMDB API key required for live ingestion")
 
-        self._ingest_queue: asyncio.Queue[_IngestBatch | None] = asyncio.Queue(
+        self._ingest_queue: IngestQueue = asyncio.Queue(
             maxsize=self._enrichment_workers * 2
         )
-        self._points_queue: asyncio.Queue[list[models.PointStruct] | None] = (
-            asyncio.Queue()
-        )
+        self._points_queue: PersistenceQueue = asyncio.Queue()
         self._upsert_capacity = asyncio.Semaphore(self._max_concurrent_upserts)
         self._items: list[AggregatedItem] = []
         self._qdrant_retry_queue: asyncio.Queue[list[models.PointStruct]] = (
@@ -1161,7 +1165,7 @@ class LoaderPipeline:
     async def _enrichment_worker(self, worker_id: int) -> None:
         while True:
             batch = await self._ingest_queue.get()
-            if batch is None:
+            if batch is None or batch is INGEST_DONE:
                 self._ingest_queue.task_done()
                 break
             try:

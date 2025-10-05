@@ -1,10 +1,16 @@
-"""Batch container and helper utilities shared across loader stages."""
+"""Batch container and helper utilities shared across loader stages.
+
+The queues exported here intentionally share sentinel objects so stage-specific
+integration tests can assert on hand-off behavior without duplicating
+constants.  The loader still emits ``None`` as a completion token for
+compatibility while downstream components migrate to sentinel-only signaling.
+"""
 from __future__ import annotations
 
 import asyncio
 from collections import deque
 from dataclasses import dataclass
-from typing import Iterable, Sequence, TypeVar
+from typing import TYPE_CHECKING, Any, Final, Iterable, Sequence, TypeVar, TypeAlias
 
 from ...common.types import AggregatedItem
 
@@ -14,6 +20,22 @@ except Exception:
     PlexPartialObject = object  # type: ignore[assignment]
 
 T = TypeVar("T")
+
+if TYPE_CHECKING:
+    from qdrant_client import models
+
+
+INGEST_DONE: Final = object()
+"""Sentinel object signaling that ingestion has completed.
+
+The loader currently places ``None`` on ingestion queues in addition to this
+sentinel so legacy listeners that only check for ``None`` continue to work.
+"""
+
+if TYPE_CHECKING:
+    PersistencePayload: TypeAlias = list[models.PointStruct]
+else:  # pragma: no cover - runtime fallback for typing-only alias
+    PersistencePayload: TypeAlias = list[Any]
 
 
 @dataclass(slots=True)
@@ -39,6 +61,12 @@ class SampleBatch:
 
 
 IngestBatch = MovieBatch | EpisodeBatch | SampleBatch
+
+IngestQueueItem: TypeAlias = IngestBatch | None | object
+PersistenceQueueItem: TypeAlias = PersistencePayload | None
+
+IngestQueue: TypeAlias = asyncio.Queue[IngestQueueItem]
+PersistenceQueue: TypeAlias = asyncio.Queue[PersistenceQueueItem]
 
 
 def require_positive(value: int, *, name: str) -> int:
@@ -98,6 +126,9 @@ _MovieBatch = MovieBatch
 _EpisodeBatch = EpisodeBatch
 _SampleBatch = SampleBatch
 _IngestBatch = IngestBatch
+_INGEST_DONE = INGEST_DONE
+_IngestQueue = IngestQueue
+_PersistenceQueue = PersistenceQueue
 _require_positive = require_positive
 _chunk_sequence = chunk_sequence
 _IMDbRetryQueue = IMDbRetryQueue
@@ -107,6 +138,9 @@ __all__ = [
     "EpisodeBatch",
     "SampleBatch",
     "IngestBatch",
+    "INGEST_DONE",
+    "IngestQueue",
+    "PersistenceQueue",
     "require_positive",
     "chunk_sequence",
     "IMDbRetryQueue",
@@ -114,6 +148,9 @@ __all__ = [
     "_EpisodeBatch",
     "_SampleBatch",
     "_IngestBatch",
+    "_INGEST_DONE",
+    "_IngestQueue",
+    "_PersistenceQueue",
     "_require_positive",
     "_chunk_sequence",
     "_IMDbRetryQueue",
