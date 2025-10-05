@@ -11,10 +11,13 @@ from __future__ import annotations
 
 import asyncio
 import logging
+from collections import deque
 from collections.abc import AsyncIterator, Awaitable, Callable, Sequence
 from contextlib import asynccontextmanager
 import inspect
 from typing import Any
+
+import httpx
 
 from .channels import (
     EpisodeBatch,
@@ -28,16 +31,19 @@ from .channels import (
     require_positive,
 )
 
-from ...common.types import AggregatedItem, TMDBEpisode, TMDBItem, TMDBShow
+from ...common.types import AggregatedItem, IMDbTitle, TMDBEpisode, TMDBItem, TMDBShow
 from .. import (
     _build_plex_item,
     _extract_external_ids,
-    _fetch_imdb_batch,
     _fetch_tmdb_episode,
     _fetch_tmdb_movie,
     _fetch_tmdb_show,
     resolve_tmdb_season_number,
 )
+from ..imdb_cache import IMDbCache
+
+
+LOGGER = logging.getLogger(__name__)
 
 
 class EnrichmentStage:
@@ -53,6 +59,12 @@ class EnrichmentStage:
         imdb_retry_queue: IMDbRetryQueue | None,
         movie_batch_size: int,
         episode_batch_size: int,
+        imdb_cache: IMDbCache | None = None,
+        imdb_max_retries: int = 3,
+        imdb_backoff: float = 1.0,
+        imdb_batch_limit: int = 5,
+        imdb_requests_per_window: int | None = None,
+        imdb_window_seconds: float = 1.0,
         logger: logging.Logger | None = None,
     ) -> None:
         self._http_client_factory = http_client_factory
@@ -60,6 +72,26 @@ class EnrichmentStage:
         self._ingest_queue = ingest_queue
         self._persistence_queue = persistence_queue
         self._imdb_retry_queue = imdb_retry_queue or IMDbRetryQueue()
+        self._imdb_cache = imdb_cache
+        if imdb_max_retries < 0:
+            raise ValueError("imdb_max_retries must be non-negative")
+        if imdb_backoff < 0:
+            raise ValueError("imdb_backoff must be non-negative")
+        self._imdb_max_retries = int(imdb_max_retries)
+        self._imdb_backoff = float(imdb_backoff)
+        self._imdb_batch_limit = require_positive(
+            int(imdb_batch_limit), name="imdb_batch_limit"
+        )
+        if imdb_requests_per_window is not None and imdb_requests_per_window <= 0:
+            raise ValueError(
+                "imdb_requests_per_window must be positive when provided"
+            )
+        if imdb_window_seconds <= 0:
+            raise ValueError("imdb_window_seconds must be positive")
+        self._imdb_throttle = _RequestThrottler(
+            limit=imdb_requests_per_window,
+            interval=float(imdb_window_seconds),
+        )
         requested_movie_batch_size = require_positive(
             int(movie_batch_size), name="movie_batch_size"
         )
@@ -69,6 +101,7 @@ class EnrichmentStage:
         )
         self._logger = logger or logging.getLogger("mcp_plex.loader.enrichment")
         self._show_tmdb_cache: dict[str, TMDBShow | None] = {}
+        self._pending_imdb_items: dict[str, list[AggregatedItem]] = {}
 
     @property
     def logger(self) -> logging.Logger:
@@ -86,7 +119,15 @@ class EnrichmentStage:
         """Execute the enrichment stage."""
 
         while True:
-            batch = await self._ingest_queue.get()
+            got_item = False
+            try:
+                batch = self._ingest_queue.get_nowait()
+                got_item = True
+            except asyncio.QueueEmpty:
+                if await self._retry_imdb_batches():
+                    continue
+                batch = await self._ingest_queue.get()
+                got_item = True
             try:
                 if batch is None:
                     self._logger.debug(
@@ -111,7 +152,8 @@ class EnrichmentStage:
                         "Received unsupported batch type: %r", batch
                     )
             finally:
-                self._ingest_queue.task_done()
+                if got_item:
+                    self._ingest_queue.task_done()
 
         await self._persistence_queue.put(None)
 
@@ -208,9 +250,20 @@ class EnrichmentStage:
 
         movie_ids = [_extract_external_ids(movie) for movie in movies]
         imdb_ids = [ids.imdb for ids in movie_ids if ids.imdb]
-        imdb_map = (
-            await _fetch_imdb_batch(client, imdb_ids) if imdb_ids else {}
-        )
+        retry_snapshot: set[str] = set()
+        imdb_map = {}
+        if imdb_ids:
+            imdb_map = await _fetch_imdb_batch(
+                client,
+                imdb_ids,
+                cache=self._imdb_cache,
+                throttle=self._imdb_throttle,
+                max_retries=self._imdb_max_retries,
+                backoff=self._imdb_backoff,
+                retry_queue=self._imdb_retry_queue,
+                batch_limit=self._imdb_batch_limit,
+            )
+            retry_snapshot = set(self._imdb_retry_queue.snapshot())
 
         tmdb_results: list[Any] = []
         api_key = self._tmdb_api_key
@@ -228,13 +281,14 @@ class EnrichmentStage:
         for movie, ids in zip(movies, movie_ids):
             tmdb = next(tmdb_iter, None) if ids.tmdb else None
             imdb = imdb_map.get(ids.imdb) if ids.imdb else None
-            aggregated.append(
-                AggregatedItem(
-                    plex=_build_plex_item(movie),
-                    imdb=imdb,
-                    tmdb=tmdb,
-                )
+            aggregated_item = AggregatedItem(
+                plex=_build_plex_item(movie),
+                imdb=imdb,
+                tmdb=tmdb,
             )
+            aggregated.append(aggregated_item)
+            if ids.imdb and imdb is None and ids.imdb in retry_snapshot:
+                self._register_pending_imdb(ids.imdb, aggregated_item)
         return aggregated
 
     async def _handle_sample_batch(self, batch: SampleBatch) -> None:
@@ -262,9 +316,20 @@ class EnrichmentStage:
             show_tmdb = await self._get_tmdb_show(client, show_ids.tmdb)
         episode_ids = [_extract_external_ids(ep) for ep in episodes]
         imdb_ids = [ids.imdb for ids in episode_ids if ids.imdb]
-        imdb_map = (
-            await _fetch_imdb_batch(client, imdb_ids) if imdb_ids else {}
-        )
+        retry_snapshot: set[str] = set()
+        imdb_map = {}
+        if imdb_ids:
+            imdb_map = await _fetch_imdb_batch(
+                client,
+                imdb_ids,
+                cache=self._imdb_cache,
+                throttle=self._imdb_throttle,
+                max_retries=self._imdb_max_retries,
+                backoff=self._imdb_backoff,
+                retry_queue=self._imdb_retry_queue,
+                batch_limit=self._imdb_batch_limit,
+            )
+            retry_snapshot = set(self._imdb_retry_queue.snapshot())
 
         tmdb_results: list[TMDBEpisode | None] = []
         if show_tmdb:
@@ -281,13 +346,14 @@ class EnrichmentStage:
             tmdb_episode = next(tmdb_iter, None) if show_tmdb else None
             imdb = imdb_map.get(ids.imdb) if ids.imdb else None
             tmdb_item: TMDBItem | None = tmdb_episode or show_tmdb
-            aggregated.append(
-                AggregatedItem(
-                    plex=_build_plex_item(ep),
-                    imdb=imdb,
-                    tmdb=tmdb_item,
-                )
+            aggregated_item = AggregatedItem(
+                plex=_build_plex_item(ep),
+                imdb=imdb,
+                tmdb=tmdb_item,
             )
+            aggregated.append(aggregated_item)
+            if ids.imdb and imdb is None and ids.imdb in retry_snapshot:
+                self._register_pending_imdb(ids.imdb, aggregated_item)
         return aggregated
 
     async def _get_tmdb_show(
@@ -324,3 +390,220 @@ class EnrichmentStage:
             ep_num,
             self._tmdb_api_key,
         )
+
+    async def _retry_imdb_batches(self) -> bool:
+        """Process IMDb IDs from the retry queue when idle."""
+
+        if self._imdb_retry_queue.empty():
+            return False
+
+        imdb_ids: list[str] = []
+        while (
+            len(imdb_ids) < self._imdb_batch_limit
+            and not self._imdb_retry_queue.empty()
+        ):
+            try:
+                imdb_ids.append(self._imdb_retry_queue.get_nowait())
+            except asyncio.QueueEmpty:  # pragma: no cover - race with producers
+                break
+
+        if not imdb_ids:
+            return False
+
+        async with self._acquire_http_client() as client:
+            imdb_results = await _fetch_imdb_batch(
+                client,
+                imdb_ids,
+                cache=self._imdb_cache,
+                throttle=self._imdb_throttle,
+                max_retries=self._imdb_max_retries,
+                backoff=self._imdb_backoff,
+                retry_queue=self._imdb_retry_queue,
+                batch_limit=self._imdb_batch_limit,
+            )
+
+        updated: list[AggregatedItem] = []
+        for imdb_id in imdb_ids:
+            imdb_title = imdb_results.get(imdb_id)
+            if imdb_title is None:
+                continue
+            pending_items = self._pending_imdb_items.pop(imdb_id, [])
+            for item in pending_items:
+                updated.append(item.model_copy(update={"imdb": imdb_title}))
+
+        if updated:
+            await self._emit_persistence_batch(updated)
+
+        self._logger.info(
+            "Retried IMDb batch with %d updates (retry queue=%d)",
+            len(updated),
+            self._imdb_retry_queue.qsize(),
+        )
+        return True
+
+    def _register_pending_imdb(self, imdb_id: str, item: AggregatedItem) -> None:
+        """Track *item* for re-emission once IMDb metadata becomes available."""
+
+        items = self._pending_imdb_items.setdefault(imdb_id, [])
+        items.append(item)
+
+
+class _RequestThrottler:
+    """Simple asynchronous rate limiter for external requests."""
+
+    def __init__(self, *, limit: int | None, interval: float) -> None:
+        self._limit = limit
+        self._interval = interval
+        self._timestamps: deque[float] = deque()
+        self._lock = asyncio.Lock()
+
+    async def acquire(self) -> None:
+        """Await until another request can be issued."""
+
+        if self._limit is None:
+            return
+
+        async with self._lock:
+            loop = asyncio.get_running_loop()
+            now = loop.time()
+            while self._timestamps and now - self._timestamps[0] >= self._interval:
+                self._timestamps.popleft()
+
+            while len(self._timestamps) >= self._limit:
+                sleep_for = self._timestamps[0] + self._interval - now
+                if sleep_for <= 0:
+                    self._timestamps.popleft()
+                    now = loop.time()
+                    continue
+                await asyncio.sleep(sleep_for)
+                now = loop.time()
+                while self._timestamps and now - self._timestamps[0] >= self._interval:
+                    self._timestamps.popleft()
+
+            self._timestamps.append(loop.time())
+
+
+async def _fetch_imdb(
+    client: httpx.AsyncClient,
+    imdb_id: str,
+    *,
+    cache: IMDbCache | None,
+    throttle: _RequestThrottler | None,
+    max_retries: int,
+    backoff: float,
+    retry_queue: IMDbRetryQueue | None,
+) -> IMDbTitle | None:
+    """Fetch a single IMDb title with retry, caching, and throttling."""
+
+    if cache:
+        cached = cache.get(imdb_id)
+        if cached:
+            return IMDbTitle.model_validate(cached)
+
+    url = f"https://api.imdbapi.dev/titles/{imdb_id}"
+    delay = backoff
+    for attempt in range(max_retries + 1):
+        if throttle is not None:
+            await throttle.acquire()
+        try:
+            response = await client.get(url)
+        except httpx.HTTPError:
+            LOGGER.exception("HTTP error fetching IMDb ID %s", imdb_id)
+            return None
+
+        if response.status_code == 429:
+            if attempt == max_retries:
+                if retry_queue is not None:
+                    await retry_queue.put(imdb_id)
+                return None
+            await asyncio.sleep(delay)
+            delay *= 2
+            continue
+
+        if response.is_success:
+            data = response.json()
+            if cache:
+                cache.set(imdb_id, data)
+            return IMDbTitle.model_validate(data)
+
+        return None
+
+    return None
+
+
+async def _fetch_imdb_batch(
+    client: httpx.AsyncClient,
+    imdb_ids: Sequence[str],
+    *,
+    cache: IMDbCache | None,
+    throttle: _RequestThrottler | None,
+    max_retries: int,
+    backoff: float,
+    retry_queue: IMDbRetryQueue | None,
+    batch_limit: int,
+) -> dict[str, IMDbTitle | None]:
+    """Fetch metadata for multiple IMDb IDs using batch requests."""
+
+    results: dict[str, IMDbTitle | None] = {}
+    ids_to_fetch: list[str] = []
+    for imdb_id in imdb_ids:
+        if cache:
+            cached = cache.get(imdb_id)
+            if cached:
+                results[imdb_id] = IMDbTitle.model_validate(cached)
+                continue
+        ids_to_fetch.append(imdb_id)
+
+    if not ids_to_fetch:
+        return results
+
+    url = "https://api.imdbapi.dev/titles:batchGet"
+    batch_size = require_positive(int(batch_limit), name="batch_limit")
+
+    for start in range(0, len(ids_to_fetch), batch_size):
+        chunk = ids_to_fetch[start : start + batch_size]
+        params = [("titleIds", imdb_id) for imdb_id in chunk]
+        delay = backoff
+        for attempt in range(max_retries + 1):
+            if throttle is not None:
+                await throttle.acquire()
+            try:
+                response = await client.get(url, params=params)
+            except httpx.HTTPError:
+                LOGGER.exception(
+                    "HTTP error fetching IMDb IDs %s", ",".join(chunk)
+                )
+                for imdb_id in chunk:
+                    results[imdb_id] = None
+                break
+
+            if response.status_code == 429:
+                if attempt == max_retries:
+                    if retry_queue is not None:
+                        for imdb_id in chunk:
+                            await retry_queue.put(imdb_id)
+                    for imdb_id in chunk:
+                        results[imdb_id] = None
+                    break
+                await asyncio.sleep(delay)
+                delay *= 2
+                continue
+
+            if response.is_success:
+                data = response.json()
+                found: set[str] = set()
+                for title_data in data.get("titles", []):
+                    imdb_title = IMDbTitle.model_validate(title_data)
+                    results[imdb_title.id] = imdb_title
+                    found.add(imdb_title.id)
+                    if cache:
+                        cache.set(imdb_title.id, title_data)
+                for missing in set(chunk) - found:
+                    results[missing] = None
+                break
+
+            for imdb_id in chunk:
+                results[imdb_id] = None
+            break
+
+    return results
