@@ -8,6 +8,11 @@ from typing import Iterable, Sequence, TypeVar
 
 from ...common.types import AggregatedItem
 
+try:  # Only import plexapi when available; the sample data mode does not require it.
+    from plexapi.base import PlexPartialObject
+except Exception:
+    PlexPartialObject = object  # type: ignore[assignment]
+
 T = TypeVar("T")
 
 
