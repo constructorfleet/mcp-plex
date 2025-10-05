@@ -12,7 +12,7 @@ import logging
 from typing import Sequence
 
 from ...common.types import AggregatedItem
-from .channels import IngestQueue
+from .channels import IngestQueue, SampleBatch, chunk_sequence
 
 
 class IngestionStage:
@@ -37,6 +37,8 @@ class IngestionStage:
         self._output_queue = output_queue
         self._completion_sentinel = completion_sentinel
         self._logger = logging.getLogger("mcp_plex.loader.ingestion")
+        self._items_ingested = 0
+        self._batches_ingested = 0
 
     @property
     def logger(self) -> logging.Logger:
@@ -60,6 +62,18 @@ class IngestionStage:
         await self._output_queue.put(None)
         await self._output_queue.put(self._completion_sentinel)
 
+    @property
+    def items_ingested(self) -> int:
+        """Total number of items placed onto the ingest queue."""
+
+        return self._items_ingested
+
+    @property
+    def batches_ingested(self) -> int:
+        """Total number of batches placed onto the ingest queue."""
+
+        return self._batches_ingested
+
     async def _run_sample_ingestion(self, items: Sequence[AggregatedItem]) -> None:
         """Placeholder hook for the sample ingestion flow."""
 
@@ -68,6 +82,7 @@ class IngestionStage:
             "Sample ingestion has not been ported yet; %d items queued for later.",
             item_count,
         )
+        await self._enqueue_sample_batches(items)
         await asyncio.sleep(0)
 
     async def _run_plex_ingestion(self) -> None:
@@ -78,3 +93,17 @@ class IngestionStage:
         else:
             self._logger.info("Plex ingestion pending implementation.")
         await asyncio.sleep(0)
+
+    async def _enqueue_sample_batches(
+        self, items: Sequence[AggregatedItem]
+    ) -> None:
+        """Place sample items onto the ingest queue in configured batch sizes."""
+
+        for chunk in chunk_sequence(items, self._sample_batch_size):
+            batch_items = list(chunk)
+            if not batch_items:
+                continue
+
+            await self._output_queue.put(SampleBatch(items=batch_items))
+            self._items_ingested += len(batch_items)
+            self._batches_ingested += 1
