@@ -13,7 +13,7 @@ import pytest
 from mcp_plex import loader
 from mcp_plex.loader.imdb_cache import IMDbCache
 from mcp_plex.loader import (
-    LoaderPipeline,
+    LegacyLoaderPipeline as LoaderPipeline,
     _build_plex_item,
     _extract_external_ids,
     _fetch_imdb,

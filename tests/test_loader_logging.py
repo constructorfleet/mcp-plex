@@ -128,17 +128,17 @@ def test_run_ensures_collection_before_loading(monkeypatch):
 
     monkeypatch.setattr(loader, "_ensure_collection", fake_ensure)
     sample_dir = Path(__file__).resolve().parents[1] / "sample-data"
-    original_execute = loader.LoaderPipeline.execute
+    original_execute = loader.LegacyLoaderPipeline.execute
 
     async def fake_execute(self):
         order.append("execute")
         self._items = []
 
-    monkeypatch.setattr(loader.LoaderPipeline, "execute", fake_execute)
+    monkeypatch.setattr(loader.LegacyLoaderPipeline, "execute", fake_execute)
 
     asyncio.run(loader.run(None, None, None, sample_dir, None, None))
 
     assert order and order[0] == "ensure"
     assert "execute" in order
 
-    monkeypatch.setattr(loader.LoaderPipeline, "execute", original_execute)
+    monkeypatch.setattr(loader.LegacyLoaderPipeline, "execute", original_execute)
