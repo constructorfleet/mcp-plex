@@ -37,6 +37,7 @@ from .pipeline.channels import (
     chunk_sequence,
     require_positive,
 )
+from .pipeline.persistence import PersistenceStage as _PersistenceStage
 from ..common.types import (
     AggregatedItem,
     ExternalIDs,
@@ -985,6 +986,18 @@ class LoaderPipeline:
         self._ingest_start = now
         self._enrich_start = now
         self._upsert_start = now
+        self._persistence_stage = _PersistenceStage(
+            client=self._client,
+            collection_name=self._collection_name,
+            dense_vector_name=self._dense_model_name,
+            sparse_vector_name=self._sparse_model_name,
+            persistence_queue=self._points_queue,
+            retry_queue=self._qdrant_retry_queue,
+            upsert_semaphore=self._upsert_capacity,
+            upsert_buffer_size=self._upsert_buffer_size,
+            upsert_fn=self._perform_upsert,
+            on_batch_complete=self._handle_upsert_batch,
+        )
 
     @property
     def qdrant_retry_queue(self) -> asyncio.Queue[list[models.PointStruct]]:
@@ -1009,7 +1022,7 @@ class LoaderPipeline:
                 for worker_id in range(self._enrichment_workers)
             ]
             upsert_tasks = [
-                asyncio.create_task(self._upsert_worker(worker_id))
+                asyncio.create_task(self._persistence_stage.run(worker_id))
                 for worker_id in range(self._max_concurrent_upserts)
             ]
             error: BaseException | None = None
@@ -1297,48 +1310,30 @@ class LoaderPipeline:
             build_point(item, self._dense_model_name, self._sparse_model_name)
             for item in aggregated
         ]
-        for chunk in _chunk_sequence(points, self._upsert_buffer_size):
-            batch = list(chunk)
-            if not batch:
-                continue
-            await self._upsert_capacity.acquire()
-            try:
-                await self._points_queue.put(batch)
-            except BaseException:
-                self._upsert_capacity.release()
-                raise
+        await self._persistence_stage.enqueue_points(points)
 
-    async def _upsert_worker(self, worker_id: int) -> None:
-        while True:
-            batch = await self._points_queue.get()
-            if batch is None:
-                self._points_queue.task_done()
-                break
-            logger.info(
-                "Upsert worker %d handling %d points (queue size=%d)",
-                worker_id,
-                len(batch),
-                self._points_queue.qsize(),
-            )
-            try:
-                if self._upserted_points == 0:
-                    self._upsert_start = time.perf_counter()
-                await _upsert_in_batches(
-                    self._client,
-                    self._collection_name,
-                    batch,
-                    retry_queue=self._qdrant_retry_queue,
-                )
-                self._upserted_points += len(batch)
-                self._log_progress(
-                    f"Upsert worker {worker_id}",
-                    self._upserted_points,
-                    self._upsert_start,
-                    self._points_queue.qsize(),
-                )
-            finally:
-                self._points_queue.task_done()
-                self._upsert_capacity.release()
+    async def _perform_upsert(
+        self, batch: Sequence[models.PointStruct]
+    ) -> None:
+        await _upsert_in_batches(
+            self._client,
+            self._collection_name,
+            list(batch),
+            retry_queue=self._qdrant_retry_queue,
+        )
+
+    def _handle_upsert_batch(
+        self, worker_id: int, batch_size: int, queue_size: int
+    ) -> None:
+        if self._upserted_points == 0:
+            self._upsert_start = time.perf_counter()
+        self._upserted_points += batch_size
+        self._log_progress(
+            f"Upsert worker {worker_id}",
+            self._upserted_points,
+            self._upsert_start,
+            queue_size,
+        )
 async def run(
     plex_url: Optional[str],
     plex_token: Optional[str],

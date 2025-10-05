@@ -4,9 +4,9 @@ from __future__ import annotations
 
 import asyncio
 import logging
-from typing import TYPE_CHECKING, Any
+from typing import TYPE_CHECKING, Any, Awaitable, Callable, Sequence
 
-from .channels import PersistenceQueue
+from .channels import PersistenceQueue, chunk_sequence, require_positive
 
 if TYPE_CHECKING:  # pragma: no cover - typing helpers only
     from qdrant_client import AsyncQdrantClient, models
@@ -30,6 +30,9 @@ class PersistenceStage:
         persistence_queue: PersistenceQueue,
         retry_queue: asyncio.Queue[PersistencePayload],
         upsert_semaphore: asyncio.Semaphore,
+        upsert_buffer_size: int,
+        upsert_fn: Callable[[PersistencePayload], Awaitable[None]],
+        on_batch_complete: Callable[[int, int, int], None] | None = None,
     ) -> None:
         self._client = client
         self._collection_name = str(collection_name)
@@ -38,6 +41,11 @@ class PersistenceStage:
         self._persistence_queue = persistence_queue
         self._retry_queue = retry_queue
         self._upsert_semaphore = upsert_semaphore
+        self._upsert_buffer_size = require_positive(
+            upsert_buffer_size, name="upsert_buffer_size"
+        )
+        self._upsert_fn = upsert_fn
+        self._on_batch_complete = on_batch_complete
         self._logger = logging.getLogger("mcp_plex.loader.persistence")
 
     @property
@@ -88,7 +96,32 @@ class PersistenceStage:
 
         return self._upsert_semaphore
 
-    async def run(self) -> None:
+    @property
+    def upsert_buffer_size(self) -> int:
+        """Maximum number of points per persistence batch."""
+
+        return self._upsert_buffer_size
+
+    async def enqueue_points(
+        self, points: Sequence["models.PointStruct"]
+    ) -> None:
+        """Chunk *points* and place them on the persistence queue."""
+
+        if not points:
+            return
+
+        for chunk in chunk_sequence(list(points), self._upsert_buffer_size):
+            batch = list(chunk)
+            if not batch:
+                continue
+            await self._upsert_semaphore.acquire()
+            try:
+                await self._persistence_queue.put(batch)
+            except BaseException:
+                self._upsert_semaphore.release()
+                raise
+
+    async def run(self, worker_id: int) -> None:
         """Drain the persistence queue until a sentinel is received."""
 
         while True:
@@ -96,15 +129,24 @@ class PersistenceStage:
             try:
                 if payload is None:
                     self._logger.debug(
-                        "Persistence queue sentinel received; finishing placeholder run."
+                        "Persistence queue sentinel received; finishing run for worker %d.",
+                        worker_id,
                     )
                     return
 
-                self._logger.debug(
-                    "Placeholder persistence stage received batch with %d items.",
+                queue_size = self._persistence_queue.qsize()
+                self._logger.info(
+                    "Upsert worker %d handling %d points (queue size=%d)",
+                    worker_id,
                     len(payload),
+                    queue_size,
                 )
+                await self._upsert_fn(payload)
+                if self._on_batch_complete is not None:
+                    self._on_batch_complete(
+                        worker_id, len(payload), self._persistence_queue.qsize()
+                    )
             finally:
                 self._persistence_queue.task_done()
-
-            await asyncio.sleep(0)
+                if payload is not None:
+                    self._upsert_semaphore.release()
