@@ -12,7 +12,6 @@ from pathlib import Path
 from typing import (
     AsyncIterator,
     Awaitable,
-    Iterable,
     List,
     Optional,
     Sequence,
