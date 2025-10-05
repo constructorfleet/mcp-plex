@@ -17,7 +17,11 @@ from mcp_plex.loader.pipeline.channels import (
     MovieBatch,
     SampleBatch,
 )
-from mcp_plex.loader.pipeline.enrichment import EnrichmentStage
+from mcp_plex.loader.pipeline.enrichment import (
+    EnrichmentStage,
+    _RequestThrottler,
+    _fetch_imdb_batch,
+)
 
 
 def test_enrichment_stage_logger_name() -> None:
@@ -177,7 +181,7 @@ def test_enrichment_stage_enriches_movie_batches_and_emits_chunks(monkeypatch):
     tmdb_requests: list[str] = []
     client_log: list[str] = []
 
-    async def fake_fetch_imdb_batch(client, imdb_ids):
+    async def fake_fetch_imdb_batch(client, imdb_ids, **kwargs):
         imdb_requests.append(list(imdb_ids))
         return {
             imdb_id: IMDbTitle(id=imdb_id, type="movie", primaryTitle=f"IMDb {imdb_id}")
@@ -259,7 +263,7 @@ def test_enrichment_stage_handles_missing_external_ids(monkeypatch):
     imdb_requests: list[list[str]] = []
     tmdb_requests: list[str] = []
 
-    async def fake_fetch_imdb_batch(client, imdb_ids):
+    async def fake_fetch_imdb_batch(client, imdb_ids, **kwargs):
         imdb_requests.append(list(imdb_ids))
         return {
             imdb_id: IMDbTitle(id=imdb_id, type="movie", primaryTitle=f"IMDb {imdb_id}")
@@ -361,7 +365,7 @@ def test_enrichment_stage_caches_tmdb_show_results(monkeypatch):
             }
         )
 
-    async def fake_fetch_imdb_batch(client, imdb_ids):
+    async def fake_fetch_imdb_batch(client, imdb_ids, **kwargs):
         return {
             imdb_id: IMDbTitle(
                 id=imdb_id,
@@ -499,3 +503,181 @@ def test_enrichment_stage_sample_batches_pass_through(monkeypatch):
     assert batch == items
     assert put_payloads[0] == batch
     assert put_payloads[-1] is None
+
+
+def test_enrichment_stage_retries_imdb_queue_when_idle(monkeypatch):
+    calls: list[list[str]] = []
+
+    async def fake_fetch_imdb_batch(client, imdb_ids, **kwargs):
+        calls.append(list(imdb_ids))
+        return {
+            imdb_id: IMDbTitle(id=imdb_id, type="movie", primaryTitle=imdb_id)
+            for imdb_id in imdb_ids
+        }
+
+    monkeypatch.setattr(
+        "mcp_plex.loader.pipeline.enrichment._fetch_imdb_batch",
+        fake_fetch_imdb_batch,
+    )
+
+    async def scenario() -> tuple[list[list[str]], int]:
+        ingest_queue: asyncio.Queue = asyncio.Queue()
+        persistence_queue: asyncio.Queue = asyncio.Queue()
+        retry_queue = IMDbRetryQueue(["tt1", "tt2"])
+
+        stage = EnrichmentStage(
+            http_client_factory=lambda: object(),
+            tmdb_api_key="",
+            ingest_queue=ingest_queue,
+            persistence_queue=persistence_queue,
+            imdb_retry_queue=retry_queue,
+            movie_batch_size=2,
+            episode_batch_size=2,
+        )
+
+        run_task = asyncio.create_task(stage.run())
+        await asyncio.sleep(0)
+        await ingest_queue.put(INGEST_DONE)
+        await run_task
+        return calls, retry_queue.qsize()
+
+    processed, remaining = asyncio.run(scenario())
+    assert processed == [["tt1", "tt2"]]
+    assert remaining == 0
+
+
+class _FakeResponse:
+    def __init__(self, status_code: int, payload: dict[str, Any]):
+        self.status_code = status_code
+        self._payload = payload
+
+    @property
+    def is_success(self) -> bool:
+        return 200 <= self.status_code < 300
+
+    def json(self) -> dict[str, Any]:  # pragma: no cover - tiny helper
+        return self._payload
+
+
+def test_fetch_imdb_batch_success(monkeypatch):
+    async def scenario() -> tuple[dict[str, IMDbTitle | None], int]:
+        class _Client:
+            def __init__(self) -> None:
+                self.calls = 0
+
+            async def get(self, url: str, params=None):
+                self.calls += 1
+                ids = [value for _, value in params]
+                return _FakeResponse(
+                    200,
+                    {
+                        "titles": [
+                            {
+                                "id": imdb_id,
+                                "type": "movie",
+                                "primaryTitle": imdb_id.upper(),
+                            }
+                            for imdb_id in ids
+                        ]
+                    },
+                )
+
+        client = _Client()
+        throttle = _RequestThrottler(limit=10, interval=1.0)
+        results = await _fetch_imdb_batch(
+            client,
+            ["tt1", "tt2"],
+            cache=None,
+            throttle=throttle,
+            max_retries=2,
+            backoff=0.01,
+            retry_queue=None,
+            batch_limit=5,
+        )
+        return results, client.calls
+
+    results, calls = asyncio.run(scenario())
+    assert calls == 1
+    assert results["tt1"].primaryTitle == "TT1"
+    assert results["tt2"].primaryTitle == "TT2"
+
+
+def test_fetch_imdb_batch_rate_limit_retries(monkeypatch):
+    sleep_calls: list[float] = []
+
+    async def fake_sleep(delay: float) -> None:
+        sleep_calls.append(delay)
+
+    monkeypatch.setattr(asyncio, "sleep", fake_sleep)
+
+    async def scenario() -> tuple[dict[str, IMDbTitle | None], int]:
+        attempts = 0
+
+        class _Client:
+            async def get(self, url: str, params=None):
+                nonlocal attempts
+                attempts += 1
+                if attempts == 1:
+                    return _FakeResponse(429, {})
+                return _FakeResponse(
+                    200,
+                    {
+                        "titles": [
+                            {
+                                "id": params[0][1],
+                                "type": "movie",
+                                "primaryTitle": params[0][1],
+                            }
+                        ]
+                    },
+                )
+
+        client = _Client()
+        results = await _fetch_imdb_batch(
+            client,
+            ["tt3"],
+            cache=None,
+            throttle=None,
+            max_retries=2,
+            backoff=0.05,
+            retry_queue=None,
+            batch_limit=5,
+        )
+        return results, attempts
+
+    results, attempts = asyncio.run(scenario())
+    assert attempts == 2
+    assert sleep_calls == [0.05]
+    assert results["tt3"] is not None
+
+
+def test_fetch_imdb_batch_rate_limit_exhaustion(monkeypatch):
+    sleep_calls: list[float] = []
+
+    async def fake_sleep(delay: float) -> None:
+        sleep_calls.append(delay)
+
+    monkeypatch.setattr(asyncio, "sleep", fake_sleep)
+
+    async def scenario() -> tuple[dict[str, IMDbTitle | None], list[str]]:
+        class _Client:
+            async def get(self, url: str, params=None):
+                return _FakeResponse(429, {})
+
+        retry_queue = IMDbRetryQueue()
+        results = await _fetch_imdb_batch(
+            _Client(),
+            ["tt4", "tt5"],
+            cache=None,
+            throttle=None,
+            max_retries=1,
+            backoff=0.01,
+            retry_queue=retry_queue,
+            batch_limit=5,
+        )
+        return results, retry_queue.snapshot()
+
+    results, queued = asyncio.run(scenario())
+    assert queued == ["tt4", "tt5"]
+    assert all(value is None for value in results.values())
+    assert sleep_calls == [0.01]
