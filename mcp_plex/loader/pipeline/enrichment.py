@@ -2,8 +2,9 @@
 
 Movie metadata enrichment has been ported from the legacy loader and now
 performs TMDb and IMDb lookups before emitting aggregated payloads to the
-persistence queue.  Episode and sample handling remain placeholder hooks while
-the rest of the legacy logic is migrated.
+persistence queue.  Episode enrichment reuses the TMDb caching and lookup
+logic, and sample-mode batches pass straight through to persistence so end to
+end processing mirrors the legacy worker implementation.
 """
 
 from __future__ import annotations
@@ -27,12 +28,15 @@ from .channels import (
     require_positive,
 )
 
-from ...common.types import AggregatedItem
+from ...common.types import AggregatedItem, TMDBEpisode, TMDBItem, TMDBShow
 from .. import (
     _build_plex_item,
     _extract_external_ids,
     _fetch_imdb_batch,
+    _fetch_tmdb_episode,
     _fetch_tmdb_movie,
+    _fetch_tmdb_show,
+    resolve_tmdb_season_number,
 )
 
 
@@ -64,6 +68,7 @@ class EnrichmentStage:
             int(episode_batch_size), name="episode_batch_size"
         )
         self._logger = logger or logging.getLogger("mcp_plex.loader.enrichment")
+        self._show_tmdb_cache: dict[str, TMDBShow | None] = {}
 
     @property
     def logger(self) -> logging.Logger:
@@ -125,18 +130,34 @@ class EnrichmentStage:
             for movies in movie_chunks:
                 aggregated = await self._enrich_movies(client, movies)
                 await self._emit_persistence_batch(aggregated)
+                self._logger.info(
+                    "Processed movie batch with %d items (queue size=%d)",
+                    len(aggregated),
+                    self._persistence_queue.qsize(),
+                )
 
     async def _handle_episode_batch(self, batch: EpisodeBatch) -> None:
-        """Placeholder hook for processing Plex episode batches."""
+        """Enrich and forward Plex episode batches to the persistence stage."""
+
+        episode_chunks = [
+            list(chunk)
+            for chunk in chunk_sequence(batch.episodes, self._episode_batch_size)
+            if len(chunk)
+        ]
+        if not episode_chunks:
+            return
 
         show_title = getattr(batch.show, "title", str(batch.show))
-        episode_count = len(batch.episodes)
-        self._logger.info(
-            "Episode enrichment has not been ported yet; %d episodes pending for %s.",
-            episode_count,
-            show_title,
-        )
-        await asyncio.sleep(0)
+        async with self._acquire_http_client() as client:
+            for episodes in episode_chunks:
+                aggregated = await self._enrich_episodes(client, batch.show, episodes)
+                await self._emit_persistence_batch(aggregated)
+                self._logger.info(
+                    "Processed episode batch for %s with %d items (queue size=%d)",
+                    show_title,
+                    len(aggregated),
+                    self._persistence_queue.qsize(),
+                )
 
     @asynccontextmanager
     async def _acquire_http_client(self) -> AsyncIterator[Any]:
@@ -217,11 +238,89 @@ class EnrichmentStage:
         return aggregated
 
     async def _handle_sample_batch(self, batch: SampleBatch) -> None:
-        """Placeholder hook for processing sample data batches."""
+        """Forward sample data batches directly to the persistence stage."""
 
-        item_count = len(batch.items)
-        self._logger.info(
-            "Sample enrichment has not been ported yet; %d items queued for later.",
-            item_count,
+        for items in chunk_sequence(batch.items, self._movie_batch_size):
+            aggregated = list(items)
+            if not aggregated:
+                continue
+            await self._emit_persistence_batch(aggregated)
+            self._logger.info(
+                "Processed sample batch with %d items (queue size=%d)",
+                len(aggregated),
+                self._persistence_queue.qsize(),
+            )
+
+    async def _enrich_episodes(
+        self, client: Any, show: Any, episodes: Sequence[Any]
+    ) -> list[AggregatedItem]:
+        """Fetch external metadata for *episodes* and aggregate the results."""
+
+        show_ids = _extract_external_ids(show)
+        show_tmdb: TMDBShow | None = None
+        if show_ids.tmdb:
+            show_tmdb = await self._get_tmdb_show(client, show_ids.tmdb)
+        episode_ids = [_extract_external_ids(ep) for ep in episodes]
+        imdb_ids = [ids.imdb for ids in episode_ids if ids.imdb]
+        imdb_map = (
+            await _fetch_imdb_batch(client, imdb_ids) if imdb_ids else {}
         )
-        await asyncio.sleep(0)
+
+        tmdb_results: list[TMDBEpisode | None] = []
+        if show_tmdb:
+            episode_tasks = [
+                self._lookup_tmdb_episode(client, show_tmdb, ep)
+                for ep in episodes
+            ]
+            if episode_tasks:
+                tmdb_results = await asyncio.gather(*episode_tasks)
+        tmdb_iter = iter(tmdb_results)
+
+        aggregated: list[AggregatedItem] = []
+        for ep, ids in zip(episodes, episode_ids):
+            tmdb_episode = next(tmdb_iter, None) if show_tmdb else None
+            imdb = imdb_map.get(ids.imdb) if ids.imdb else None
+            tmdb_item: TMDBItem | None = tmdb_episode or show_tmdb
+            aggregated.append(
+                AggregatedItem(
+                    plex=_build_plex_item(ep),
+                    imdb=imdb,
+                    tmdb=tmdb_item,
+                )
+            )
+        return aggregated
+
+    async def _get_tmdb_show(
+        self, client: Any, tmdb_id: str
+    ) -> TMDBShow | None:
+        """Return the TMDb show for *tmdb_id*, using the in-memory cache."""
+
+        tmdb_id_str = str(tmdb_id)
+        if tmdb_id_str in self._show_tmdb_cache:
+            return self._show_tmdb_cache[tmdb_id_str]
+        show = await _fetch_tmdb_show(
+            client, tmdb_id_str, self._tmdb_api_key or ""
+        )
+        self._show_tmdb_cache[tmdb_id_str] = show
+        return show
+
+    async def _lookup_tmdb_episode(
+        self, client: Any, show_tmdb: TMDBShow | None, episode: Any
+    ) -> TMDBEpisode | None:
+        """Lookup the TMDb metadata for *episode* within *show_tmdb*."""
+
+        if not show_tmdb or not self._tmdb_api_key:
+            return None
+        season = resolve_tmdb_season_number(show_tmdb, episode)
+        ep_num = getattr(episode, "index", None)
+        if isinstance(ep_num, str) and ep_num.isdigit():
+            ep_num = int(ep_num)
+        if season is None or ep_num is None:
+            return None
+        return await _fetch_tmdb_episode(
+            client,
+            show_tmdb.id,
+            season,
+            ep_num,
+            self._tmdb_api_key,
+        )
