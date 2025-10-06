@@ -2,22 +2,13 @@
 from __future__ import annotations
 
 import asyncio
-import inspect
 import json
 import logging
 import sys
 import time
 import warnings
 from pathlib import Path
-from typing import (
-    Any,
-    AsyncIterator,
-    Awaitable,
-    List,
-    Optional,
-    Sequence,
-    TypeVar,
-)
+from typing import Any, List, Optional, Sequence, TypeVar
 
 import click
 import httpx
@@ -37,8 +28,6 @@ from .pipeline.channels import (
     chunk_sequence,
     require_positive,
 )
-from .pipeline.orchestrator import LoaderOrchestrator
-from .pipeline.persistence import PersistenceStage as _PersistenceStage
 from .pipeline.enrichment import (
     _build_plex_item,
     _extract_external_ids,
@@ -47,13 +36,14 @@ from .pipeline.enrichment import (
     _fetch_tmdb_show,
     resolve_tmdb_season_number,
 )
+from .pipeline.orchestrator import LoaderOrchestrator
+from .pipeline.persistence import PersistenceStage as _PersistenceStage
 from ..common.types import (
     AggregatedItem,
     IMDbTitle,
     PlexGuid,
     PlexItem,
     PlexPerson,
-    TMDBItem,
     TMDBMovie,
     TMDBShow,
 )
@@ -125,41 +115,6 @@ _DENSE_MODEL_PARAMS: dict[str, tuple[int, models.Distance]] = {
 }
 
 
-def _close_coroutines(tasks: Sequence[Awaitable[object]]) -> None:
-    """Close coroutine objects to avoid unawaited warnings."""
-
-    for task in tasks:
-        if inspect.iscoroutine(task):
-            task.close()
-
-
-async def _iter_gather_in_batches(
-    tasks: Sequence[Awaitable[T]], batch_size: int
-) -> AsyncIterator[T]:
-    """Yield results from awaitable tasks in fixed-size batches."""
-
-    try:
-        _require_positive(batch_size, name="batch_size")
-    except ValueError:
-        _close_coroutines(tasks)
-        raise
-
-    total = len(tasks)
-    for i in range(0, total, batch_size):
-        batch = tasks[i : i + batch_size]
-        for result in await asyncio.gather(*batch):
-            yield result
-        logger.info("Processed %d/%d items", min(i + batch_size, total), total)
-
-
-async def _gather_in_batches(
-    tasks: Sequence[Awaitable[T]], batch_size: int
-) -> List[T]:
-    """Gather awaitable tasks in fixed-size batches."""
-
-    return [result async for result in _iter_gather_in_batches(tasks, batch_size)]
-
-
 def _resolve_dense_model_params(model_name: str) -> tuple[int, models.Distance]:
     """Look up Qdrant vector parameters for a known dense embedding model."""
 
@@ -200,25 +155,6 @@ async def _fetch_imdb(client: httpx.AsyncClient, imdb_id: str) -> Optional[IMDbT
         max_retries=_imdb_max_retries,
         backoff=_imdb_backoff,
         retry_queue=_imdb_retry_queue,
-    )
-
-
-async def _fetch_imdb_batch(
-    client: httpx.AsyncClient, imdb_ids: Sequence[str]
-) -> dict[str, Optional[IMDbTitle]]:
-    """Fetch metadata for multiple IMDb IDs, batching requests."""
-
-    from .pipeline import enrichment as enrichment_mod
-
-    return await enrichment_mod._fetch_imdb_batch(
-        client,
-        imdb_ids,
-        cache=_imdb_cache,
-        throttle=_get_imdb_throttle(),
-        max_retries=_imdb_max_retries,
-        backoff=_imdb_backoff,
-        retry_queue=_imdb_retry_queue,
-        batch_limit=_imdb_batch_limit,
     )
 
 
@@ -541,87 +477,6 @@ def build_point(
     )
 
 
-async def _iter_from_plex(
-    server: PlexServer, tmdb_api_key: str, *, batch_size: int = 50
-) -> AsyncIterator[AggregatedItem]:
-    """Yield items from a live Plex server as they are enriched."""
-
-    async with httpx.AsyncClient(timeout=30) as client:
-        movie_section = server.library.section("Movies")
-        movie_keys = [int(m.ratingKey) for m in movie_section.all()]
-        movies = server.fetchItems(movie_keys) if movie_keys else []
-        movie_imdb_ids = [
-            _extract_external_ids(m).imdb for m in movies if _extract_external_ids(m).imdb
-        ]
-        movie_imdb_map = (
-            await _fetch_imdb_batch(client, movie_imdb_ids) if movie_imdb_ids else {}
-        )
-
-        async def _augment_movie(movie: PlexPartialObject) -> AggregatedItem:
-            ids = _extract_external_ids(movie)
-            imdb = movie_imdb_map.get(ids.imdb) if ids.imdb else None
-            tmdb = (
-                await _fetch_tmdb_movie(client, ids.tmdb, tmdb_api_key)
-                if ids.tmdb
-                else None
-            )
-            return AggregatedItem(plex=_build_plex_item(movie), imdb=imdb, tmdb=tmdb)
-
-        movie_tasks = [_augment_movie(movie) for movie in movies]
-        if movie_tasks:
-            async for result in _iter_gather_in_batches(movie_tasks, batch_size):
-                yield result
-
-        show_section = server.library.section("TV Shows")
-        show_keys = [int(s.ratingKey) for s in show_section.all()]
-        full_shows = server.fetchItems(show_keys) if show_keys else []
-        for full_show in full_shows:
-            show_ids = _extract_external_ids(full_show)
-            show_tmdb: Optional[TMDBShow] = None
-            if show_ids.tmdb:
-                show_tmdb = await _fetch_tmdb_show(client, show_ids.tmdb, tmdb_api_key)
-            episode_keys = [int(e.ratingKey) for e in full_show.episodes()]
-            episodes = server.fetchItems(episode_keys) if episode_keys else []
-            ep_imdb_ids = [
-                _extract_external_ids(e).imdb
-                for e in episodes
-                if _extract_external_ids(e).imdb
-            ]
-            ep_imdb_map = (
-                await _fetch_imdb_batch(client, ep_imdb_ids) if ep_imdb_ids else {}
-            )
-
-            async def _augment_episode(episode: PlexPartialObject) -> AggregatedItem:
-                ids = _extract_external_ids(episode)
-                imdb = ep_imdb_map.get(ids.imdb) if ids.imdb else None
-                season = resolve_tmdb_season_number(show_tmdb, episode)
-                ep_num = getattr(episode, "index", None)
-                tmdb_episode = (
-                    await _fetch_tmdb_episode(
-                        client, show_tmdb.id, season, ep_num, tmdb_api_key
-                    )
-                    if show_tmdb and season is not None and ep_num is not None
-                    else None
-                )
-                tmdb: Optional[TMDBItem] = tmdb_episode or show_tmdb
-                return AggregatedItem(
-                    plex=_build_plex_item(episode), imdb=imdb, tmdb=tmdb
-                )
-
-            episode_tasks = [_augment_episode(ep) for ep in episodes]
-            if episode_tasks:
-                async for result in _iter_gather_in_batches(episode_tasks, batch_size):
-                    yield result
-
-
-async def _load_from_plex(
-    server: PlexServer, tmdb_api_key: str, *, batch_size: int = 50
-) -> List[AggregatedItem]:
-    """Retain list-based API for tests by consuming :func:`_iter_from_plex`."""
-
-    return [item async for item in _iter_from_plex(server, tmdb_api_key, batch_size=batch_size)]
-
-
 def _load_from_sample(sample_dir: Path) -> List[AggregatedItem]:
     """Load items from local sample JSON files."""
 
@@ -728,14 +583,6 @@ def _load_from_sample(sample_dir: Path) -> List[AggregatedItem]:
     results.append(AggregatedItem(plex=plex_episode, imdb=imdb_episode, tmdb=tmdb_show))
 
     return results
-
-
-async def _iter_from_sample(sample_dir: Path) -> AsyncIterator[AggregatedItem]:
-    """Yield sample data items for streaming pipelines."""
-
-    for item in _load_from_sample(sample_dir):
-        yield item
-
 
 
 def _build_loader_orchestrator(
