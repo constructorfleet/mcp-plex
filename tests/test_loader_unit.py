@@ -13,7 +13,6 @@ import pytest
 from mcp_plex import loader
 from mcp_plex.loader.imdb_cache import IMDbCache
 from mcp_plex.loader import (
-    LegacyLoaderPipeline as LoaderPipeline,
     _build_plex_item,
     _extract_external_ids,
     _fetch_imdb,
@@ -721,7 +720,9 @@ def test_build_point_includes_metadata():
 
 
 def test_loader_pipeline_processes_sample_batches(monkeypatch):
-    items = _load_from_sample(Path(__file__).resolve().parents[1] / "sample-data")
+    sample_items = _load_from_sample(
+        Path(__file__).resolve().parents[1] / "sample-data"
+    )
 
     recorded_batches: list[list[models.PointStruct]] = []
 
@@ -730,13 +731,13 @@ def test_loader_pipeline_processes_sample_batches(monkeypatch):
 
     monkeypatch.setattr(loader, "_upsert_in_batches", record_upsert)
 
-    pipeline = LoaderPipeline(
+    orchestrator, processed_items, _ = loader._build_loader_orchestrator(
         client=object(),
         collection_name="media-items",
         dense_model_name="BAAI/bge-small-en-v1.5",
         sparse_model_name="Qdrant/bm42-all-minilm-l6-v2-attentions",
         tmdb_api_key=None,
-        sample_items=items,
+        sample_items=sample_items,
         plex_server=None,
         plex_chunk_size=10,
         enrichment_batch_size=1,
@@ -745,9 +746,9 @@ def test_loader_pipeline_processes_sample_batches(monkeypatch):
         max_concurrent_upserts=1,
     )
 
-    asyncio.run(pipeline.execute())
+    asyncio.run(orchestrator.run())
 
-    assert len(pipeline.items) == len(items)
+    assert len(processed_items) == len(sample_items)
     assert recorded_batches, "expected pipeline to emit upsert batches"
     payload = recorded_batches[0][0].payload
     assert payload["title"]

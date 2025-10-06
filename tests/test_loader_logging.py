@@ -31,19 +31,19 @@ class DummyClient:
 def test_run_logs_upsert(monkeypatch, caplog):
     monkeypatch.setattr(loader, "AsyncQdrantClient", DummyClient)
     sample_dir = Path(__file__).resolve().parents[1] / "sample-data"
-    with caplog.at_level(logging.INFO, logger="mcp_plex.loader"):
+    with caplog.at_level(logging.INFO):
         asyncio.run(loader.run(None, None, None, sample_dir, None, None))
+    assert "Starting staged loader (sample mode)" in caplog.text
+    assert "Upsert worker 0 handling 2 points" in caplog.text
+    assert "Upsert worker 0 processed 2 items" in caplog.text
     assert "Loaded 2 items" in caplog.text
-    assert "Upsert worker" in caplog.text
-    assert "handling 2 points" in caplog.text
-    assert "processed 2 items" in caplog.text
 
 
 def test_run_logs_no_points(monkeypatch, caplog):
     monkeypatch.setattr(loader, "AsyncQdrantClient", DummyClient)
     monkeypatch.setattr(loader, "_load_from_sample", lambda _: [])
     sample_dir = Path(__file__).resolve().parents[1] / "sample-data"
-    with caplog.at_level(logging.INFO, logger="mcp_plex.loader"):
+    with caplog.at_level(logging.INFO):
         asyncio.run(loader.run(None, None, None, sample_dir, None, None))
     assert "Loaded 0 items" in caplog.text
     assert "No points to upsert" in caplog.text
