@@ -3,8 +3,9 @@
 This package now centres its public API on :class:`LoaderOrchestrator`,
 the coordination layer for the ingestion, enrichment, and persistence
 stages. The historical pipeline implementation remains available as
-``LegacyLoaderPipeline`` for the CLI while the original ``LoaderPipeline``
-name resolves to the orchestrator with a deprecation warning.
+``LoaderPipeline`` for reference, but new code should instantiate the
+staged classes directly and coordinate them with
+:class:`LoaderOrchestrator`.
 """
 from __future__ import annotations
 
@@ -1346,12 +1347,6 @@ class LoaderPipeline:
         )
 
 
-# Preserve the legacy pipeline implementation for the CLI while exposing the
-# orchestrator as the public API moving forward.
-LegacyLoaderPipeline = LoaderPipeline
-del LoaderPipeline
-
-
 def _build_loader_orchestrator(
     *,
     client: AsyncQdrantClient,
@@ -1472,21 +1467,6 @@ def _build_loader_orchestrator(
     )
 
     return orchestrator, items, persistence_stage.retry_queue
-
-
-def __getattr__(name: str) -> Any:
-    """Provide deprecated access to :class:`LoaderOrchestrator`."""
-
-    if name == "LoaderPipeline":
-        warnings.warn(
-            "LoaderPipeline has been renamed to LoaderOrchestrator; import "
-            "mcp_plex.loader.LoaderOrchestrator instead.",
-            DeprecationWarning,
-            stacklevel=2,
-        )
-        globals()[name] = LoaderOrchestrator
-        return LoaderOrchestrator
-    raise AttributeError(f"module {__name__!r} has no attribute {name!r}")
 
 
 async def run(
