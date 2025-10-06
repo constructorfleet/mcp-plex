@@ -435,6 +435,12 @@ class EnrichmentStage:
         if updated:
             await self._emit_persistence_batch(updated)
 
+        stalled_ids = [
+            imdb_id for imdb_id in imdb_ids if imdb_results.get(imdb_id) is None
+        ]
+        for imdb_id in stalled_ids:
+            await self._imdb_retry_queue.put(imdb_id)
+
         self._logger.info(
             "Retried IMDb batch with %d updates (retry queue=%d)",
             len(updated),

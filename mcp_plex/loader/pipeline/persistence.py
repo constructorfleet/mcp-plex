@@ -38,6 +38,7 @@ class PersistenceStage:
         upsert_buffer_size: int,
         upsert_fn: Callable[[PersistencePayload], Awaitable[None]],
         on_batch_complete: Callable[[int, int, int], None] | None = None,
+        worker_count: int = 1,
     ) -> None:
         self._client = client
         self._collection_name = str(collection_name)
@@ -53,6 +54,8 @@ class PersistenceStage:
         self._on_batch_complete = on_batch_complete
         self._logger = logging.getLogger("mcp_plex.loader.persistence")
         self._retry_flush_attempted = False
+        self._worker_count = require_positive(worker_count, name="worker_count")
+        self._shutdown_tokens_seen = 0
 
     @property
     def logger(self) -> logging.Logger:
@@ -189,9 +192,19 @@ class PersistenceStage:
                                 await self._persistence_queue.put(PERSIST_DONE)
                             continue
 
-                    remaining_tokens = max(sentinel_budget - 1, 0)
-                    if remaining_tokens:
-                        for _ in range(remaining_tokens):
+                    drained_sentinels = max(sentinel_budget - 1, 0)
+                    for _ in range(drained_sentinels):
+                        await self._persistence_queue.put(PERSIST_DONE)
+
+                    self._shutdown_tokens_seen += 1
+                    outstanding_workers = max(
+                        self._worker_count - self._shutdown_tokens_seen, 0
+                    )
+                    additional_tokens = max(
+                        outstanding_workers - drained_sentinels, 0
+                    )
+                    if additional_tokens:
+                        for _ in range(additional_tokens):
                             await self._persistence_queue.put(PERSIST_DONE)
                     self._logger.debug(
                         "Persistence queue sentinel received; finishing run for worker %d.",
