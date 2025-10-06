@@ -60,13 +60,27 @@ class IngestionStage:
         ported from the legacy loader.
         """
 
+        mode = "sample" if self._sample_items is not None else "plex"
+        self._logger.info(
+            "Starting ingestion stage (%s mode) with movie batch size=%d, episode batch size=%d, sample batch size=%d.",
+            mode,
+            self._movie_batch_size,
+            self._episode_batch_size,
+            self._sample_batch_size,
+        )
         if self._sample_items is not None:
             await self._run_sample_ingestion(self._sample_items)
         else:
             await self._run_plex_ingestion()
 
+        self._logger.debug("Publishing ingestion completion sentinels to downstream stages.")
         await self._output_queue.put(None)
         await self._output_queue.put(self._completion_sentinel)
+        self._logger.info(
+            "Ingestion stage finished after queuing %d batch(es) covering %d item(s).",
+            self._batches_ingested,
+            self._items_ingested,
+        )
 
     @property
     def items_ingested(self) -> int:
@@ -84,11 +98,23 @@ class IngestionStage:
         """Placeholder hook for the sample ingestion flow."""
 
         item_count = len(items)
+        start_batches = self._batches_ingested
+        start_items = self._items_ingested
+        self._logger.info(
+            "Beginning sample ingestion for %d item(s) with batch size=%d.",
+            item_count,
+            self._sample_batch_size,
+        )
         self._logger.info(
             "Sample ingestion has not been ported yet; %d items queued for later.",
             item_count,
         )
         await self._enqueue_sample_batches(items)
+        self._logger.info(
+            "Queued %d sample batch(es) covering %d item(s).",
+            self._batches_ingested - start_batches,
+            self._items_ingested - start_items,
+        )
         await asyncio.sleep(0)
 
     async def _run_plex_ingestion(self) -> None:
@@ -97,12 +123,22 @@ class IngestionStage:
         if self._plex_server is None:
             self._logger.warning("Plex server unavailable; skipping ingestion.")
         else:
+            self._logger.info(
+                "Beginning Plex ingestion with movie batch size=%d and episode batch size=%d.",
+                self._movie_batch_size,
+                self._episode_batch_size,
+            )
             await self._ingest_plex(
                 plex_server=self._plex_server,
                 movie_batch_size=self._movie_batch_size,
                 episode_batch_size=self._episode_batch_size,
                 output_queue=self._output_queue,
                 logger=self._logger,
+            )
+            self._logger.info(
+                "Completed Plex ingestion; emitted %d batch(es) covering %d item(s).",
+                self._batches_ingested,
+                self._items_ingested,
             )
         await asyncio.sleep(0)
 
@@ -120,6 +156,11 @@ class IngestionStage:
         movies_attr = getattr(plex_server, "movies", [])
         movies_source = movies_attr() if callable(movies_attr) else movies_attr
         movies = list(movies_source)
+        logger.info(
+            "Discovered %d Plex movie(s) for ingestion.",
+            len(movies),
+        )
+        movie_batches = 0
         for batch_index, chunk in enumerate(
             chunk_sequence(movies, movie_batch_size), start=1
         ):
@@ -131,6 +172,7 @@ class IngestionStage:
             await output_queue.put(batch)
             self._items_ingested += len(batch_movies)
             self._batches_ingested += 1
+            movie_batches += 1
             logger.info(
                 "Queued Plex movie batch %d with %d movies (total items=%d).",
                 batch_index,
@@ -141,6 +183,12 @@ class IngestionStage:
         shows_attr = getattr(plex_server, "shows", [])
         shows_source = shows_attr() if callable(shows_attr) else shows_attr
         shows = list(shows_source)
+        logger.info(
+            "Discovered %d Plex show(s) for ingestion.",
+            len(shows),
+        )
+        episode_batches = 0
+        episode_total = 0
         for show in shows:
             show_title = getattr(show, "title", str(show))
             episodes_attr = getattr(show, "episodes", [])
@@ -148,6 +196,8 @@ class IngestionStage:
                 episodes_attr() if callable(episodes_attr) else episodes_attr
             )
             episodes = list(episodes_source)
+            if not episodes:
+                logger.debug("Show %s yielded no episodes for ingestion.", show_title)
             for batch_index, chunk in enumerate(
                 chunk_sequence(episodes, episode_batch_size), start=1
             ):
@@ -159,6 +209,8 @@ class IngestionStage:
                 await output_queue.put(batch)
                 self._items_ingested += len(batch_episodes)
                 self._batches_ingested += 1
+                episode_batches += 1
+                episode_total += len(batch_episodes)
                 logger.info(
                     "Queued Plex episode batch %d for %s with %d episodes (total items=%d).",
                     batch_index,
@@ -166,6 +218,13 @@ class IngestionStage:
                     len(batch_episodes),
                     self._items_ingested,
                 )
+
+        logger.debug(
+            "Plex ingestion summary: %d movie batch(es), %d episode batch(es), %d episode(s).",
+            movie_batches,
+            episode_batches,
+            episode_total,
+        )
 
     async def _enqueue_sample_batches(
         self, items: Sequence[AggregatedItem]
@@ -180,3 +239,8 @@ class IngestionStage:
             await self._output_queue.put(SampleBatch(items=batch_items))
             self._items_ingested += len(batch_items)
             self._batches_ingested += 1
+            self._logger.debug(
+                "Queued sample batch with %d item(s) (total items=%d).",
+                len(batch_items),
+                self._items_ingested,
+            )

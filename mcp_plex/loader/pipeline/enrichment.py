@@ -325,6 +325,11 @@ class EnrichmentStage:
     async def run(self) -> None:
         """Execute the enrichment stage."""
 
+        self._logger.info(
+            "Starting enrichment stage with movie batch size=%d and episode batch size=%d.",
+            self._movie_batch_size,
+            self._episode_batch_size,
+        )
         while True:
             got_item = False
             try:
@@ -349,10 +354,26 @@ class EnrichmentStage:
                     break
 
                 if isinstance(batch, MovieBatch):
+                    self._logger.info(
+                        "Enriching movie batch with %d item(s) (ingest queue=%d).",
+                        len(batch.movies),
+                        self._ingest_queue.qsize(),
+                    )
                     await self._handle_movie_batch(batch)
                 elif isinstance(batch, EpisodeBatch):
+                    self._logger.info(
+                        "Enriching episode batch for %s with %d item(s) (ingest queue=%d).",
+                        getattr(batch.show, "title", str(batch.show)),
+                        len(batch.episodes),
+                        self._ingest_queue.qsize(),
+                    )
                     await self._handle_episode_batch(batch)
                 elif isinstance(batch, SampleBatch):
+                    self._logger.info(
+                        "Forwarding sample batch with %d item(s) (ingest queue=%d).",
+                        len(batch.items),
+                        self._ingest_queue.qsize(),
+                    )
                     await self._handle_sample_batch(batch)
                 else:  # pragma: no cover - defensive logging for future types
                     self._logger.warning(
@@ -363,6 +384,10 @@ class EnrichmentStage:
                     self._ingest_queue.task_done()
 
         await self._persistence_queue.put(PERSIST_DONE)
+        self._logger.info(
+            "Enrichment stage completed; persistence sentinel emitted (retry queue=%d).",
+            self._imdb_retry_queue.qsize(),
+        )
 
     async def _handle_movie_batch(self, batch: MovieBatch) -> None:
         """Enrich and forward Plex movie batches to the persistence stage."""
@@ -448,7 +473,13 @@ class EnrichmentStage:
 
         if not aggregated:
             return
-        await self._persistence_queue.put(list(aggregated))
+        payload = list(aggregated)
+        await self._persistence_queue.put(payload)
+        self._logger.debug(
+            "Enqueued %d aggregated item(s) for persistence (queue size=%d).",
+            len(payload),
+            self._persistence_queue.qsize(),
+        )
 
     async def _enrich_movies(
         self, client: Any, movies: Sequence[Any]
@@ -604,6 +635,10 @@ class EnrichmentStage:
         if self._imdb_retry_queue.empty():
             return False
 
+        self._logger.debug(
+            "Processing IMDb retry queue with %d pending id(s).",
+            self._imdb_retry_queue.qsize(),
+        )
         imdb_ids: list[str] = []
         while (
             len(imdb_ids) < self._imdb_batch_limit

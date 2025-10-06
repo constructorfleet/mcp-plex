@@ -1,6 +1,8 @@
 import asyncio
 import logging
 
+import pytest
+
 from mcp_plex.common.types import AggregatedItem, PlexItem
 from mcp_plex.loader.pipeline.channels import (
     INGEST_DONE,
@@ -237,10 +239,19 @@ def test_ingestion_stage_ingest_plex_batches_movies_and_episodes(caplog) -> None
     assert isinstance(batches[4], EpisodeBatch)
     assert [episode.title for episode in batches[4].episodes] == ["S01E01", "S01E02"]
 
-    assert caplog.messages == [
+    expected_tail = [
         "Queued Plex movie batch 1 with 2 movies (total items=2).",
         "Queued Plex movie batch 2 with 1 movies (total items=3).",
         "Queued Plex episode batch 1 for Show A with 2 episodes (total items=5).",
         "Queued Plex episode batch 2 for Show A with 1 episodes (total items=6).",
         "Queued Plex episode batch 1 for Show B with 2 episodes (total items=8).",
     ]
+    observed_iter = iter(caplog.messages)
+    for expected in expected_tail:
+        for message in observed_iter:
+            if message == expected:
+                break
+        else:  # pragma: no cover - pytest fail helper
+            pytest.fail(f"Expected log message not found: {expected}")
+    assert "Discovered 3 Plex movie(s) for ingestion." in caplog.messages
+    assert "Discovered 2 Plex show(s) for ingestion." in caplog.messages
