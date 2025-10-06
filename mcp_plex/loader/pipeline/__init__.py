@@ -16,8 +16,8 @@ from .channels import (
     PersistenceQueue,
     SampleBatch,
     chunk_sequence,
-    require_positive,
 )
+from ...common.validation import require_positive
 
 if TYPE_CHECKING:
     from .enrichment import EnrichmentStage
