@@ -15,7 +15,7 @@ from collections import deque
 from collections.abc import AsyncIterator, Awaitable, Callable, Sequence
 from contextlib import asynccontextmanager
 import inspect
-from typing import Any
+from typing import Any, Optional
 
 import httpx
 
@@ -32,19 +32,225 @@ from .channels import (
     require_positive,
 )
 
-from ...common.types import AggregatedItem, IMDbTitle, TMDBEpisode, TMDBItem, TMDBShow
-from .. import (
-    _build_plex_item,
-    _extract_external_ids,
-    _fetch_tmdb_episode,
-    _fetch_tmdb_movie,
-    _fetch_tmdb_show,
-    resolve_tmdb_season_number,
+from ...common.types import (
+    AggregatedItem,
+    ExternalIDs,
+    IMDbTitle,
+    PlexGuid,
+    PlexItem,
+    PlexPerson,
+    TMDBEpisode,
+    TMDBItem,
+    TMDBMovie,
+    TMDBShow,
 )
 from ..imdb_cache import IMDbCache
 
 
 LOGGER = logging.getLogger(__name__)
+
+
+try:  # Only import plexapi when available; the sample data mode does not require it.
+    from plexapi.base import PlexPartialObject
+except Exception:  # pragma: no cover - plexapi is optional in tests
+    PlexPartialObject = object  # type: ignore[assignment]
+
+
+def _extract_external_ids(item: PlexPartialObject) -> ExternalIDs:
+    """Extract IMDb and TMDb IDs from a Plex object."""
+
+    imdb_id: Optional[str] = None
+    tmdb_id: Optional[str] = None
+    for guid in getattr(item, "guids", []) or []:
+        gid = getattr(guid, "id", "")
+        if gid.startswith("imdb://"):
+            imdb_id = gid.split("imdb://", 1)[1]
+        elif gid.startswith("tmdb://"):
+            tmdb_id = gid.split("tmdb://", 1)[1]
+    return ExternalIDs(imdb=imdb_id, tmdb=tmdb_id)
+
+
+def _build_plex_item(item: PlexPartialObject) -> PlexItem:
+    """Convert a Plex object into the internal :class:`PlexItem`."""
+
+    guids = [PlexGuid(id=g.id) for g in getattr(item, "guids", [])]
+    directors = [
+        PlexPerson(
+            id=getattr(d, "id", 0),
+            tag=str(getattr(d, "tag", "")),
+            thumb=getattr(d, "thumb", None),
+        )
+        for d in getattr(item, "directors", []) or []
+    ]
+    writers = [
+        PlexPerson(
+            id=getattr(w, "id", 0),
+            tag=str(getattr(w, "tag", "")),
+            thumb=getattr(w, "thumb", None),
+        )
+        for w in getattr(item, "writers", []) or []
+    ]
+    actors = [
+        PlexPerson(
+            id=getattr(a, "id", 0),
+            tag=str(getattr(a, "tag", "")),
+            thumb=getattr(a, "thumb", None),
+            role=getattr(a, "role", None),
+        )
+        for a in getattr(item, "actors", []) or getattr(item, "roles", []) or []
+    ]
+    genres = [
+        str(getattr(g, "tag", ""))
+        for g in getattr(item, "genres", []) or []
+        if getattr(g, "tag", None)
+    ]
+    collections = [
+        str(getattr(c, "tag", ""))
+        for c in getattr(item, "collections", []) or []
+        if getattr(c, "tag", None)
+    ]
+    season_number = getattr(item, "parentIndex", None)
+    if isinstance(season_number, str):
+        season_number = int(season_number) if season_number.isdigit() else None
+    episode_number = getattr(item, "index", None)
+    if isinstance(episode_number, str):
+        episode_number = int(episode_number) if episode_number.isdigit() else None
+
+    return PlexItem(
+        rating_key=str(getattr(item, "ratingKey", "")),
+        guid=str(getattr(item, "guid", "")),
+        type=str(getattr(item, "type", "")),
+        title=str(getattr(item, "title", "")),
+        show_title=getattr(item, "grandparentTitle", None),
+        season_title=getattr(item, "parentTitle", None),
+        season_number=season_number,
+        episode_number=episode_number,
+        summary=getattr(item, "summary", None),
+        year=getattr(item, "year", None),
+        added_at=getattr(item, "addedAt", None),
+        guids=guids,
+        thumb=getattr(item, "thumb", None),
+        art=getattr(item, "art", None),
+        tagline=getattr(item, "tagline", None),
+        content_rating=getattr(item, "contentRating", None),
+        directors=directors,
+        writers=writers,
+        actors=actors,
+        genres=genres,
+        collections=collections,
+    )
+
+
+async def _fetch_tmdb_movie(
+    client: httpx.AsyncClient, tmdb_id: str, api_key: str
+) -> Optional[TMDBMovie]:
+    url = f"https://api.themoviedb.org/3/movie/{tmdb_id}?append_to_response=reviews"
+    try:
+        resp = await client.get(url, headers={"Authorization": f"Bearer {api_key}"})
+    except httpx.HTTPError:
+        LOGGER.exception("HTTP error fetching TMDb movie %s", tmdb_id)
+        return None
+    if resp.is_success:
+        return TMDBMovie.model_validate(resp.json())
+    return None
+
+
+async def _fetch_tmdb_show(
+    client: httpx.AsyncClient, tmdb_id: str, api_key: str
+) -> Optional[TMDBShow]:
+    url = f"https://api.themoviedb.org/3/tv/{tmdb_id}?append_to_response=reviews"
+    try:
+        resp = await client.get(url, headers={"Authorization": f"Bearer {api_key}"})
+    except httpx.HTTPError:
+        LOGGER.exception("HTTP error fetching TMDb show %s", tmdb_id)
+        return None
+    if resp.is_success:
+        return TMDBShow.model_validate(resp.json())
+    return None
+
+
+async def _fetch_tmdb_episode(
+    client: httpx.AsyncClient,
+    show_id: int,
+    season_number: int,
+    episode_number: int,
+    api_key: str,
+) -> Optional[TMDBEpisode]:
+    """Fetch TMDb data for a TV episode."""
+
+    url = (
+        f"https://api.themoviedb.org/3/tv/{show_id}/season/{season_number}/episode/{episode_number}"
+    )
+    try:
+        resp = await client.get(url, headers={"Authorization": f"Bearer {api_key}"})
+    except httpx.HTTPError:
+        LOGGER.exception(
+            "HTTP error fetching TMDb episode %s S%sE%s",
+            show_id,
+            season_number,
+            episode_number,
+        )
+        return None
+    if resp.is_success:
+        return TMDBEpisode.model_validate(resp.json())
+    return None
+
+
+def resolve_tmdb_season_number(
+    show_tmdb: Optional[TMDBShow], episode: PlexPartialObject
+) -> Optional[int]:
+    """Map a Plex episode to the appropriate TMDb season number.
+
+    This resolves cases where Plex uses year-based season indices that do not
+    match TMDb's sequential ``season_number`` values.
+    """
+
+    parent_index = getattr(episode, "parentIndex", None)
+    parent_title = getattr(episode, "parentTitle", None)
+    parent_year = getattr(episode, "parentYear", None)
+    if parent_year is None:
+        parent_year = getattr(episode, "year", None)
+
+    seasons = getattr(show_tmdb, "seasons", []) if show_tmdb else []
+
+    # direct numeric match
+    if parent_index is not None:
+        for season in seasons:
+            if season.season_number == parent_index:
+                return season.season_number
+
+    # match by season name (e.g. "Season 2018" -> "2018")
+    title_norm: Optional[str] = None
+    if isinstance(parent_title, str):
+        title_norm = parent_title.lower().lstrip("season ").strip()
+        for season in seasons:
+            name_norm = (season.name or "").lower().lstrip("season ").strip()
+            if name_norm == title_norm:
+                return season.season_number
+
+    # match by air date year when Plex uses year-based seasons
+    year: Optional[int] = None
+    if isinstance(parent_year, int):
+        year = parent_year
+    elif isinstance(parent_index, int):
+        year = parent_index
+    elif title_norm and title_norm.isdigit():
+        year = int(title_norm)
+
+    if year is not None:
+        for season in seasons:
+            air = getattr(season, "air_date", None)
+            if isinstance(air, str) and len(air) >= 4 and air[:4].isdigit():
+                if int(air[:4]) == year:
+                    return season.season_number
+
+    if isinstance(parent_index, int):
+        return parent_index
+    if isinstance(parent_index, str) and parent_index.isdigit():
+        return int(parent_index)
+    if isinstance(parent_title, str) and parent_title.isdigit():
+        return int(parent_title)
+    return None
 
 
 class EnrichmentStage:
