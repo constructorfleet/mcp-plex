@@ -16,6 +16,9 @@ import httpx
 from qdrant_client import models
 from qdrant_client.async_qdrant_client import AsyncQdrantClient
 
+from plexapi.base import PlexPartialObject as _PlexPartialObject
+from plexapi.server import PlexServer
+
 from .imdb_cache import IMDbCache
 from .pipeline.channels import (
     IMDbRetryQueue,
@@ -37,13 +40,7 @@ from ..common.types import (
     TMDBShow,
 )
 
-try:  # Only import plexapi when available; the sample data mode does not require it.
-    from plexapi.base import PlexPartialObject
-    from plexapi.server import PlexServer
-except Exception:
-    PlexServer = None  # type: ignore[assignment]
-    PlexPartialObject = object  # type: ignore[assignment]
-
+PlexPartialObject = _PlexPartialObject
 
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)

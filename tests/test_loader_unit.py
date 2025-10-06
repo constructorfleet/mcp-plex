@@ -55,19 +55,26 @@ def make_imdb_config(
     )
 
 
-def test_loader_import_fallback(monkeypatch):
+def test_loader_import_requires_plexapi(monkeypatch):
     real_import = builtins.__import__
 
     def fake_import(name, globals=None, locals=None, fromlist=(), level=0):
         if name.startswith("plexapi"):
-            raise ModuleNotFoundError
+            raise ModuleNotFoundError("forced plexapi failure")
         return real_import(name, globals, locals, fromlist, level)
 
-    monkeypatch.setattr(builtins, "__import__", fake_import)
+    with monkeypatch.context() as ctx:
+        ctx.setattr(builtins, "__import__", fake_import)
+        with pytest.raises(ModuleNotFoundError):
+            importlib.reload(loader)
+
     module = importlib.reload(loader)
-    assert module.PlexServer is None
-    assert module.PlexPartialObject is object
-    importlib.reload(loader)
+    from plexapi.base import PlexPartialObject
+    from plexapi.server import PlexServer
+
+    assert module.PlexServer is PlexServer
+    assert module.PlexPartialObject is PlexPartialObject
+    assert not hasattr(module, "PartialPlexObject")
 def test_load_from_sample_returns_items():
     sample_dir = Path(__file__).resolve().parents[1] / "sample-data"
     items = _load_from_sample(sample_dir)

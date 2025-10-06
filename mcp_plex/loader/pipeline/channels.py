@@ -10,17 +10,21 @@ from __future__ import annotations
 import asyncio
 from collections import deque
 from dataclasses import dataclass
-from typing import TYPE_CHECKING, Any, Final, Iterable, Sequence, TypeVar, TypeAlias
+from typing import (
+    TYPE_CHECKING,
+    Any,
+    Final,
+    Iterable,
+    Literal,
+    Sequence,
+    TypeAlias,
+    TypeVar,
+)
 
 from ...common.types import AggregatedItem
 from ...common.validation import require_positive
 
-try:  # Only import plexapi when available; the sample data mode does not require it.
-    from plexapi.base import PlexPartialObject
-    from plexapi.video import Episode, Movie, Show
-except Exception:
-    PlexPartialObject = object  # type: ignore[assignment]
-    Episode = Movie = Show = PlexPartialObject  # type: ignore[assignment]
+from plexapi.video import Episode, Movie, Show
 
 T = TypeVar("T")
 
@@ -29,6 +33,7 @@ if TYPE_CHECKING:
 
 
 INGEST_DONE: Final = object()
+IngestSentinel: TypeAlias = Literal[INGEST_DONE]
 """Sentinel object signaling that ingestion has completed.
 
 The loader currently places ``None`` on ingestion queues in addition to this
@@ -36,6 +41,7 @@ sentinel so legacy listeners that only check for ``None`` continue to work.
 """
 
 PERSIST_DONE: Final = object()
+PersistenceSentinel: TypeAlias = Literal[PERSIST_DONE]
 """Sentinel object signaling that persistence has completed."""
 
 if TYPE_CHECKING:
@@ -68,8 +74,10 @@ class SampleBatch:
 
 IngestBatch = MovieBatch | EpisodeBatch | SampleBatch
 
-IngestQueueItem: TypeAlias = IngestBatch | None | object
-PersistenceQueueItem: TypeAlias = PersistencePayload | None | object
+IngestQueueItem: TypeAlias = IngestBatch | None | IngestSentinel
+PersistenceQueueItem: TypeAlias = (
+    PersistencePayload | None | PersistenceSentinel
+)
 
 IngestQueue: TypeAlias = asyncio.Queue[IngestQueueItem]
 PersistenceQueue: TypeAlias = asyncio.Queue[PersistenceQueueItem]
@@ -125,7 +133,9 @@ __all__ = [
     "SampleBatch",
     "IngestBatch",
     "INGEST_DONE",
+    "IngestSentinel",
     "PERSIST_DONE",
+    "PersistenceSentinel",
     "IngestQueue",
     "PersistenceQueue",
     "chunk_sequence",
