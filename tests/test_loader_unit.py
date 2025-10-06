@@ -16,7 +16,6 @@ from mcp_plex.loader import (
     _build_plex_item,
     _extract_external_ids,
     _fetch_imdb,
-    _fetch_imdb_batch,
     _fetch_tmdb_episode,
     _fetch_tmdb_movie,
     _fetch_tmdb_show,
@@ -224,95 +223,6 @@ def test_fetch_imdb_cache_hit(tmp_path, monkeypatch):
             result = await _fetch_imdb(client, "tt1")
             assert result is not None
             assert result.id == "tt1"
-
-    asyncio.run(main())
-
-
-def test_fetch_imdb_batch(tmp_path, monkeypatch):
-    cache_path = tmp_path / "cache.json"
-    monkeypatch.setattr(loader, "_imdb_cache", IMDbCache(cache_path))
-
-    async def imdb_mock(request):
-        params = request.url.params
-        assert sorted(params.get_list("titleIds")) == ["tt1", "tt2"]
-        return httpx.Response(
-            200,
-            json={
-                "titles": [
-                    {"id": "tt1", "type": "movie", "primaryTitle": "A"},
-                    {"id": "tt2", "type": "movie", "primaryTitle": "B"},
-                ]
-            },
-        )
-
-    async def main():
-        async with httpx.AsyncClient(transport=httpx.MockTransport(imdb_mock)) as client:
-            result = await _fetch_imdb_batch(client, ["tt1", "tt2"])
-            assert result["tt1"] and result["tt1"].primaryTitle == "A"
-            assert result["tt2"] and result["tt2"].primaryTitle == "B"
-
-    asyncio.run(main())
-    data = json.loads(cache_path.read_text())
-    assert set(data.keys()) == {"tt1", "tt2"}
-
-
-def test_fetch_imdb_batch_chunks(monkeypatch, tmp_path):
-    cache_path = tmp_path / "cache.json"
-    monkeypatch.setattr(loader, "_imdb_cache", IMDbCache(cache_path))
-
-    calls: list[list[str]] = []
-
-    async def imdb_mock(request):
-        ids = request.url.params.get_list("titleIds")
-        calls.append(ids)
-        return httpx.Response(
-            200,
-            json={
-                "titles": [
-                    {"id": i, "type": "movie", "primaryTitle": i} for i in ids
-                ]
-            },
-        )
-
-    async def main():
-        ids = [f"tt{i}" for i in range(6)]
-        async with httpx.AsyncClient(transport=httpx.MockTransport(imdb_mock)) as client:
-            result = await _fetch_imdb_batch(client, ids)
-            assert set(result.keys()) == set(ids)
-
-    asyncio.run(main())
-    assert len(calls) == 2
-    assert all(len(c) <= 5 for c in calls)
-
-
-def test_fetch_imdb_batch_all_cached(monkeypatch, tmp_path):
-    cache_path = tmp_path / "cache.json"
-    cache_path.write_text(
-        json.dumps(
-            {
-                "tt0111161": {
-                    "id": "tt0111161",
-                    "type": "movie",
-                    "primaryTitle": "The Shawshank Redemption",
-                },
-                "tt0068646": {
-                    "id": "tt0068646",
-                    "type": "movie",
-                    "primaryTitle": "The Godfather",
-                },
-            }
-        )
-    )
-    monkeypatch.setattr(loader, "_imdb_cache", IMDbCache(cache_path))
-
-    async def error_mock(request):
-        raise AssertionError("network should not be called")
-
-    async def main():
-        async with httpx.AsyncClient(transport=httpx.MockTransport(error_mock)) as client:
-            result = await _fetch_imdb_batch(client, ["tt0111161", "tt0068646"])
-            assert result["tt0111161"].primaryTitle == "The Shawshank Redemption"
-            assert result["tt0068646"].primaryTitle == "The Godfather"
 
     asyncio.run(main())
 
@@ -585,47 +495,6 @@ def test_imdb_retry_queue_desync_errors():
     queue._queue.clear()  # type: ignore[attr-defined]
     with pytest.raises(RuntimeError, match="asyncio.Queue is empty"):
         queue.get_nowait()
-
-
-def test_fetch_imdb_batch_http_error(monkeypatch):
-    monkeypatch.setattr(loader, "_imdb_cache", None)
-
-    async def raise_error(request: httpx.Request) -> httpx.Response:  # type: ignore[override]
-        raise httpx.ConnectError("boom", request=request)
-
-    async def main() -> None:
-        async with httpx.AsyncClient(transport=httpx.MockTransport(raise_error)) as client:
-            result = await _fetch_imdb_batch(client, ["tt1", "tt2"])
-            assert result == {"tt1": None, "tt2": None}
-
-    asyncio.run(main())
-
-
-def test_fetch_imdb_batch_rate_limited(monkeypatch):
-    retry_queue = loader._IMDbRetryQueue()
-    monkeypatch.setattr(loader, "_imdb_retry_queue", retry_queue)
-    monkeypatch.setattr(loader, "_imdb_max_retries", 1)
-    monkeypatch.setattr(loader, "_imdb_backoff", 0.01)
-
-    sleeps: list[float] = []
-
-    async def fake_sleep(delay: float) -> None:
-        sleeps.append(delay)
-
-    monkeypatch.setattr(asyncio, "sleep", fake_sleep)
-
-    async def rate_limited(request: httpx.Request) -> httpx.Response:  # type: ignore[override]
-        return httpx.Response(429)
-
-    async def main() -> None:
-        async with httpx.AsyncClient(transport=httpx.MockTransport(rate_limited)) as client:
-            result = await _fetch_imdb_batch(client, ["tt3"])
-            assert result["tt3"] is None
-
-    asyncio.run(main())
-
-    assert sleeps == [0.01]
-    assert retry_queue.snapshot() == ["tt3"]
 
 
 def test_persist_imdb_retry_queue_noop(tmp_path, monkeypatch):
