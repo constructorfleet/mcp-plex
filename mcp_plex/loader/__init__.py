@@ -1006,6 +1006,7 @@ class LoaderPipeline:
             upsert_buffer_size=self._upsert_buffer_size,
             upsert_fn=self._perform_upsert,
             on_batch_complete=self._handle_upsert_batch,
+            worker_count=self._max_concurrent_upserts,
         )
 
     @property
@@ -1365,6 +1366,7 @@ def _build_loader_orchestrator(
     enrichment_workers: int,
     upsert_buffer_size: int,
     max_concurrent_upserts: int,
+    imdb_retry_queue: IMDbRetryQueue | None = None,
 ) -> tuple[LoaderOrchestrator, list[AggregatedItem], asyncio.Queue[list[models.PointStruct]]]:
     """Wire the staged loader pipeline and return the orchestrator helpers."""
 
@@ -1374,9 +1376,12 @@ def _build_loader_orchestrator(
     ingest_queue: IngestQueue = IngestQueue(maxsize=enrichment_workers * 2)
     persistence_queue: PersistenceQueue = PersistenceQueue()
 
-    global _imdb_retry_queue
-    if _imdb_retry_queue is None:
-        _imdb_retry_queue = _IMDbRetryQueue()
+    imdb_queue = imdb_retry_queue
+    if imdb_queue is None:
+        global _imdb_retry_queue
+        if _imdb_retry_queue is None:
+            _imdb_retry_queue = _IMDbRetryQueue()
+        imdb_queue = _imdb_retry_queue
 
     upsert_capacity = asyncio.Semaphore(max_concurrent_upserts)
     qdrant_retry_queue: asyncio.Queue[list[models.PointStruct]] = asyncio.Queue()
@@ -1394,12 +1399,13 @@ def _build_loader_orchestrator(
             build_point(item, dense_model_name, sparse_model_name)
             for item in batch
         ]
-        await _upsert_in_batches(
-            client,
-            collection_name,
-            points,
-            retry_queue=qdrant_retry_queue,
-        )
+        for point_chunk in chunk_sequence(points, upsert_buffer_size):
+            await _upsert_in_batches(
+                client,
+                collection_name,
+                list(point_chunk),
+                retry_queue=qdrant_retry_queue,
+            )
 
     def _record_upsert(worker_id: int, batch_size: int, queue_size: int) -> None:
         nonlocal upserted, upsert_start
@@ -1431,7 +1437,7 @@ def _build_loader_orchestrator(
         tmdb_api_key=tmdb_api_key or "",
         ingest_queue=ingest_queue,
         persistence_queue=persistence_queue,
-        imdb_retry_queue=_imdb_retry_queue,
+        imdb_retry_queue=imdb_queue,
         movie_batch_size=enrichment_batch_size,
         episode_batch_size=enrichment_batch_size,
         imdb_cache=_imdb_cache,
@@ -1453,6 +1459,7 @@ def _build_loader_orchestrator(
         upsert_buffer_size=upsert_buffer_size,
         upsert_fn=_upsert_aggregated,
         on_batch_complete=_record_upsert,
+        worker_count=max_concurrent_upserts,
     )
 
     orchestrator = LoaderOrchestrator(
@@ -1575,6 +1582,7 @@ async def run(
             enrichment_workers=enrichment_workers,
             upsert_buffer_size=upsert_buffer_size,
             max_concurrent_upserts=_qdrant_max_concurrent_upserts,
+            imdb_retry_queue=_IMDbRetryQueue(),
         )
         logger.info("Starting staged loader (sample mode)")
         await orchestrator.run()
