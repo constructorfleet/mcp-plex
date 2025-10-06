@@ -9,26 +9,20 @@ from __future__ import annotations
 
 import asyncio
 import logging
-from typing import TYPE_CHECKING, Sequence
+from typing import Sequence
 
 from ...common.types import AggregatedItem
 from .channels import (
     EpisodeBatch,
     IngestQueue,
+    IngestSentinel,
     MovieBatch,
     SampleBatch,
     chunk_sequence,
 )
 
-if TYPE_CHECKING:  # pragma: no cover - imported for typing
-    from plexapi.server import PlexServer
-    from plexapi.video import Episode, Movie, Season, Show
-else:  # pragma: no cover - runtime import with graceful fallback
-    try:
-        from plexapi.server import PlexServer
-        from plexapi.video import Episode, Movie, Season, Show
-    except Exception:  # pragma: no cover - plexapi optional at runtime
-        PlexServer = Movie = Show = Season = Episode = object  # type: ignore[assignment]
+from plexapi.server import PlexServer
+from plexapi.video import Episode, Movie, Season, Show
 
 
 class IngestionStage:
@@ -43,7 +37,7 @@ class IngestionStage:
         episode_batch_size: int,
         sample_batch_size: int,
         output_queue: IngestQueue,
-        completion_sentinel: object,
+        completion_sentinel: IngestSentinel,
     ) -> None:
         self._plex_server = plex_server
         self._sample_items = list(sample_items) if sample_items is not None else None
@@ -51,7 +45,7 @@ class IngestionStage:
         self._episode_batch_size = int(episode_batch_size)
         self._sample_batch_size = int(sample_batch_size)
         self._output_queue = output_queue
-        self._completion_sentinel = completion_sentinel
+        self._completion_sentinel: IngestSentinel = completion_sentinel
         self._logger = logging.getLogger("mcp_plex.loader.ingestion")
         self._items_ingested = 0
         self._batches_ingested = 0

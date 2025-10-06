@@ -46,14 +46,10 @@ from ...common.types import (
 )
 from ..imdb_cache import IMDbCache
 
+from plexapi.base import PlexPartialObject
+
 
 LOGGER = logging.getLogger(__name__)
-
-
-try:  # Only import plexapi when available; the sample data mode does not require it.
-    from plexapi.base import PlexPartialObject
-except Exception:  # pragma: no cover - plexapi is optional in tests
-    PlexPartialObject = object  # type: ignore[assignment]
 
 
 def _extract_external_ids(item: PlexPartialObject) -> ExternalIDs:

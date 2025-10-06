@@ -1,6 +1,5 @@
 import asyncio
 import logging
-from typing import cast
 from unittest.mock import Mock, create_autospec
 
 import pytest
@@ -11,6 +10,7 @@ from mcp_plex.common.types import AggregatedItem, PlexItem
 from mcp_plex.loader.pipeline.channels import (
     INGEST_DONE,
     EpisodeBatch,
+    IngestSentinel,
     MovieBatch,
     SampleBatch,
 )
@@ -32,7 +32,7 @@ def test_ingestion_stage_logger_name() -> None:
     async def scenario() -> str:
         queue: asyncio.Queue = asyncio.Queue()
         stage = IngestionStage(
-            plex_server=cast(PlexServer, object()),
+            plex_server=create_autospec(PlexServer, instance=True),
             sample_items=None,
             movie_batch_size=50,
             episode_batch_size=25,
@@ -47,9 +47,7 @@ def test_ingestion_stage_logger_name() -> None:
 
 
 def test_ingestion_stage_sample_empty_batches() -> None:
-    sentinel = object()
-
-    async def scenario() -> tuple[object | None, object | None, bool, int, int]:
+    async def scenario() -> tuple[SampleBatch | None, None | IngestSentinel, bool, int, int]:
         queue: asyncio.Queue = asyncio.Queue()
         stage = IngestionStage(
             plex_server=None,
@@ -58,7 +56,7 @@ def test_ingestion_stage_sample_empty_batches() -> None:
             episode_batch_size=1,
             sample_batch_size=2,
             output_queue=queue,
-            completion_sentinel=sentinel,
+            completion_sentinel=INGEST_DONE,
         )
 
         await stage.run()
@@ -70,16 +68,20 @@ def test_ingestion_stage_sample_empty_batches() -> None:
     first, second, empty, items_ingested, batches_ingested = asyncio.run(scenario())
 
     assert first is None
-    assert second is sentinel
+    assert second is INGEST_DONE
     assert empty is True
     assert items_ingested == 0
     assert batches_ingested == 0
 
 
 def test_ingestion_stage_sample_partial_batches() -> None:
-    sentinel = object()
-
-    async def scenario() -> tuple[list[SampleBatch], object | None, object | None, int, int]:
+    async def scenario() -> tuple[
+        list[SampleBatch],
+        None | SampleBatch,
+        None | IngestSentinel,
+        int,
+        int,
+    ]:
         queue: asyncio.Queue = asyncio.Queue()
         sample_items = [
             _make_aggregated_item("1"),
@@ -93,7 +95,7 @@ def test_ingestion_stage_sample_partial_batches() -> None:
             episode_batch_size=1,
             sample_batch_size=2,
             output_queue=queue,
-            completion_sentinel=sentinel,
+            completion_sentinel=INGEST_DONE,
         )
 
         await stage.run()
@@ -110,15 +112,19 @@ def test_ingestion_stage_sample_partial_batches() -> None:
     assert all(isinstance(batch, SampleBatch) for batch in batches)
     assert [len(batch.items) for batch in batches] == [2, 1]
     assert first_token is None
-    assert second_token is sentinel
+    assert second_token is INGEST_DONE
     assert items_ingested == 3
     assert batches_ingested == 2
 
 
 def test_ingestion_stage_backpressure_handling() -> None:
-    sentinel = object()
-
-    async def scenario() -> tuple[list[SampleBatch], object | None, object | None, int, int]:
+    async def scenario() -> tuple[
+        list[SampleBatch],
+        None | SampleBatch,
+        None | IngestSentinel,
+        int,
+        int,
+    ]:
         queue: asyncio.Queue = asyncio.Queue(maxsize=1)
         sample_items = [
             _make_aggregated_item("1"),
@@ -131,7 +137,7 @@ def test_ingestion_stage_backpressure_handling() -> None:
             episode_batch_size=1,
             sample_batch_size=1,
             output_queue=queue,
-            completion_sentinel=sentinel,
+            completion_sentinel=INGEST_DONE,
         )
 
         run_task = asyncio.create_task(stage.run())
@@ -155,7 +161,7 @@ def test_ingestion_stage_backpressure_handling() -> None:
 
     assert [len(batch.items) for batch in batches] == [1, 1]
     assert first_token is None
-    assert second_token is sentinel
+    assert second_token is INGEST_DONE
     assert items_ingested == 2
     assert batches_ingested == 2
 
@@ -163,9 +169,7 @@ def test_ingestion_stage_backpressure_handling() -> None:
 def test_ingestion_stage_ingest_plex_batches_movies_and_episodes(caplog) -> None:
     caplog.set_level(logging.INFO)
 
-    sentinel = object()
-
-    async def scenario() -> tuple[list[object], int, int, Mock]:
+    async def scenario() -> tuple[list[MovieBatch | EpisodeBatch], int, int, Mock]:
         queue: asyncio.Queue = asyncio.Queue()
 
         movie_section = Mock()
@@ -213,7 +217,7 @@ def test_ingestion_stage_ingest_plex_batches_movies_and_episodes(caplog) -> None
             episode_batch_size=2,
             sample_batch_size=10,
             output_queue=queue,
-            completion_sentinel=sentinel,
+            completion_sentinel=INGEST_DONE,
         )
 
         await stage._ingest_plex(
@@ -224,7 +228,7 @@ def test_ingestion_stage_ingest_plex_batches_movies_and_episodes(caplog) -> None
             logger=stage.logger,
         )
 
-        batches: list[object] = []
+        batches: list[MovieBatch | EpisodeBatch] = []
         while not queue.empty():
             batches.append(await queue.get())
 
