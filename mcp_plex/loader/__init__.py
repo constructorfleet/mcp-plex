@@ -1564,6 +1564,7 @@ async def run(
             max_concurrent_upserts=_qdrant_max_concurrent_upserts,
             imdb_retry_queue=_IMDbRetryQueue(),
         )
+        logger.info("Starting ingestion, enrichment, and persistence stages")
         logger.info("Starting staged loader (sample mode)")
         await orchestrator.run()
     else:
@@ -1589,6 +1590,7 @@ async def run(
             upsert_buffer_size=upsert_buffer_size,
             max_concurrent_upserts=_qdrant_max_concurrent_upserts,
         )
+        logger.info("Starting ingestion, enrichment, and persistence stages")
         logger.info("Starting staged loader (Plex mode)")
         await orchestrator.run()
     logger.info("Loaded %d items", len(items))
