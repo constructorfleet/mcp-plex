@@ -148,6 +148,7 @@ def test_persistence_stage_populates_retry_queue_on_failure() -> None:
                 _FailingClient(),
                 "media-items",
                 batch,
+                batch_size=1,
                 retry_queue=retry_queue,
             )
 

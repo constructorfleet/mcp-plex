@@ -7,6 +7,7 @@ import logging
 import sys
 import time
 import warnings
+from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any, List, Optional, Sequence, TypeVar
 
@@ -19,12 +20,8 @@ from .imdb_cache import IMDbCache
 from .pipeline.channels import (
     IMDbRetryQueue,
     INGEST_DONE,
-    IngestBatch,
     IngestQueue,
-    MovieBatch,
-    EpisodeBatch,
     PersistenceQueue,
-    SampleBatch,
     chunk_sequence,
     require_positive,
 )
@@ -59,31 +56,48 @@ warnings.filterwarnings(
 
 T = TypeVar("T")
 
-_imdb_cache: IMDbCache | None = None
-_imdb_max_retries: int = 3
-_imdb_backoff: float = 1.0
-_imdb_retry_queue: "_IMDbRetryQueue" | None = None
-_imdb_batch_limit: int = 5
-_imdb_requests_per_window: int | None = None
-_imdb_window_seconds: float = 1.0
-_imdb_throttle: Any = None
-_qdrant_batch_size: int = 1000
-_qdrant_upsert_buffer_size: int = 200
-_qdrant_max_concurrent_upserts: int = 4
-_qdrant_retry_attempts: int = 3
-_qdrant_retry_backoff: float = 1.0
+IMDB_BATCH_LIMIT: int = 5
+DEFAULT_QDRANT_BATCH_SIZE: int = 1000
+DEFAULT_QDRANT_UPSERT_BUFFER_SIZE: int = 200
+DEFAULT_QDRANT_MAX_CONCURRENT_UPSERTS: int = 4
+DEFAULT_QDRANT_RETRY_ATTEMPTS: int = 3
+DEFAULT_QDRANT_RETRY_BACKOFF: float = 1.0
 
-# Backwards-compatible aliases while callers migrate to shared pipeline exports.
-_MovieBatch = MovieBatch
-_EpisodeBatch = EpisodeBatch
-_SampleBatch = SampleBatch
-_IngestBatch = IngestBatch
-_IngestQueue = IngestQueue
-_PersistenceQueue = PersistenceQueue
-_require_positive = require_positive
-_chunk_sequence = chunk_sequence
-_IMDbRetryQueue = IMDbRetryQueue
-_INGEST_DONE = INGEST_DONE
+
+@dataclass(slots=True)
+class IMDbRuntimeConfig:
+    """Runtime configuration for IMDb enrichment helpers."""
+
+    cache: IMDbCache | None
+    max_retries: int
+    backoff: float
+    retry_queue: IMDbRetryQueue
+    requests_per_window: int | None
+    window_seconds: float
+    _throttle: Any = field(default=None, init=False, repr=False)
+
+    def get_throttle(self) -> Any:
+        """Return the shared rate limiter, creating it on first use."""
+
+        if self.requests_per_window is None:
+            return None
+        if self._throttle is None:
+            from .pipeline import enrichment as enrichment_mod
+
+            self._throttle = enrichment_mod._RequestThrottler(
+                limit=self.requests_per_window,
+                interval=float(self.window_seconds),
+            )
+        return self._throttle
+
+
+@dataclass(slots=True)
+class QdrantRuntimeConfig:
+    """Runtime configuration for Qdrant persistence helpers."""
+
+    batch_size: int = DEFAULT_QDRANT_BATCH_SIZE
+    retry_attempts: int = DEFAULT_QDRANT_RETRY_ATTEMPTS
+    retry_backoff: float = DEFAULT_QDRANT_RETRY_BACKOFF
 
 
 def _is_local_qdrant(client: AsyncQdrantClient) -> bool:
@@ -118,23 +132,11 @@ def _resolve_dense_model_params(model_name: str) -> tuple[int, models.Distance]:
         ) from exc
 
 
-def _get_imdb_throttle() -> Any:
-    """Return the shared IMDb rate limiter instance if configured."""
-
-    global _imdb_throttle
-    if _imdb_requests_per_window is None:
-        return None
-    from .pipeline import enrichment as enrichment_mod
-
-    if _imdb_throttle is None:
-        _imdb_throttle = enrichment_mod._RequestThrottler(
-            limit=_imdb_requests_per_window,
-            interval=float(_imdb_window_seconds),
-        )
-    return _imdb_throttle
-
-
-async def _fetch_imdb(client: httpx.AsyncClient, imdb_id: str) -> Optional[IMDbTitle]:
+async def _fetch_imdb(
+    client: httpx.AsyncClient,
+    imdb_id: str,
+    config: IMDbRuntimeConfig,
+) -> Optional[IMDbTitle]:
     """Fetch metadata for an IMDb ID with caching, retry, and throttling."""
 
     from .pipeline import enrichment as enrichment_mod
@@ -142,18 +144,17 @@ async def _fetch_imdb(client: httpx.AsyncClient, imdb_id: str) -> Optional[IMDbT
     return await enrichment_mod._fetch_imdb(
         client,
         imdb_id,
-        cache=_imdb_cache,
-        throttle=_get_imdb_throttle(),
-        max_retries=_imdb_max_retries,
-        backoff=_imdb_backoff,
-        retry_queue=_imdb_retry_queue,
+        cache=config.cache,
+        throttle=config.get_throttle(),
+        max_retries=config.max_retries,
+        backoff=config.backoff,
+        retry_queue=config.retry_queue,
     )
 
 
-def _load_imdb_retry_queue(path: Path) -> None:
+def _load_imdb_retry_queue(path: Path) -> IMDbRetryQueue:
     """Populate the retry queue from a JSON file if it exists."""
 
-    global _imdb_retry_queue
     ids: list[str] = []
     if path.exists():
         try:
@@ -167,28 +168,29 @@ def _load_imdb_retry_queue(path: Path) -> None:
                 )
         except Exception:
             logger.exception("Failed to load IMDb retry queue from %s", path)
-    _imdb_retry_queue = _IMDbRetryQueue(ids)
+    return IMDbRetryQueue(ids)
 
 
-async def _process_imdb_retry_queue(client: httpx.AsyncClient) -> None:
+async def _process_imdb_retry_queue(
+    client: httpx.AsyncClient,
+    config: IMDbRuntimeConfig,
+) -> None:
     """Attempt to fetch queued IMDb IDs, re-queueing failures."""
 
-    if _imdb_retry_queue is None or _imdb_retry_queue.empty():
+    if config.retry_queue.empty():
         return
-    size = _imdb_retry_queue.qsize()
+    size = config.retry_queue.qsize()
     for _ in range(size):
-        imdb_id = await _imdb_retry_queue.get()
-        title = await _fetch_imdb(client, imdb_id)
+        imdb_id = await config.retry_queue.get()
+        title = await _fetch_imdb(client, imdb_id, config)
         if title is None:
-            await _imdb_retry_queue.put(imdb_id)
+            await config.retry_queue.put(imdb_id)
 
 
-def _persist_imdb_retry_queue(path: Path) -> None:
+def _persist_imdb_retry_queue(path: Path, queue: IMDbRetryQueue) -> None:
     """Persist the retry queue to disk."""
 
-    if _imdb_retry_queue is None:
-        return
-    path.write_text(json.dumps(_imdb_retry_queue.snapshot()))
+    path.write_text(json.dumps(queue.snapshot()))
 
 
 async def _upsert_in_batches(
@@ -196,13 +198,14 @@ async def _upsert_in_batches(
     collection_name: str,
     points: Sequence[models.PointStruct],
     *,
+    batch_size: int,
     retry_queue: asyncio.Queue[list[models.PointStruct]] | None = None,
 ) -> None:
     """Upsert points into Qdrant in batches, logging HTTP errors."""
 
     total = len(points)
-    for i in range(0, total, _qdrant_batch_size):
-        batch = points[i : i + _qdrant_batch_size]
+    for i in range(0, total, batch_size):
+        batch = points[i : i + batch_size]
         try:
             await client.upsert(collection_name=collection_name, points=batch)
         except Exception:
@@ -221,6 +224,8 @@ async def _process_qdrant_retry_queue(
     client: AsyncQdrantClient,
     collection_name: str,
     retry_queue: asyncio.Queue[list[models.PointStruct]],
+    *,
+    config: QdrantRuntimeConfig,
 ) -> None:
     """Retry failed Qdrant batches with exponential backoff."""
 
@@ -232,7 +237,7 @@ async def _process_qdrant_retry_queue(
     while not retry_queue.empty():
         batch = await retry_queue.get()
         attempt = 1
-        while attempt <= _qdrant_retry_attempts:
+        while attempt <= config.retry_attempts:
             try:
                 await client.upsert(
                     collection_name=collection_name,
@@ -242,18 +247,18 @@ async def _process_qdrant_retry_queue(
                 logger.exception(
                     "Retry %d/%d failed for Qdrant batch of %d points",
                     attempt,
-                    _qdrant_retry_attempts,
+                    config.retry_attempts,
                     len(batch),
                 )
                 attempt += 1
-                if attempt > _qdrant_retry_attempts:
+                if attempt > config.retry_attempts:
                     logger.error(
                         "Giving up on Qdrant batch after %d attempts; %d points were not indexed",
-                        _qdrant_retry_attempts,
+                        config.retry_attempts,
                         len(batch),
                     )
                     break
-                await asyncio.sleep(_qdrant_retry_backoff * attempt)
+                await asyncio.sleep(config.retry_backoff * attempt)
                 continue
             else:
                 logger.info(
@@ -591,7 +596,8 @@ def _build_loader_orchestrator(
     enrichment_workers: int,
     upsert_buffer_size: int,
     max_concurrent_upserts: int,
-    imdb_retry_queue: IMDbRetryQueue | None = None,
+    imdb_config: IMDbRuntimeConfig,
+    qdrant_config: QdrantRuntimeConfig,
 ) -> tuple[LoaderOrchestrator, list[AggregatedItem], asyncio.Queue[list[models.PointStruct]]]:
     """Wire the staged loader pipeline and return the orchestrator helpers."""
 
@@ -600,13 +606,7 @@ def _build_loader_orchestrator(
 
     ingest_queue: IngestQueue = IngestQueue(maxsize=enrichment_workers * 2)
     persistence_queue: PersistenceQueue = PersistenceQueue()
-
-    imdb_queue = imdb_retry_queue
-    if imdb_queue is None:
-        global _imdb_retry_queue
-        if _imdb_retry_queue is None:
-            _imdb_retry_queue = _IMDbRetryQueue()
-        imdb_queue = _imdb_retry_queue
+    imdb_queue = imdb_config.retry_queue
 
     upsert_capacity = asyncio.Semaphore(max_concurrent_upserts)
     qdrant_retry_queue: asyncio.Queue[list[models.PointStruct]] = asyncio.Queue()
@@ -629,6 +629,7 @@ def _build_loader_orchestrator(
                 client,
                 collection_name,
                 list(point_chunk),
+                batch_size=qdrant_config.batch_size,
                 retry_queue=qdrant_retry_queue,
             )
 
@@ -665,12 +666,12 @@ def _build_loader_orchestrator(
         imdb_retry_queue=imdb_queue,
         movie_batch_size=enrichment_batch_size,
         episode_batch_size=enrichment_batch_size,
-        imdb_cache=_imdb_cache,
-        imdb_max_retries=_imdb_max_retries,
-        imdb_backoff=_imdb_backoff,
-        imdb_batch_limit=_imdb_batch_limit,
-        imdb_requests_per_window=_imdb_requests_per_window,
-        imdb_window_seconds=_imdb_window_seconds,
+        imdb_cache=imdb_config.cache,
+        imdb_max_retries=imdb_config.max_retries,
+        imdb_backoff=imdb_config.backoff,
+        imdb_batch_limit=IMDB_BATCH_LIMIT,
+        imdb_requests_per_window=imdb_config.requests_per_window,
+        imdb_window_seconds=imdb_config.window_seconds,
     )
 
     persistence_stage = _PersistenceStage(
@@ -719,41 +720,52 @@ async def run(
     imdb_queue_path: Path | None = None,
     imdb_requests_per_window: int | None = None,
     imdb_window_seconds: float = 1.0,
-    upsert_buffer_size: int = _qdrant_upsert_buffer_size,
+    upsert_buffer_size: int = DEFAULT_QDRANT_UPSERT_BUFFER_SIZE,
     plex_chunk_size: int = 200,
     enrichment_batch_size: int = 100,
     enrichment_workers: int = 4,
+    qdrant_batch_size: int = DEFAULT_QDRANT_BATCH_SIZE,
+    max_concurrent_upserts: int = DEFAULT_QDRANT_MAX_CONCURRENT_UPSERTS,
+    qdrant_retry_attempts: int = DEFAULT_QDRANT_RETRY_ATTEMPTS,
+    qdrant_retry_backoff: float = DEFAULT_QDRANT_RETRY_BACKOFF,
 ) -> None:
     """Core execution logic for the CLI."""
 
-    global _imdb_cache
-    global _imdb_max_retries
-    global _imdb_backoff
-    global _imdb_retry_queue
-    global _imdb_requests_per_window
-    global _imdb_window_seconds
-    global _imdb_throttle
-    _imdb_cache = IMDbCache(imdb_cache_path) if imdb_cache_path else None
-    _imdb_max_retries = imdb_max_retries
-    _imdb_backoff = imdb_backoff
+    imdb_cache = IMDbCache(imdb_cache_path) if imdb_cache_path else None
     if imdb_requests_per_window is not None:
-        _require_positive(imdb_requests_per_window, name="imdb_requests_per_window")
+        require_positive(imdb_requests_per_window, name="imdb_requests_per_window")
         if imdb_window_seconds <= 0:
             raise ValueError("imdb_window_seconds must be positive")
-    _imdb_requests_per_window = imdb_requests_per_window
-    _imdb_window_seconds = imdb_window_seconds
-    _imdb_throttle = None
-    if imdb_queue_path:
-        _load_imdb_retry_queue(imdb_queue_path)
-        async with httpx.AsyncClient(timeout=30) as client:
-            await _process_imdb_retry_queue(client)
-    else:
-        _imdb_retry_queue = _IMDbRetryQueue()
+    if qdrant_retry_backoff <= 0:
+        raise ValueError("qdrant_retry_backoff must be positive")
 
-    _require_positive(upsert_buffer_size, name="upsert_buffer_size")
-    _require_positive(plex_chunk_size, name="plex_chunk_size")
-    _require_positive(enrichment_batch_size, name="enrichment_batch_size")
-    _require_positive(enrichment_workers, name="enrichment_workers")
+    require_positive(upsert_buffer_size, name="upsert_buffer_size")
+    require_positive(plex_chunk_size, name="plex_chunk_size")
+    require_positive(enrichment_batch_size, name="enrichment_batch_size")
+    require_positive(enrichment_workers, name="enrichment_workers")
+    require_positive(qdrant_batch_size, name="qdrant_batch_size")
+    require_positive(max_concurrent_upserts, name="max_concurrent_upserts")
+    require_positive(qdrant_retry_attempts, name="qdrant_retry_attempts")
+
+    imdb_retry_queue = _load_imdb_retry_queue(imdb_queue_path) if imdb_queue_path else IMDbRetryQueue()
+    imdb_config = IMDbRuntimeConfig(
+        cache=imdb_cache,
+        max_retries=imdb_max_retries,
+        backoff=imdb_backoff,
+        retry_queue=imdb_retry_queue,
+        requests_per_window=imdb_requests_per_window,
+        window_seconds=imdb_window_seconds,
+    )
+
+    if imdb_queue_path:
+        async with httpx.AsyncClient(timeout=30) as client:
+            await _process_imdb_retry_queue(client, imdb_config)
+
+    qdrant_config = QdrantRuntimeConfig(
+        batch_size=qdrant_batch_size,
+        retry_attempts=qdrant_retry_attempts,
+        retry_backoff=qdrant_retry_backoff,
+    )
 
     dense_size, dense_distance = _resolve_dense_model_params(dense_model_name)
     if qdrant_url is None and qdrant_host is None:
@@ -791,8 +803,16 @@ async def run(
             enrichment_batch_size=enrichment_batch_size,
             enrichment_workers=enrichment_workers,
             upsert_buffer_size=upsert_buffer_size,
-            max_concurrent_upserts=_qdrant_max_concurrent_upserts,
-            imdb_retry_queue=_IMDbRetryQueue(),
+            max_concurrent_upserts=max_concurrent_upserts,
+            imdb_config=IMDbRuntimeConfig(
+                cache=imdb_config.cache,
+                max_retries=imdb_config.max_retries,
+                backoff=imdb_config.backoff,
+                retry_queue=IMDbRetryQueue(),
+                requests_per_window=imdb_config.requests_per_window,
+                window_seconds=imdb_config.window_seconds,
+            ),
+            qdrant_config=qdrant_config,
         )
         logger.info("Starting staged loader (sample mode)")
         await orchestrator.run()
@@ -817,7 +837,9 @@ async def run(
             enrichment_batch_size=enrichment_batch_size,
             enrichment_workers=enrichment_workers,
             upsert_buffer_size=upsert_buffer_size,
-            max_concurrent_upserts=_qdrant_max_concurrent_upserts,
+            max_concurrent_upserts=max_concurrent_upserts,
+            imdb_config=imdb_config,
+            qdrant_config=qdrant_config,
         )
         logger.info("Starting staged loader (Plex mode)")
         await orchestrator.run()
@@ -826,11 +848,14 @@ async def run(
         logger.info("No points to upsert")
 
     await _process_qdrant_retry_queue(
-        client, collection_name, qdrant_retry_queue
+        client,
+        collection_name,
+        qdrant_retry_queue,
+        config=qdrant_config,
     )
 
     if imdb_queue_path:
-        _persist_imdb_retry_queue(imdb_queue_path)
+        _persist_imdb_retry_queue(imdb_queue_path, imdb_config.retry_queue)
 
     json.dump([item.model_dump(mode="json") for item in items], fp=sys.stdout, indent=2)
     sys.stdout.write("\n")
@@ -924,7 +949,7 @@ async def run(
     envvar="QDRANT_UPSERT_BUFFER_SIZE",
     show_envvar=True,
     type=int,
-    default=_qdrant_upsert_buffer_size,
+    default=DEFAULT_QDRANT_UPSERT_BUFFER_SIZE,
     show_default=True,
     help="Number of media items to buffer before scheduling an async upsert",
 )
@@ -1126,6 +1151,10 @@ async def load_media(
     plex_chunk_size: int,
     enrichment_batch_size: int,
     enrichment_workers: int,
+    qdrant_batch_size: int = DEFAULT_QDRANT_BATCH_SIZE,
+    max_concurrent_upserts: int = DEFAULT_QDRANT_MAX_CONCURRENT_UPSERTS,
+    qdrant_retry_attempts: int = DEFAULT_QDRANT_RETRY_ATTEMPTS,
+    qdrant_retry_backoff: float = DEFAULT_QDRANT_RETRY_BACKOFF,
 ) -> None:
     """Orchestrate one or more runs of :func:`run`."""
 
@@ -1154,6 +1183,10 @@ async def load_media(
             plex_chunk_size,
             enrichment_batch_size,
             enrichment_workers,
+            qdrant_batch_size,
+            max_concurrent_upserts,
+            qdrant_retry_attempts,
+            qdrant_retry_backoff,
         )
         if not continuous:
             break

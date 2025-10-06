@@ -124,19 +124,6 @@ class IMDbRetryQueue(asyncio.Queue[str]):
         return list(self._items)
 
 
-# Backwards-compatible aliases for private imports while callers migrate.
-_MovieBatch = MovieBatch
-_EpisodeBatch = EpisodeBatch
-_SampleBatch = SampleBatch
-_IngestBatch = IngestBatch
-_INGEST_DONE = INGEST_DONE
-_PERSIST_DONE = PERSIST_DONE
-_IngestQueue = IngestQueue
-_PersistenceQueue = PersistenceQueue
-_require_positive = require_positive
-_chunk_sequence = chunk_sequence
-_IMDbRetryQueue = IMDbRetryQueue
-
 __all__ = [
     "MovieBatch",
     "EpisodeBatch",
@@ -149,15 +136,4 @@ __all__ = [
     "require_positive",
     "chunk_sequence",
     "IMDbRetryQueue",
-    "_MovieBatch",
-    "_EpisodeBatch",
-    "_SampleBatch",
-    "_IngestBatch",
-    "_INGEST_DONE",
-    "_PERSIST_DONE",
-    "_IngestQueue",
-    "_PersistenceQueue",
-    "_require_positive",
-    "_chunk_sequence",
-    "_IMDbRetryQueue",
 ]
