@@ -10,8 +10,8 @@ from .channels import (
     PERSIST_DONE,
     PersistenceQueue,
     chunk_sequence,
-    require_positive,
 )
+from ...common.validation import require_positive
 
 if TYPE_CHECKING:  # pragma: no cover - typing helpers only
     from qdrant_client import AsyncQdrantClient, models

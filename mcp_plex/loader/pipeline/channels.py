@@ -13,6 +13,7 @@ from dataclasses import dataclass
 from typing import TYPE_CHECKING, Any, Final, Iterable, Sequence, TypeVar, TypeAlias
 
 from ...common.types import AggregatedItem
+from ...common.validation import require_positive
 
 try:  # Only import plexapi when available; the sample data mode does not require it.
     from plexapi.base import PlexPartialObject
@@ -72,14 +73,6 @@ IngestQueue: TypeAlias = asyncio.Queue[IngestQueueItem]
 PersistenceQueue: TypeAlias = asyncio.Queue[PersistenceQueueItem]
 
 
-def require_positive(value: int, *, name: str) -> int:
-    """Return *value* if positive, otherwise raise a ``ValueError``."""
-
-    if value <= 0:
-        raise ValueError(f"{name} must be positive")
-    return value
-
-
 def chunk_sequence(items: Sequence[T], size: int) -> Iterable[Sequence[T]]:
     """Yield ``items`` in chunks of at most ``size`` elements."""
 
@@ -133,7 +126,6 @@ __all__ = [
     "PERSIST_DONE",
     "IngestQueue",
     "PersistenceQueue",
-    "require_positive",
     "chunk_sequence",
     "IMDbRetryQueue",
 ]
