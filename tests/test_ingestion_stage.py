@@ -1,7 +1,11 @@
 import asyncio
 import logging
+from typing import cast
+from unittest.mock import Mock, create_autospec
 
 import pytest
+from plexapi.server import PlexServer
+from plexapi.video import Episode, Movie, Season, Show
 
 from mcp_plex.common.types import AggregatedItem, PlexItem
 from mcp_plex.loader.pipeline.channels import (
@@ -28,7 +32,7 @@ def test_ingestion_stage_logger_name() -> None:
     async def scenario() -> str:
         queue: asyncio.Queue = asyncio.Queue()
         stage = IngestionStage(
-            plex_server=object(),
+            plex_server=cast(PlexServer, object()),
             sample_items=None,
             movie_batch_size=50,
             episode_batch_size=25,
@@ -159,45 +163,49 @@ def test_ingestion_stage_backpressure_handling() -> None:
 def test_ingestion_stage_ingest_plex_batches_movies_and_episodes(caplog) -> None:
     caplog.set_level(logging.INFO)
 
-    class FakeMovie:
-        def __init__(self, title: str) -> None:
-            self.title = title
-
-    class FakeEpisode:
-        def __init__(self, title: str) -> None:
-            self.title = title
-
-    class FakeShow:
-        def __init__(self, title: str, episode_titles: list[str]) -> None:
-            self.title = title
-            self._episodes = [FakeEpisode(ep_title) for ep_title in episode_titles]
-
-        def episodes(self) -> list[FakeEpisode]:
-            return list(self._episodes)
-
-    class FakePlex:
-        def __init__(self) -> None:
-            self._movies = [
-                FakeMovie("Movie 1"),
-                FakeMovie("Movie 2"),
-                FakeMovie("Movie 3"),
-            ]
-            self._shows = [
-                FakeShow("Show A", ["S01E01", "S01E02", "S01E03"]),
-                FakeShow("Show B", ["S01E01", "S01E02"]),
-            ]
-
-        def movies(self) -> list[FakeMovie]:
-            return list(self._movies)
-
-        def shows(self) -> list[FakeShow]:
-            return list(self._shows)
-
     sentinel = object()
 
-    async def scenario() -> tuple[list[object], int, int]:
+    async def scenario() -> tuple[list[object], int, int, Mock]:
         queue: asyncio.Queue = asyncio.Queue()
-        plex = FakePlex()
+
+        movie_section = Mock()
+        movies = [
+            create_autospec(Movie, instance=True, title="Movie 1"),
+            create_autospec(Movie, instance=True, title="Movie 2"),
+            create_autospec(Movie, instance=True, title="Movie 3"),
+        ]
+        movie_section.all.return_value = movies
+
+        def _episodes(titles: list[str]) -> list[Episode]:
+            return [create_autospec(Episode, instance=True, title=title) for title in titles]
+
+        show_a_season_1 = create_autospec(Season, instance=True)
+        show_a_season_1.episodes.return_value = _episodes(["S01E01", "S01E02"])
+        show_a_season_2 = create_autospec(Season, instance=True)
+        show_a_season_2.episodes.return_value = _episodes(["S01E03"])
+
+        show_a = create_autospec(Show, instance=True, title="Show A")
+        show_a.seasons.return_value = [show_a_season_1, show_a_season_2]
+
+        show_b_season_1 = create_autospec(Season, instance=True)
+        show_b_season_1.episodes.return_value = _episodes(["S01E01", "S01E02"])
+
+        show_b = create_autospec(Show, instance=True, title="Show B")
+        show_b.seasons.return_value = [show_b_season_1]
+
+        shows = [show_a, show_b]
+        show_section = Mock()
+        show_section.all.return_value = shows
+
+        library = Mock()
+        library.section.side_effect = lambda name: {
+            "Movies": movie_section,
+            "TV Shows": show_section,
+        }[name]
+
+        plex = create_autospec(PlexServer, instance=True)
+        plex.library = library
+
         stage = IngestionStage(
             plex_server=plex,
             sample_items=None,
@@ -220,10 +228,14 @@ def test_ingestion_stage_ingest_plex_batches_movies_and_episodes(caplog) -> None
         while not queue.empty():
             batches.append(await queue.get())
 
-        return batches, stage.items_ingested, stage.batches_ingested
+        return batches, stage.items_ingested, stage.batches_ingested, library
 
-    batches, items_ingested, batches_ingested = asyncio.run(scenario())
+    batches, items_ingested, batches_ingested, library = asyncio.run(scenario())
 
+    assert library.section.call_args_list == [
+        (("Movies",),),
+        (("TV Shows",),),
+    ]
     assert items_ingested == 8
     assert batches_ingested == 5
 
