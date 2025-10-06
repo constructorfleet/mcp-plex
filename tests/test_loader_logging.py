@@ -71,7 +71,6 @@ def test_run_rejects_invalid_upsert_buffer_size(monkeypatch):
 def test_run_limits_concurrent_upserts(monkeypatch):
     monkeypatch.setattr(loader, "AsyncQdrantClient", DummyClient)
     sample_dir = Path(__file__).resolve().parents[1] / "sample-data"
-    monkeypatch.setattr(loader, "_qdrant_max_concurrent_upserts", 1)
 
     concurrency = {"current": 0, "max": 0}
     started = asyncio.Queue()
@@ -101,7 +100,16 @@ def test_run_limits_concurrent_upserts(monkeypatch):
 
     async def invoke():
         run_task = asyncio.create_task(
-            loader.run(None, None, None, sample_dir, None, None, upsert_buffer_size=1)
+            loader.run(
+                None,
+                None,
+                None,
+                sample_dir,
+                None,
+                None,
+                upsert_buffer_size=1,
+                max_concurrent_upserts=1,
+            )
         )
         await asyncio.wait_for(started.get(), timeout=1)
         assert not third_requested.is_set()

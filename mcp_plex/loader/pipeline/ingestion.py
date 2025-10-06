@@ -18,7 +18,6 @@ from .channels import (
     MovieBatch,
     SampleBatch,
     chunk_sequence,
-    _chunk_sequence,
 )
 
 
@@ -122,7 +121,7 @@ class IngestionStage:
         movies_source = movies_attr() if callable(movies_attr) else movies_attr
         movies = list(movies_source)
         for batch_index, chunk in enumerate(
-            _chunk_sequence(movies, movie_batch_size), start=1
+            chunk_sequence(movies, movie_batch_size), start=1
         ):
             batch_movies = list(chunk)
             if not batch_movies:
@@ -150,7 +149,7 @@ class IngestionStage:
             )
             episodes = list(episodes_source)
             for batch_index, chunk in enumerate(
-                _chunk_sequence(episodes, episode_batch_size), start=1
+                chunk_sequence(episodes, episode_batch_size), start=1
             ):
                 batch_episodes = list(chunk)
                 if not batch_episodes:

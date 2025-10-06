@@ -12,6 +12,9 @@ import pytest
 from mcp_plex import loader
 from mcp_plex.loader.imdb_cache import IMDbCache
 from mcp_plex.loader import (
+    IMDbRuntimeConfig,
+    QdrantRuntimeConfig,
+    _build_loader_orchestrator,
     _fetch_imdb,
     _load_from_sample,
     _load_imdb_retry_queue,
@@ -20,6 +23,7 @@ from mcp_plex.loader import (
     _resolve_dense_model_params,
     build_point,
 )
+from mcp_plex.loader.pipeline.channels import IMDbRetryQueue
 from mcp_plex.common.types import (
     AggregatedItem,
     IMDbName,
@@ -30,6 +34,25 @@ from mcp_plex.common.types import (
     PlexPerson,
     TMDBMovie,
 )
+
+
+def make_imdb_config(
+    *,
+    cache: IMDbCache | None = None,
+    max_retries: int = 3,
+    backoff: float = 1.0,
+    retry_queue: IMDbRetryQueue | None = None,
+    requests_per_window: int | None = None,
+    window_seconds: float = 1.0,
+) -> IMDbRuntimeConfig:
+    return IMDbRuntimeConfig(
+        cache=cache,
+        max_retries=max_retries,
+        backoff=backoff,
+        retry_queue=retry_queue or IMDbRetryQueue(),
+        requests_per_window=requests_per_window,
+        window_seconds=window_seconds,
+    )
 
 
 def test_loader_import_fallback(monkeypatch):
@@ -52,9 +75,9 @@ def test_load_from_sample_returns_items():
     assert {i.plex.type for i in items} == {"movie", "episode"}
 
 
-def test_fetch_imdb_cache_miss(tmp_path, monkeypatch):
+def test_fetch_imdb_cache_miss(tmp_path):
     cache_path = tmp_path / "cache.json"
-    monkeypatch.setattr(loader, "_imdb_cache", IMDbCache(cache_path))
+    config = make_imdb_config(cache=IMDbCache(cache_path))
 
     calls = 0
 
@@ -67,7 +90,7 @@ def test_fetch_imdb_cache_miss(tmp_path, monkeypatch):
 
     async def main():
         async with httpx.AsyncClient(transport=httpx.MockTransport(imdb_mock)) as client:
-            result = await _fetch_imdb(client, "tt1")
+            result = await _fetch_imdb(client, "tt1", config)
             assert result is not None
 
     asyncio.run(main())
@@ -76,19 +99,19 @@ def test_fetch_imdb_cache_miss(tmp_path, monkeypatch):
     assert data["tt1"]["id"] == "tt1"
 
 
-def test_fetch_imdb_cache_hit(tmp_path, monkeypatch):
+def test_fetch_imdb_cache_hit(tmp_path):
     cache_path = tmp_path / "cache.json"
     cache_path.write_text(
         json.dumps({"tt1": {"id": "tt1", "type": "movie", "primaryTitle": "T"}})
     )
-    monkeypatch.setattr(loader, "_imdb_cache", IMDbCache(cache_path))
+    config = make_imdb_config(cache=IMDbCache(cache_path))
 
     async def error_mock(request):
         raise AssertionError("network should not be called")
 
     async def main():
         async with httpx.AsyncClient(transport=httpx.MockTransport(error_mock)) as client:
-            result = await _fetch_imdb(client, "tt1")
+            result = await _fetch_imdb(client, "tt1", config)
             assert result is not None
             assert result.id == "tt1"
 
@@ -97,9 +120,11 @@ def test_fetch_imdb_cache_hit(tmp_path, monkeypatch):
 
 def test_fetch_imdb_retries_on_429(monkeypatch, tmp_path):
     cache_path = tmp_path / "cache.json"
-    monkeypatch.setattr(loader, "_imdb_cache", IMDbCache(cache_path))
-    monkeypatch.setattr(loader, "_imdb_max_retries", 5)
-    monkeypatch.setattr(loader, "_imdb_backoff", 0.1)
+    config = make_imdb_config(
+        cache=IMDbCache(cache_path),
+        max_retries=5,
+        backoff=0.1,
+    )
 
     call_count = 0
 
@@ -121,7 +146,7 @@ def test_fetch_imdb_retries_on_429(monkeypatch, tmp_path):
 
     async def main():
         async with httpx.AsyncClient(transport=httpx.MockTransport(imdb_mock)) as client:
-            result = await _fetch_imdb(client, "tt1")
+            result = await _fetch_imdb(client, "tt1", config)
             assert result is not None
 
     asyncio.run(main())
@@ -129,12 +154,9 @@ def test_fetch_imdb_retries_on_429(monkeypatch, tmp_path):
     assert delays == [0.1, 0.2]
 
 
-def test_imdb_retry_queue_persists_and_retries(tmp_path, monkeypatch):
+def test_imdb_retry_queue_persists_and_retries(tmp_path):
     cache_path = tmp_path / "cache.json"
     queue_path = tmp_path / "queue.json"
-    monkeypatch.setattr(loader, "_imdb_cache", IMDbCache(cache_path))
-    monkeypatch.setattr(loader, "_imdb_max_retries", 0)
-    monkeypatch.setattr(loader, "_imdb_backoff", 0)
 
     async def first_transport(request):
         return httpx.Response(429)
@@ -149,50 +171,63 @@ def test_imdb_retry_queue_persists_and_retries(tmp_path, monkeypatch):
             },
         )
 
-    async def first_run():
-        _load_imdb_retry_queue(queue_path)
+    async def first_run() -> IMDbRuntimeConfig:
+        queue = _load_imdb_retry_queue(queue_path)
+        config = make_imdb_config(
+            cache=IMDbCache(cache_path),
+            max_retries=0,
+            backoff=0,
+            retry_queue=queue,
+        )
         async with httpx.AsyncClient(transport=httpx.MockTransport(first_transport)) as client:
-            await _process_imdb_retry_queue(client)
-            await _fetch_imdb(client, "tt0111161")
-        _persist_imdb_retry_queue(queue_path)
+            await _process_imdb_retry_queue(client, config)
+            await _fetch_imdb(client, "tt0111161", config)
+        _persist_imdb_retry_queue(queue_path, config.retry_queue)
+        return config
 
     asyncio.run(first_run())
     assert json.loads(queue_path.read_text()) == ["tt0111161"]
 
-    async def second_run():
-        _load_imdb_retry_queue(queue_path)
-        assert loader._imdb_retry_queue is not None
-        assert loader._imdb_retry_queue.qsize() == 1
-        assert loader._imdb_retry_queue.snapshot() == ["tt0111161"]
+    async def second_run() -> IMDbRuntimeConfig:
+        queue = _load_imdb_retry_queue(queue_path)
+        config = make_imdb_config(
+            cache=IMDbCache(cache_path),
+            max_retries=0,
+            backoff=0,
+            retry_queue=queue,
+        )
+        assert config.retry_queue.qsize() == 1
+        assert config.retry_queue.snapshot() == ["tt0111161"]
         async with httpx.AsyncClient(transport=httpx.MockTransport(second_transport)) as client:
-            await _process_imdb_retry_queue(client)
-        _persist_imdb_retry_queue(queue_path)
+            await _process_imdb_retry_queue(client, config)
+        _persist_imdb_retry_queue(queue_path, config.retry_queue)
+        return config
 
-    asyncio.run(second_run())
+    second_config = asyncio.run(second_run())
     assert json.loads(queue_path.read_text()) == []
-    assert loader._imdb_cache.get("tt0111161") is not None
+    assert second_config.cache is not None
+    assert second_config.cache.get("tt0111161") is not None
 
 
 def test_load_imdb_retry_queue_invalid_json(tmp_path):
     path = tmp_path / "queue.json"
     path.write_text("not json")
-    _load_imdb_retry_queue(path)
-    assert loader._imdb_retry_queue is not None
-    assert loader._imdb_retry_queue.qsize() == 0
+    queue = _load_imdb_retry_queue(path)
+    assert queue.qsize() == 0
 
 
 def test_process_imdb_retry_queue_requeues(monkeypatch):
-    queue = loader._IMDbRetryQueue(["tt0111161"])
-    monkeypatch.setattr(loader, "_imdb_retry_queue", queue)
+    queue = IMDbRetryQueue(["tt0111161"])
+    config = make_imdb_config(retry_queue=queue, max_retries=0, backoff=0)
 
-    async def fake_fetch(client, imdb_id):
+    async def fake_fetch(client, imdb_id, runtime_config):
         return None
 
     monkeypatch.setattr(loader, "_fetch_imdb", fake_fetch)
 
     async def run_test():
         async with httpx.AsyncClient() as client:
-            await _process_imdb_retry_queue(client)
+            await _process_imdb_retry_queue(client, config)
 
     asyncio.run(run_test())
     assert queue.qsize() == 1
@@ -209,8 +244,14 @@ def test_upsert_in_batches_handles_errors(monkeypatch):
 
     client = DummyClient()
     points = [models.PointStruct(id=i, vector={}, payload={}) for i in range(3)]
-    monkeypatch.setattr(loader, "_qdrant_batch_size", 1)
-    asyncio.run(loader._upsert_in_batches(client, "c", points))
+    asyncio.run(
+        loader._upsert_in_batches(
+            client,
+            "c",
+            points,
+            batch_size=1,
+        )
+    )
     assert client.calls == 3
 
 
@@ -227,13 +268,13 @@ def test_upsert_in_batches_enqueues_retry_batches(monkeypatch):
     client = DummyClient()
     points = [models.PointStruct(id=i, vector={}, payload={}) for i in range(2)]
     retry_queue: asyncio.Queue[list[models.PointStruct]] = asyncio.Queue()
-    monkeypatch.setattr(loader, "_qdrant_batch_size", 1)
 
     async def main() -> None:
         await loader._upsert_in_batches(
             client,
             "collection",
             points,
+            batch_size=1,
             retry_queue=retry_queue,
         )
 
@@ -258,8 +299,7 @@ def test_process_qdrant_retry_queue_retries_batches(monkeypatch):
         retry_queue.put_nowait(
             [models.PointStruct(id=1, vector={}, payload={})]
         )
-        monkeypatch.setattr(loader, "_qdrant_retry_attempts", 2)
-        monkeypatch.setattr(loader, "_qdrant_retry_backoff", 0.01)
+        config = QdrantRuntimeConfig(retry_attempts=2, retry_backoff=0.01)
 
         sleeps: list[float] = []
 
@@ -268,7 +308,12 @@ def test_process_qdrant_retry_queue_retries_batches(monkeypatch):
 
         monkeypatch.setattr(loader.asyncio, "sleep", fake_sleep)
 
-        await loader._process_qdrant_retry_queue(client, "collection", retry_queue)
+        await loader._process_qdrant_retry_queue(
+            client,
+            "collection",
+            retry_queue,
+            config=config,
+        )
         assert sleeps == [0.02]
 
     asyncio.run(main())
@@ -288,22 +333,22 @@ def test_resolve_dense_model_params_unknown_model():
 
 
 def test_imdb_retry_queue_desync_errors():
-    queue = loader._IMDbRetryQueue(["tt1"])
+    queue = IMDbRetryQueue(["tt1"])
     queue._items.clear()
     with pytest.raises(RuntimeError, match="Queue is not empty"):
         queue.get_nowait()
 
-    queue = loader._IMDbRetryQueue(["tt2"])
+    queue = IMDbRetryQueue(["tt2"])
     queue._queue.clear()  # type: ignore[attr-defined]
     with pytest.raises(RuntimeError, match="asyncio.Queue is empty"):
         queue.get_nowait()
 
 
-def test_persist_imdb_retry_queue_noop(tmp_path, monkeypatch):
-    monkeypatch.setattr(loader, "_imdb_retry_queue", None)
+def test_persist_imdb_retry_queue_writes_snapshot(tmp_path):
     path = tmp_path / "retry.json"
-    loader._persist_imdb_retry_queue(path)
-    assert not path.exists()
+    queue = IMDbRetryQueue(["tt1"])
+    _persist_imdb_retry_queue(path, queue)
+    assert json.loads(path.read_text()) == ["tt1"]
 
 
 def test_ensure_collection_skips_existing():
@@ -387,7 +432,10 @@ def test_loader_pipeline_processes_sample_batches(monkeypatch):
 
     monkeypatch.setattr(loader, "_upsert_in_batches", record_upsert)
 
-    orchestrator, processed_items, _ = loader._build_loader_orchestrator(
+    imdb_config = make_imdb_config()
+    qdrant_config = QdrantRuntimeConfig(batch_size=1)
+
+    orchestrator, processed_items, _ = _build_loader_orchestrator(
         client=object(),
         collection_name="media-items",
         dense_model_name="BAAI/bge-small-en-v1.5",
@@ -400,6 +448,8 @@ def test_loader_pipeline_processes_sample_batches(monkeypatch):
         enrichment_workers=2,
         upsert_buffer_size=1,
         max_concurrent_upserts=1,
+        imdb_config=imdb_config,
+        qdrant_config=qdrant_config,
     )
 
     asyncio.run(orchestrator.run())

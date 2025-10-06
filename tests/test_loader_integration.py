@@ -45,7 +45,7 @@ class CaptureClient(AsyncQdrantClient):
         )
 
 
-async def _run_loader(sample_dir: Path) -> None:
+async def _run_loader(sample_dir: Path, **kwargs) -> None:
     await loader.run(
         None,
         None,
@@ -53,6 +53,7 @@ async def _run_loader(sample_dir: Path) -> None:
         sample_dir,
         None,
         None,
+        **kwargs,
     )
 
 
@@ -113,7 +114,7 @@ def test_run_processes_imdb_queue(monkeypatch, tmp_path):
     queue_file.write_text(json.dumps(["tt0111161"]))
     sample_dir = Path(__file__).resolve().parents[1] / "sample-data"
 
-    async def fake_fetch(client, imdb_id):
+    async def fake_fetch(client, imdb_id, config):
         return None
 
     monkeypatch.setattr(loader, "_fetch_imdb", fake_fetch)
@@ -135,11 +136,10 @@ def test_run_processes_imdb_queue(monkeypatch, tmp_path):
 
 def test_run_upserts_in_batches(monkeypatch):
     monkeypatch.setattr(loader, "AsyncQdrantClient", CaptureClient)
-    monkeypatch.setattr(loader, "_qdrant_batch_size", 1)
     CaptureClient.captured_points = []
     CaptureClient.upsert_calls = 0
     sample_dir = Path(__file__).resolve().parents[1] / "sample-data"
-    asyncio.run(_run_loader(sample_dir))
+    asyncio.run(_run_loader(sample_dir, qdrant_batch_size=1))
     assert CaptureClient.upsert_calls == 2
     assert len(CaptureClient.captured_points) == 2
 
