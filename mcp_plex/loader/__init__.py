@@ -1562,7 +1562,7 @@ async def run(
     if sample_dir is not None:
         logger.info("Loading sample data from %s", sample_dir)
         sample_items = _load_from_sample(sample_dir)
-        pipeline = LegacyLoaderPipeline(
+        orchestrator, items, qdrant_retry_queue = _build_loader_orchestrator(
             client=client,
             collection_name=collection_name,
             dense_model_name=dense_model_name,
@@ -1576,6 +1576,8 @@ async def run(
             upsert_buffer_size=upsert_buffer_size,
             max_concurrent_upserts=_qdrant_max_concurrent_upserts,
         )
+        logger.info("Starting staged loader (sample mode)")
+        await orchestrator.run()
     else:
         if PlexServer is None:
             raise RuntimeError("plexapi is required for live loading")
@@ -1600,14 +1602,15 @@ async def run(
             max_concurrent_upserts=_qdrant_max_concurrent_upserts,
         )
 
-    await pipeline.execute()
-    items = pipeline.items
+        await pipeline.execute()
+        items = pipeline.items
+        qdrant_retry_queue = pipeline.qdrant_retry_queue
     logger.info("Loaded %d items", len(items))
     if not items:
         logger.info("No points to upsert")
 
     await _process_qdrant_retry_queue(
-        client, collection_name, pipeline.qdrant_retry_queue
+        client, collection_name, qdrant_retry_queue
     )
 
     if imdb_queue_path:
