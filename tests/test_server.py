@@ -3,6 +3,7 @@ from __future__ import annotations
 import asyncio
 import importlib
 import json
+import logging
 import sys
 import types
 from contextlib import contextmanager
@@ -343,7 +344,7 @@ def test_match_player_whitespace_query_preserves_original_input():
     assert str(exc.value) == "Player '   ' not found"
 
 
-def test_reranker_import_failure(monkeypatch):
+def test_reranker_import_failure(monkeypatch, caplog):
     monkeypatch.setenv("USE_RERANKER", "1")
     orig_import = builtins.__import__
 
@@ -353,12 +354,17 @@ def test_reranker_import_failure(monkeypatch):
         return orig_import(name, *args, **kwargs)
 
     monkeypatch.setattr(builtins, "__import__", fake_import)
-    module = importlib.reload(importlib.import_module("mcp_plex.server"))
+    with caplog.at_level(logging.WARNING, logger="mcp_plex.server"):
+        module = importlib.reload(importlib.import_module("mcp_plex.server"))
     assert module.server.reranker is None
+    assert any(
+        "Failed to import CrossEncoder" in message
+        for message in caplog.messages
+    )
     asyncio.run(module.server.close())
 
 
-def test_reranker_init_failure(monkeypatch):
+def test_reranker_init_failure(monkeypatch, caplog):
     monkeypatch.setenv("USE_RERANKER", "1")
     st_module = types.ModuleType("sentence_transformers")
 
@@ -369,7 +375,12 @@ def test_reranker_init_failure(monkeypatch):
     st_module.CrossEncoder = Broken
     monkeypatch.setitem(sys.modules, "sentence_transformers", st_module)
     module = importlib.reload(importlib.import_module("mcp_plex.server"))
-    assert module.server.reranker is None
+    with caplog.at_level(logging.WARNING, logger="mcp_plex.server"):
+        assert module.server.reranker is None
+    assert any(
+        "Failed to initialize CrossEncoder reranker" in message
+        for message in caplog.messages
+    )
     asyncio.run(module.server.close())
 
 

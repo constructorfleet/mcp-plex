@@ -6,6 +6,7 @@ import asyncio
 import importlib.metadata
 import inspect
 import json
+import logging
 import os
 import uuid
 from typing import Annotated, Any, Callable, Sequence
@@ -29,9 +30,17 @@ from rapidfuzz import fuzz, process
 from ..common.cache import MediaCache
 from .config import Settings
 
+
+logger = logging.getLogger(__name__)
+
 try:
     from sentence_transformers import CrossEncoder
-except Exception:
+except Exception as exc:
+    logger.warning(
+        "Failed to import CrossEncoder for reranking: %s",
+        exc,
+        exc_info=exc,
+    )
     CrossEncoder = None
 
 
@@ -108,7 +117,12 @@ class PlexServer(FastMCP):
                 self._reranker = CrossEncoder(
                     "cross-encoder/ms-marco-MiniLM-L-6-v2"
                 )
-            except Exception:
+            except Exception as exc:
+                logger.warning(
+                    "Failed to initialize CrossEncoder reranker: %s",
+                    exc,
+                    exc_info=exc,
+                )
                 self._reranker = None
             self._reranker_loaded = True
         return self._reranker
