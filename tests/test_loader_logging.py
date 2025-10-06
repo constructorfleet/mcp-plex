@@ -3,6 +3,7 @@ import logging
 from pathlib import Path
 
 import pytest
+from click.testing import CliRunner
 
 from mcp_plex import loader
 from qdrant_client import models
@@ -150,3 +151,42 @@ def test_run_ensures_collection_before_loading(monkeypatch):
 
     assert order and order[0] == "ensure"
     assert "execute" in order
+
+
+def test_main_accepts_log_level(monkeypatch, tmp_path):
+    runner = CliRunner()
+    configured: dict[str, int] = {}
+
+    def fake_basic_config(**kwargs):
+        configured["level"] = kwargs.get("level")
+
+    def fake_asyncio_run(coro):
+        coro.close()
+        return None
+
+    monkeypatch.setattr(loader.logging, "basicConfig", fake_basic_config)
+    monkeypatch.setattr(loader.asyncio, "run", fake_asyncio_run)
+
+    sample_dir = tmp_path / "samples"
+    sample_dir.mkdir()
+
+    result = runner.invoke(
+        loader.main,
+        [
+            "--plex-url",
+            "http://example.com",
+            "--plex-token",
+            "token",
+            "--tmdb-api-key",
+            "key",
+            "--qdrant-url",
+            "http://qdrant",
+            "--sample-dir",
+            str(sample_dir),
+            "--log-level",
+            "debug",
+        ],
+    )
+
+    assert result.exit_code == 0
+    assert configured.get("level") == logging.DEBUG

@@ -42,7 +42,6 @@ from ..common.types import (
 
 PlexPartialObject = _PlexPartialObject
 
-logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
 
 warnings.filterwarnings(
@@ -1002,6 +1001,15 @@ async def run(
     required=False,
 )
 @click.option(
+    "--log-level",
+    envvar="LOG_LEVEL",
+    show_envvar=True,
+    type=click.Choice(["critical", "error", "warning", "info", "debug", "notset"], case_sensitive=False),
+    default="info",
+    show_default=True,
+    help="Logging level for console output",
+)
+@click.option(
     "--delay",
     type=float,
     default=300.0,
@@ -1088,8 +1096,11 @@ def main(
     imdb_requests_per_window: Optional[int],
     imdb_window_seconds: float,
     imdb_queue: Path,
+    log_level: str,
 ) -> None:
     """Entry-point for the ``load-data`` script."""
+
+    logging.basicConfig(level=getattr(logging, log_level.upper(), logging.INFO))
 
     asyncio.run(
         load_media(
