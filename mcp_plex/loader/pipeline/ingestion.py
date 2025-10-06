@@ -9,7 +9,7 @@ from __future__ import annotations
 
 import asyncio
 import logging
-from typing import Sequence
+from typing import TYPE_CHECKING, Sequence
 
 from ...common.types import AggregatedItem
 from .channels import (
@@ -20,6 +20,16 @@ from .channels import (
     chunk_sequence,
 )
 
+if TYPE_CHECKING:  # pragma: no cover - imported for typing
+    from plexapi.server import PlexServer
+    from plexapi.video import Episode, Movie, Season, Show
+else:  # pragma: no cover - runtime import with graceful fallback
+    try:
+        from plexapi.server import PlexServer
+        from plexapi.video import Episode, Movie, Season, Show
+    except Exception:  # pragma: no cover - plexapi optional at runtime
+        PlexServer = Movie = Show = Season = Episode = object  # type: ignore[assignment]
+
 
 class IngestionStage:
     """Coordinate ingesting items from Plex or bundled sample data."""
@@ -27,7 +37,7 @@ class IngestionStage:
     def __init__(
         self,
         *,
-        plex_server: object | None,
+        plex_server: PlexServer | None,
         sample_items: Sequence[AggregatedItem] | None,
         movie_batch_size: int,
         episode_batch_size: int,
@@ -145,7 +155,7 @@ class IngestionStage:
     async def _ingest_plex(
         self,
         *,
-        plex_server: object,
+        plex_server: PlexServer,
         movie_batch_size: int,
         episode_batch_size: int,
         output_queue: IngestQueue,
@@ -153,9 +163,10 @@ class IngestionStage:
     ) -> None:
         """Retrieve Plex media and place batches onto *output_queue*."""
 
-        movies_attr = getattr(plex_server, "movies", [])
-        movies_source = movies_attr() if callable(movies_attr) else movies_attr
-        movies = list(movies_source)
+        library = plex_server.library
+
+        movies_section = library.section("Movies")
+        movies: list[Movie] = list(movies_section.all())
         logger.info(
             "Discovered %d Plex movie(s) for ingestion.",
             len(movies),
@@ -180,9 +191,8 @@ class IngestionStage:
                 self._items_ingested,
             )
 
-        shows_attr = getattr(plex_server, "shows", [])
-        shows_source = shows_attr() if callable(shows_attr) else shows_attr
-        shows = list(shows_source)
+        shows_section = library.section("TV Shows")
+        shows: list[Show] = list(shows_section.all())
         logger.info(
             "Discovered %d Plex show(s) for ingestion.",
             len(shows),
@@ -191,11 +201,10 @@ class IngestionStage:
         episode_total = 0
         for show in shows:
             show_title = getattr(show, "title", str(show))
-            episodes_attr = getattr(show, "episodes", [])
-            episodes_source = (
-                episodes_attr() if callable(episodes_attr) else episodes_attr
-            )
-            episodes = list(episodes_source)
+            seasons: list[Season] = list(show.seasons())
+            episodes: list[Episode] = []
+            for season in seasons:
+                episodes.extend(season.episodes())
             if not episodes:
                 logger.debug("Show %s yielded no episodes for ingestion.", show_title)
             for batch_index, chunk in enumerate(

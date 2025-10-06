@@ -17,8 +17,10 @@ from ...common.validation import require_positive
 
 try:  # Only import plexapi when available; the sample data mode does not require it.
     from plexapi.base import PlexPartialObject
+    from plexapi.video import Episode, Movie, Show
 except Exception:
     PlexPartialObject = object  # type: ignore[assignment]
+    Episode = Movie = Show = PlexPartialObject  # type: ignore[assignment]
 
 T = TypeVar("T")
 
@@ -46,15 +48,15 @@ else:  # pragma: no cover - runtime fallback for typing-only alias
 class MovieBatch:
     """Batch of Plex movie items pending metadata enrichment."""
 
-    movies: list["PlexPartialObject"]
+    movies: list["Movie"]
 
 
 @dataclass(slots=True)
 class EpisodeBatch:
     """Batch of Plex episodes along with their parent show."""
 
-    show: "PlexPartialObject"
-    episodes: list["PlexPartialObject"]
+    show: "Show"
+    episodes: list["Episode"]
 
 
 @dataclass(slots=True)
