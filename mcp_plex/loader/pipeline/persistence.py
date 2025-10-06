@@ -164,6 +164,12 @@ class PersistenceStage:
         if not points:
             return
 
+        total_points = len(points)
+        self._logger.info(
+            "Received %d point(s) for persistence; chunking with buffer size=%d.",
+            total_points,
+            self._upsert_buffer_size,
+        )
         for chunk in chunk_sequence(list(points), self._upsert_buffer_size):
             batch = list(chunk)
             if not batch:
@@ -174,10 +180,21 @@ class PersistenceStage:
             except BaseException:
                 self._upsert_semaphore.release()
                 raise
+            else:
+                self._logger.debug(
+                    "Queued persistence batch with %d point(s) (queue size=%d).",
+                    len(batch),
+                    self._persistence_queue.qsize(),
+                )
 
     async def run(self, worker_id: int) -> None:
         """Drain the persistence queue until a sentinel is received."""
 
+        self._logger.info(
+            "Starting persistence worker %d (buffer size=%d).",
+            worker_id,
+            self._upsert_buffer_size,
+        )
         while True:
             payload = await self._persistence_queue.get()
             try:

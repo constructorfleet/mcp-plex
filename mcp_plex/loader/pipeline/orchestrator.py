@@ -58,6 +58,10 @@ class LoaderOrchestrator:
     async def run(self) -> None:
         """Execute the configured pipeline stages concurrently."""
 
+        self._logger.info(
+            "Launching loader orchestrator with %d persistence worker(s).",
+            self._persistence_worker_count,
+        )
         try:
             async with asyncio.TaskGroup() as group:
                 group.create_task(
@@ -87,6 +91,8 @@ class LoaderOrchestrator:
             # Re-raise the first underlying error after cleanup so callers see the
             # original exception rather than the wrapper.
             raise failures[0].error
+        else:
+            self._logger.info("Loader orchestrator run completed successfully.")
 
     async def _run_stage(
         self,
@@ -96,14 +102,22 @@ class LoaderOrchestrator:
     ) -> None:
         """Execute *runner* and wrap unexpected exceptions with stage metadata."""
 
+        stage_name = self._describe_stage(spec)
+        self._logger.info("Starting %s.", stage_name)
         try:
             result = runner(*args)
             if inspect.isawaitable(result):
                 await result
         except asyncio.CancelledError:
+            self._logger.debug("%s cancelled.", stage_name)
             raise
         except BaseException as exc:
+            self._logger.debug(
+                "%s raised %s", stage_name, exc, exc_info=exc
+            )
             raise _StageFailure(spec, exc) from exc
+        else:
+            self._logger.info("%s completed successfully.", stage_name)
 
     async def _handle_failures(self, failures: list[_StageFailure]) -> None:
         """Log stage-specific failures and drain queues during cancellation."""

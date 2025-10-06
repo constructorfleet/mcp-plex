@@ -34,9 +34,13 @@ def test_run_logs_upsert(monkeypatch, caplog):
     with caplog.at_level(logging.INFO):
         asyncio.run(loader.run(None, None, None, sample_dir, None, None))
     assert "Starting staged loader (sample mode)" in caplog.text
+    assert "Launching loader orchestrator" in caplog.text
+    assert "Starting ingestion stage (sample mode)" in caplog.text
     assert "Upsert worker 0 handling 2 points" in caplog.text
     assert "Upsert worker 0 processed 2 items" in caplog.text
     assert "Loaded 2 items" in caplog.text
+    assert "Ingestion stage finished" in caplog.text
+    assert "Loader orchestrator run completed successfully" in caplog.text
 
 
 def test_run_logs_no_points(monkeypatch, caplog):
@@ -47,6 +51,7 @@ def test_run_logs_no_points(monkeypatch, caplog):
         asyncio.run(loader.run(None, None, None, sample_dir, None, None))
     assert "Loaded 0 items" in caplog.text
     assert "No points to upsert" in caplog.text
+    assert "Ingestion stage finished" in caplog.text
 
 
 def test_run_rejects_invalid_upsert_buffer_size(monkeypatch):
