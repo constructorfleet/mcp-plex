@@ -1595,7 +1595,7 @@ async def run(
             raise RuntimeError("TMDB_API_KEY must be provided")
         logger.info("Loading data from Plex server %s", plex_url)
         server = PlexServer(plex_url, plex_token)
-        pipeline = LegacyLoaderPipeline(
+        orchestrator, items, qdrant_retry_queue = _build_loader_orchestrator(
             client=client,
             collection_name=collection_name,
             dense_model_name=dense_model_name,
@@ -1609,10 +1609,8 @@ async def run(
             upsert_buffer_size=upsert_buffer_size,
             max_concurrent_upserts=_qdrant_max_concurrent_upserts,
         )
-
-        await pipeline.execute()
-        items = pipeline.items
-        qdrant_retry_queue = pipeline.qdrant_retry_queue
+        logger.info("Starting staged loader (Plex mode)")
+        await orchestrator.run()
     logger.info("Loaded %d items", len(items))
     if not items:
         logger.info("No points to upsert")
