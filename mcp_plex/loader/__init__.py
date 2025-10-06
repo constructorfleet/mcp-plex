@@ -28,14 +28,6 @@ from .pipeline.channels import (
     chunk_sequence,
     require_positive,
 )
-from .pipeline.enrichment import (
-    _build_plex_item as _build_plex_item,
-    _extract_external_ids as _extract_external_ids,
-    _fetch_tmdb_episode as _fetch_tmdb_episode,
-    _fetch_tmdb_movie as _fetch_tmdb_movie,
-    _fetch_tmdb_show as _fetch_tmdb_show,
-    resolve_tmdb_season_number as resolve_tmdb_season_number,
-)
 from .pipeline.orchestrator import LoaderOrchestrator
 from .pipeline.persistence import PersistenceStage as _PersistenceStage
 from ..common.types import (
