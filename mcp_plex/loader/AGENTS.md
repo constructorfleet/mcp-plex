@@ -19,7 +19,7 @@
 - `mcp_plex/loader/pipeline/channels.py` defines the queue type aliases and sentinel tokens (`INGEST_DONE`, `PERSIST_DONE`) shared by the stages.
 
 ## Loader CLI expectations
-- `mcp_plex/loader/__init__.py` still contains the legacy `LoaderPipeline` implementation for reference.  New work should instantiate the staged classes directly and coordinate them with `LoaderOrchestrator`.
+- `mcp_plex/loader/__init__.py` exposes helpers for wiring the staged loader pipeline. New work should instantiate the stages directly and coordinate them with `LoaderOrchestrator`.
 - When constructing stages from the CLI:
   - `IngestionStage` must receive the Plex server (or `None` for sample mode), the list of sample items, the Plex chunk size for both movies and episodes, the enrichment batch size for sample batches, the ingest queue instance, and the `INGEST_DONE` sentinel.
   - `EnrichmentStage` requires a factory that returns an `httpx.AsyncClient` (or context manager), the TMDb API key (empty string when unused in sample mode), the ingest queue, the persistence queue, the shared `IMDbRetryQueue`, the enrichment batch size for movies and episodes, and the IMDb configuration derived from CLI flags.
