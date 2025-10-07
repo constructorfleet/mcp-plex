@@ -23,6 +23,7 @@ from .channels import (
     enqueue_nowait,
 )
 
+from plexapi.library import LibrarySection
 from plexapi.server import PlexServer
 from plexapi.video import Episode, Movie, Season, Show
 
@@ -171,12 +172,9 @@ class IngestionStage:
         library = plex_server.library
 
         def _log_discovered_count(
-            *, section: object, descriptor: str
+            *, section: LibrarySection, descriptor: str
         ) -> int | None:
-            try:
-                total = getattr(section, "totalSize")  # type: ignore[assignment]
-            except Exception:  # pragma: no cover - defensive guard
-                total = None
+            total = getattr(section, "totalSize", None)
             if isinstance(total, int):
                 logger.info(
                     "Discovered %d Plex %s(s) for ingestion.",

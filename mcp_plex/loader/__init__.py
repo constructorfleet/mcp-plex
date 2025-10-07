@@ -9,7 +9,7 @@ import time
 import warnings
 from dataclasses import dataclass, field
 from pathlib import Path
-from typing import Any, List, Optional, Sequence, TypeVar
+from typing import TYPE_CHECKING, Sequence, TypedDict, TypeVar
 
 import click
 import httpx
@@ -19,7 +19,7 @@ from qdrant_client.async_qdrant_client import AsyncQdrantClient
 from plexapi.base import PlexPartialObject as _PlexPartialObject
 from plexapi.server import PlexServer
 
-from .imdb_cache import IMDbCache
+from .imdb_cache import IMDbCache, JSONValue
 from .pipeline.channels import (
     IMDbRetryQueue,
     INGEST_DONE,
@@ -50,6 +50,10 @@ warnings.filterwarnings(
     category=RuntimeWarning,
 )
 
+if TYPE_CHECKING:  # pragma: no cover - import for typing only
+    from .pipeline.enrichment import _RequestThrottler
+
+
 T = TypeVar("T")
 
 IMDB_BATCH_LIMIT: int = 5
@@ -70,9 +74,9 @@ class IMDbRuntimeConfig:
     retry_queue: IMDbRetryQueue
     requests_per_window: int | None
     window_seconds: float
-    _throttle: Any = field(default=None, init=False, repr=False)
+    _throttle: _RequestThrottler | None = field(default=None, init=False, repr=False)
 
-    def get_throttle(self) -> Any:
+    def get_throttle(self) -> _RequestThrottler | None:
         """Return the shared rate limiter, creating it on first use."""
 
         if self.requests_per_window is None:
@@ -132,7 +136,7 @@ async def _fetch_imdb(
     client: httpx.AsyncClient,
     imdb_id: str,
     config: IMDbRuntimeConfig,
-) -> Optional[IMDbTitle]:
+) -> IMDbTitle | None:
     """Fetch metadata for an IMDb ID with caching, retry, and throttling."""
 
     from .pipeline import enrichment as enrichment_mod
@@ -390,10 +394,35 @@ def _build_point_text(item: AggregatedItem) -> str:
     return "\n".join(p for p in parts if p)
 
 
-def _build_point_payload(item: AggregatedItem) -> dict[str, object]:
+class _BaseQdrantPayload(TypedDict):
+    data: dict[str, JSONValue]
+    title: str
+    type: str
+
+
+class QdrantPayload(_BaseQdrantPayload, total=False):
+    show_title: str
+    season_title: str
+    season_number: int
+    episode_number: int
+    actors: list[str]
+    directors: list[str]
+    writers: list[str]
+    genres: list[str]
+    collections: list[str]
+    summary: str
+    overview: str
+    plot: str
+    tagline: str
+    reviews: list[str]
+    year: int
+    added_at: int
+
+
+def _build_point_payload(item: AggregatedItem) -> QdrantPayload:
     """Construct the Qdrant payload for ``item``."""
 
-    payload: dict[str, object] = {
+    payload: QdrantPayload = {
         "data": item.model_dump(mode="json"),
         "title": item.plex.title,
         "type": item.plex.type,
@@ -470,10 +499,10 @@ def build_point(
     )
 
 
-def _load_from_sample(sample_dir: Path) -> List[AggregatedItem]:
+def _load_from_sample(sample_dir: Path) -> list[AggregatedItem]:
     """Load items from local sample JSON files."""
 
-    results: List[AggregatedItem] = []
+    results: list[AggregatedItem] = []
     movie_dir = sample_dir / "movie"
     episode_dir = sample_dir / "episode"
 
@@ -713,13 +742,13 @@ def _build_loader_orchestrator(
 
 
 async def run(
-    plex_url: Optional[str],
-    plex_token: Optional[str],
-    tmdb_api_key: Optional[str],
-    sample_dir: Optional[Path],
-    qdrant_url: Optional[str],
-    qdrant_api_key: Optional[str],
-    qdrant_host: Optional[str] = None,
+    plex_url: str | None,
+    plex_token: str | None,
+    tmdb_api_key: str | None,
+    sample_dir: Path | None,
+    qdrant_url: str | None,
+    qdrant_api_key: str | None,
+    qdrant_host: str | None = None,
     qdrant_port: int = 6333,
     qdrant_grpc_port: int = 6334,
     qdrant_https: bool = False,
@@ -799,7 +828,7 @@ async def run(
         dense_distance=dense_distance,
     )
 
-    items: List[AggregatedItem]
+    items: list[AggregatedItem]
     if sample_dir is not None:
         logger.info("Loading sample data from %s", sample_dir)
         sample_items = _load_from_sample(sample_dir)
@@ -1087,13 +1116,13 @@ async def run(
     help="Path to persistent IMDb retry queue",
 )
 def main(
-    plex_url: Optional[str],
-    plex_token: Optional[str],
-    tmdb_api_key: Optional[str],
-    sample_dir: Optional[Path],
-    qdrant_url: Optional[str],
-    qdrant_api_key: Optional[str],
-    qdrant_host: Optional[str],
+    plex_url: str | None,
+    plex_token: str | None,
+    tmdb_api_key: str | None,
+    sample_dir: Path | None,
+    qdrant_url: str | None,
+    qdrant_api_key: str | None,
+    qdrant_host: str | None,
     qdrant_port: int,
     qdrant_grpc_port: int,
     qdrant_https: bool,
@@ -1109,7 +1138,7 @@ def main(
     imdb_cache: Path,
     imdb_max_retries: int,
     imdb_backoff: float,
-    imdb_requests_per_window: Optional[int],
+    imdb_requests_per_window: int | None,
     imdb_window_seconds: float,
     imdb_queue: Path,
     log_level: str,
@@ -1150,13 +1179,13 @@ def main(
 
 
 async def load_media(
-    plex_url: Optional[str],
-    plex_token: Optional[str],
-    tmdb_api_key: Optional[str],
-    sample_dir: Optional[Path],
-    qdrant_url: Optional[str],
-    qdrant_api_key: Optional[str],
-    qdrant_host: Optional[str],
+    plex_url: str | None,
+    plex_token: str | None,
+    tmdb_api_key: str | None,
+    sample_dir: Path | None,
+    qdrant_url: str | None,
+    qdrant_api_key: str | None,
+    qdrant_host: str | None,
     qdrant_port: int,
     qdrant_grpc_port: int,
     qdrant_https: bool,
@@ -1168,7 +1197,7 @@ async def load_media(
     imdb_cache: Path,
     imdb_max_retries: int,
     imdb_backoff: float,
-    imdb_requests_per_window: Optional[int],
+    imdb_requests_per_window: int | None,
     imdb_window_seconds: float,
     imdb_queue: Path,
     upsert_buffer_size: int,

@@ -6,7 +6,7 @@ import asyncio
 import inspect
 import logging
 from dataclasses import dataclass
-from typing import Awaitable, Callable
+from typing import Awaitable, Callable, Protocol
 
 from .channels import IngestQueue, PersistenceQueue
 
@@ -30,15 +30,30 @@ class _StageFailure(Exception):
         self.error = error
 
 
+class IngestionStageProtocol(Protocol):
+    async def run(self) -> None:
+        ...
+
+
+class EnrichmentStageProtocol(Protocol):
+    async def run(self) -> None:
+        ...
+
+
+class PersistenceStageProtocol(Protocol):
+    async def run(self, worker_id: int) -> None:
+        ...
+
+
 class LoaderOrchestrator:
     """Run the ingestion, enrichment, and persistence stages with supervision."""
 
     def __init__(
         self,
         *,
-        ingestion_stage: object,
-        enrichment_stage: object,
-        persistence_stage: object,
+        ingestion_stage: IngestionStageProtocol,
+        enrichment_stage: EnrichmentStageProtocol,
+        persistence_stage: PersistenceStageProtocol,
         ingest_queue: IngestQueue,
         persistence_queue: PersistenceQueue,
         persistence_worker_count: int = 1,
@@ -162,7 +177,7 @@ class LoaderOrchestrator:
         # the stage-specific tests which verify cancellation side-effects.
         await asyncio.sleep(0)
 
-    def _drain_queue(self, queue: asyncio.Queue[object]) -> int:
+    def _drain_queue(self, queue: IngestQueue | PersistenceQueue) -> int:
         """Remove any queued items so cancellation does not leave stale work."""
 
         drained = 0

@@ -12,7 +12,6 @@ from collections import deque
 from dataclasses import dataclass
 from typing import (
     TYPE_CHECKING,
-    Any,
     Final,
     Iterable,
     Literal,
@@ -46,8 +45,8 @@ PersistenceSentinel: TypeAlias = Literal[PERSIST_DONE]
 
 if TYPE_CHECKING:
     PersistencePayload: TypeAlias = list[models.PointStruct]
-else:  # pragma: no cover - runtime fallback for typing-only alias
-    PersistencePayload: TypeAlias = list[Any]
+
+PersistencePayload: TypeAlias = list["models.PointStruct"]
 
 
 @dataclass(slots=True)
