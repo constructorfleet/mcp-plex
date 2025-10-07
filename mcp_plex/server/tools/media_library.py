@@ -344,10 +344,13 @@ def register_media_library_tools(server: "PlexServer") -> None:
             Field(description="Match a TMDb identifier", examples=[568467]),
         ] = None,
         similar_to: Annotated[
-            str | Sequence[str] | None,
+            str | int | Sequence[str | int] | None,
             Field(
-                description="Recommend candidates similar to these identifiers",
-                examples=[["49915"], "tt8367814"],
+                description=(
+                    "Recommend candidates similar to Plex rating keys, "
+                    "IMDb/TMDb identifiers, or titles"
+                ),
+                examples=[[49915], "tt8367814", 568467, "The Gentlemen"],
             ),
         ] = None,
         limit: Annotated[
@@ -372,12 +375,21 @@ def register_media_library_tools(server: "PlexServer") -> None:
     ) -> MediaSummaryResponse | list[AggregatedMediaItem]:
         """Run a structured query against indexed payload fields and optional vector searches."""
 
-        def _listify(value: Sequence[str] | str | None) -> list[str]:
+        def _listify(
+            value: Sequence[str | int] | str | int | None,
+        ) -> list[str]:
             if value is None:
                 return []
-            if isinstance(value, str):
-                return [value]
-            return [v for v in value if isinstance(v, str) and v]
+            if isinstance(value, (str, int)):
+                text = str(value).strip()
+                return [text] if text else []
+            items: list[str] = []
+            for entry in value:
+                if isinstance(entry, (str, int)):
+                    text = str(entry).strip()
+                    if text:
+                        items.append(text)
+            return items
 
         def _finalize(
             items: list[AggregatedMediaItem],

@@ -181,6 +181,21 @@ def test_server_tools(monkeypatch):
             if isinstance(item.get("plex"), dict)
         } >= {"61960"}
 
+        similar_structured_int = asyncio.run(
+            server.query_media.fn(
+                similar_to=49915,
+                type="episode",
+                limit=3,
+                summarize_for_llm=False,
+            )
+        )
+        assert similar_structured_int
+        assert {
+            item["plex"]["rating_key"]
+            for item in similar_structured_int
+            if isinstance(item.get("plex"), dict)
+        } >= {"61960"}
+
         assert (
             asyncio.run(
                 server.query_media.fn(
