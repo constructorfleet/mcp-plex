@@ -10,6 +10,7 @@ import logging
 import os
 import uuid
 from typing import Annotated, Any, Callable, Mapping, Sequence, cast
+from typing import NotRequired, TypedDict
 
 from fastapi import FastAPI
 from fastapi.openapi.docs import get_swagger_ui_html
@@ -19,6 +20,7 @@ from fastmcp.server import FastMCP
 from fastmcp.server.context import Context as FastMCPContext
 from plexapi.exceptions import PlexApiException
 from plexapi.server import PlexServer as PlexServerClient
+from plexapi.client import PlexClient
 from pydantic import BaseModel, Field, create_model
 from qdrant_client import models
 from qdrant_client.async_qdrant_client import AsyncQdrantClient
@@ -30,6 +32,114 @@ from rapidfuzz import fuzz, process
 from ..common.cache import MediaCache
 from ..common.types import JSONValue
 from .config import Settings
+
+
+class PlexTag(TypedDict, total=False):
+    """Representation of a Plex tag entry (actor, director, etc.)."""
+
+    tag: NotRequired[str]
+    name: NotRequired[str]
+
+
+PersonEntry = str | PlexTag
+
+
+class ExternalIds(TypedDict, total=False):
+    """External identifier payload for indexed media."""
+
+    id: NotRequired[str | int | None]
+
+
+class PlexMediaMetadata(TypedDict, total=False):
+    """Subset of Plex metadata stored in Qdrant payloads."""
+
+    rating_key: NotRequired[str]
+    guid: NotRequired[str]
+    title: NotRequired[str]
+    type: NotRequired[str]
+    thumb: NotRequired[str]
+    art: NotRequired[str]
+    summary: NotRequired[str]
+    tagline: NotRequired[str | list[str]]
+    added_at: NotRequired[int]
+    year: NotRequired[int]
+    directors: NotRequired[list[PersonEntry]]
+    writers: NotRequired[list[PersonEntry]]
+    actors: NotRequired[list[PersonEntry]]
+    grandparent_title: NotRequired[str]
+    parent_title: NotRequired[str]
+    index: NotRequired[int]
+    parent_index: NotRequired[int]
+    grandparent_thumb: NotRequired[str]
+    original_title: NotRequired[str]
+
+
+class AggregatedMediaItem(TypedDict, total=False):
+    """Flattened media payload combining Plex and external data."""
+
+    title: NotRequired[str]
+    summary: NotRequired[str]
+    type: NotRequired[str]
+    year: NotRequired[int]
+    added_at: NotRequired[int]
+    show_title: NotRequired[str]
+    season_number: NotRequired[int]
+    episode_number: NotRequired[int]
+    tagline: NotRequired[str | list[str]]
+    reviews: NotRequired[list[str]]
+    overview: NotRequired[str]
+    plot: NotRequired[str]
+    genres: NotRequired[list[str]]
+    collections: NotRequired[list[str]]
+    actors: NotRequired[list[PersonEntry]]
+    directors: NotRequired[list[PersonEntry]]
+    writers: NotRequired[list[PersonEntry]]
+    imdb: NotRequired[ExternalIds]
+    tmdb: NotRequired[ExternalIds]
+    tvdb: NotRequired[ExternalIds]
+    plex: NotRequired[PlexMediaMetadata]
+
+
+class QdrantMediaPayload(TypedDict, total=False):
+    """Raw payload stored within Qdrant records."""
+
+    data: NotRequired[AggregatedMediaItem]
+    title: NotRequired[str]
+    summary: NotRequired[str]
+    type: NotRequired[str]
+    year: NotRequired[int]
+    added_at: NotRequired[int]
+    show_title: NotRequired[str]
+    season_number: NotRequired[int]
+    episode_number: NotRequired[int]
+    tagline: NotRequired[str | list[str]]
+    reviews: NotRequired[list[str]]
+    overview: NotRequired[str]
+    plot: NotRequired[str]
+    genres: NotRequired[list[str]]
+    collections: NotRequired[list[str]]
+    actors: NotRequired[list[PersonEntry]]
+    directors: NotRequired[list[PersonEntry]]
+    writers: NotRequired[list[PersonEntry]]
+    imdb: NotRequired[ExternalIds]
+    tmdb: NotRequired[ExternalIds]
+    tvdb: NotRequired[ExternalIds]
+    plex: NotRequired[PlexMediaMetadata]
+
+
+class PlexPlayerMetadata(TypedDict, total=False):
+    """Metadata describing a Plex player that can receive playback commands."""
+
+    name: NotRequired[str]
+    product: NotRequired[str]
+    display_name: str
+    friendly_names: list[str]
+    machine_identifier: NotRequired[str]
+    client_identifier: NotRequired[str]
+    address: NotRequired[str]
+    port: NotRequired[int]
+    provides: set[str]
+    client: NotRequired[PlexClient | None]
 
 
 logger = logging.getLogger(__name__)
@@ -205,27 +315,52 @@ async def _find_records(identifier: str, limit: int = 5) -> list[models.Record]:
     return points
 
 
-def _flatten_payload(payload: Mapping[str, JSONValue] | None) -> dict[str, JSONValue]:
+def _flatten_payload(payload: Mapping[str, JSONValue] | None) -> AggregatedMediaItem:
     """Merge top-level payload fields with the nested data block."""
 
     data: dict[str, JSONValue] = {}
     if not payload:
-        return data
-    base = payload.get("data")
+        return cast(AggregatedMediaItem, data)
+    payload_dict = cast(QdrantMediaPayload, payload)
+    base = payload_dict.get("data")
     if isinstance(base, dict):
         data.update(base)
-    for key, value in payload.items():
+    for key, value in payload_dict.items():
         if key == "data":
             continue
         data[key] = value
-    return data
+    return cast(AggregatedMediaItem, data)
 
 
-async def _get_media_data(identifier: str) -> dict[str, JSONValue]:
+def _normalize_identifier(value: JSONValue) -> str | None:
+    """Convert mixed identifier formats into a normalized string."""
+
+    if value is None:
+        return None
+    if isinstance(value, str):
+        normalized = value.strip()
+        return normalized or None
+    try:
+        normalized_value = str(value)
+    except Exception:
+        return None
+    return normalized_value.strip() or None
+
+
+def _extract_plex_metadata(media: AggregatedMediaItem) -> PlexMediaMetadata:
+    """Return Plex metadata block from an aggregated media item."""
+
+    plex_value = media.get("plex")
+    if isinstance(plex_value, dict):
+        return cast(PlexMediaMetadata, plex_value)
+    return cast(PlexMediaMetadata, {})
+
+
+async def _get_media_data(identifier: str) -> AggregatedMediaItem:
     """Return the first matching media record's payload."""
     cached = server.cache.get_payload(identifier)
     if cached is not None:
-        return cached
+        return cast(AggregatedMediaItem, cached)
     records = await _find_records(identifier, limit=1)
     if not records:
         raise ValueError("Media item not found")
@@ -234,50 +369,38 @@ async def _get_media_data(identifier: str) -> dict[str, JSONValue]:
     )
     data = payload
 
-    def _normalize_identifier(value: JSONValue) -> str | None:
-        if value is None:
-            return None
-        if isinstance(value, str):
-            normalized = value.strip()
-            return normalized or None
-        try:
-            return str(value)
-        except Exception:
-            return None
-
     cache_keys: set[str] = set()
 
     lookup_key = _normalize_identifier(identifier)
     if lookup_key:
         cache_keys.add(lookup_key)
 
-    plex_value = data.get("plex")
-    plex_data: dict[str, JSONValue] = (
-        plex_value if isinstance(plex_value, dict) else {}
-    )
-    rating_key = _normalize_identifier(plex_data.get("rating_key"))
+    plex_data = _extract_plex_metadata(data)
+    rating_key = _normalize_identifier(cast(JSONValue, plex_data.get("rating_key")))
     if rating_key:
         cache_keys.add(rating_key)
-    guid = _normalize_identifier(plex_data.get("guid"))
+    guid = _normalize_identifier(cast(JSONValue, plex_data.get("guid")))
     if guid:
         cache_keys.add(guid)
 
     for source_key in ("imdb", "tmdb", "tvdb"):
         source_value = data.get(source_key)
         if isinstance(source_value, dict):
-            source_id = _normalize_identifier(source_value.get("id"))
+            source_id = _normalize_identifier(
+                cast(JSONValue, source_value.get("id"))
+            )
             if source_id:
                 cache_keys.add(source_id)
 
     for cache_key in cache_keys:
-        server.cache.set_payload(cache_key, payload)
+        server.cache.set_payload(cache_key, cast(dict[str, JSONValue], payload))
 
     if rating_key:
         thumb = plex_data.get("thumb")
-        if thumb:
+        if isinstance(thumb, str) and thumb:
             server.cache.set_poster(rating_key, thumb)
         art = plex_data.get("art")
-        if art:
+        if isinstance(art, str) and art:
             server.cache.set_background(rating_key, art)
     return payload
 
@@ -317,7 +440,7 @@ async def _fetch_plex_identity() -> dict[str, Any]:
     return server._plex_identity
 
 
-async def _get_plex_players() -> list[dict[str, Any]]:
+async def _get_plex_players() -> list[PlexPlayerMetadata]:
     """Return Plex players available for playback commands."""
 
     plex_client = await _get_plex_client()
@@ -327,7 +450,7 @@ async def _get_plex_players() -> list[dict[str, Any]]:
 
     raw_clients = await asyncio.to_thread(_load_clients)
     aliases = server.settings.plex_player_aliases
-    players: list[dict[str, Any]] = []
+    players: list[PlexPlayerMetadata] = []
 
     for client in raw_clients:
         provides_raw = getattr(client, "provides", "")
@@ -345,7 +468,15 @@ async def _get_plex_players() -> list[dict[str, Any]]:
         machine_id = getattr(client, "machineIdentifier", None)
         client_id = getattr(client, "clientIdentifier", None)
         address = getattr(client, "address", None)
-        port = getattr(client, "port", None)
+        port_value = getattr(client, "port", None)
+        port: int | None
+        if isinstance(port_value, int):
+            port = port_value
+        else:
+            try:
+                port = int(port_value)
+            except (TypeError, ValueError):
+                port = None
         name = getattr(client, "title", None) or getattr(client, "name", None)
         product = getattr(client, "product", None) or getattr(client, "device", None)
 
@@ -373,20 +504,29 @@ async def _get_plex_players() -> list[dict[str, Any]]:
             or "Unknown player"
         )
 
-        players.append(
-            {
-                "name": name,
-                "product": product,
-                "display_name": display_name,
-                "friendly_names": friendly_names,
-                "machine_identifier": machine_id,
-                "client_identifier": client_id,
-                "address": address,
-                "port": port,
-                "provides": provides,
-                "client": client,
-            }
-        )
+        if display_name not in friendly_names:
+            friendly_names.append(display_name)
+
+        entry: PlexPlayerMetadata = {
+            "display_name": display_name,
+            "friendly_names": friendly_names,
+            "provides": provides,
+            "client": cast(PlexClient | None, client),
+        }
+        if name:
+            entry["name"] = str(name)
+        if product:
+            entry["product"] = str(product)
+        if machine_id:
+            entry["machine_identifier"] = str(machine_id)
+        if client_id:
+            entry["client_identifier"] = str(client_id)
+        if address:
+            entry["address"] = str(address)
+        if port is not None:
+            entry["port"] = port
+
+        players.append(entry)
 
     return players
 
@@ -394,7 +534,7 @@ async def _get_plex_players() -> list[dict[str, Any]]:
 _FUZZY_MATCH_THRESHOLD = 70
 
 
-def _match_player(query: str, players: Sequence[dict[str, Any]]) -> dict[str, Any]:
+def _match_player(query: str, players: Sequence[PlexPlayerMetadata]) -> PlexPlayerMetadata:
     """Locate a Plex player by friendly name or identifier."""
 
     normalized_query = query.strip()
@@ -402,7 +542,7 @@ def _match_player(query: str, players: Sequence[dict[str, Any]]) -> dict[str, An
     if not normalized_query:
         raise ValueError(f"Player '{query}' not found")
 
-    candidate_entries: list[tuple[str, str, dict[str, Any]]] = []
+    candidate_entries: list[tuple[str, str, PlexPlayerMetadata]] = []
     for player in players:
         candidate_strings = {
             player.get("display_name"),
@@ -448,11 +588,12 @@ def _match_player(query: str, players: Sequence[dict[str, Any]]) -> dict[str, An
 
 
 async def _start_playback(
-    rating_key: str, player: dict[str, Any], offset_seconds: int
+    rating_key: str, player: PlexPlayerMetadata, offset_seconds: int
 ) -> None:
     """Send a playback command to the selected player."""
 
-    if "player" not in player.get("provides", set()):
+    provides = player.get("provides", set())
+    if "player" not in provides:
         raise ValueError(
             f"Player '{player.get('display_name')}' cannot be controlled for playback"
         )
@@ -468,7 +609,7 @@ async def _start_playback(
 
     def _play() -> None:
         media = plex_server.fetchItem(f"/library/metadata/{rating_key}")
-        plex_client.playMedia(
+        cast(Any, plex_client).playMedia(
             media,
             offset=offset_ms,
             machineIdentifier=identity["machineIdentifier"],
@@ -511,18 +652,19 @@ async def play_media(
     """Play a media item on a specific Plex player."""
 
     media = await _get_media_data(identifier)
-    plex_info = media.get("plex") or {}
-    rating_key = plex_info.get("rating_key")
-    if not rating_key:
+    plex_info = _extract_plex_metadata(media)
+    rating_key_value = plex_info.get("rating_key")
+    rating_key_normalized = _normalize_identifier(cast(JSONValue, rating_key_value))
+    if not rating_key_normalized:
         raise ValueError("Media item is missing a Plex rating key")
 
     players = await _get_plex_players()
     target = _match_player(player, players)
-    await _start_playback(str(rating_key), target, offset_seconds or 0)
+    await _start_playback(rating_key_normalized, target, offset_seconds or 0)
 
     return {
         "player": target.get("display_name"),
-        "rating_key": str(rating_key),
+        "rating_key": rating_key_normalized,
         "title": plex_info.get("title") or media.get("title"),
         "offset_seconds": offset_seconds or 0,
     }
@@ -537,7 +679,7 @@ async def get_media(
             examples=["49915", "tt8367814", "The Gentlemen"],
         ),
     ]
-) -> list[dict[str, Any]]:
+) -> list[AggregatedMediaItem]:
     """Retrieve media items by rating key, IMDb/TMDb ID or title."""
     records = await _find_records(identifier, limit=10)
     return [
@@ -564,7 +706,7 @@ async def search_media(
             examples=[5],
         ),
     ] = 5,
-) -> list[dict[str, Any]]:
+) -> list[AggregatedMediaItem]:
     """Hybrid similarity search across media items using dense and sparse vectors."""
     dense_doc = models.Document(text=query, model=server.settings.dense_model)
     sparse_doc = models.Document(text=query, model=server.settings.sparse_model)
@@ -593,14 +735,17 @@ async def search_media(
 
     async def _prefetch(hit: models.ScoredPoint) -> None:
         data = _flatten_payload(cast(Mapping[str, JSONValue] | None, hit.payload))
-        rating_key = str(data.get("plex", {}).get("rating_key"))
+        plex_info = _extract_plex_metadata(data)
+        rating_key = _normalize_identifier(
+            cast(JSONValue, plex_info.get("rating_key"))
+        )
         if rating_key:
-            server.cache.set_payload(rating_key, data)
-            thumb = data.get("plex", {}).get("thumb")
-            if thumb:
+            server.cache.set_payload(rating_key, cast(dict[str, JSONValue], data))
+            thumb = plex_info.get("thumb")
+            if isinstance(thumb, str) and thumb:
                 server.cache.set_poster(rating_key, thumb)
-            art = data.get("plex", {}).get("art")
-            if art:
+            art = plex_info.get("art")
+            if isinstance(art, str) and art:
                 server.cache.set_background(rating_key, art)
 
     prefetch_task = asyncio.gather(*[_prefetch(h) for h in hits[:limit]])
@@ -613,16 +758,19 @@ async def search_media(
             data = _flatten_payload(
                 cast(Mapping[str, JSONValue] | None, h.payload)
             )
+            plex_info = _extract_plex_metadata(data)
+            tmdb_value = data.get("tmdb")
+            tmdb_data = tmdb_value if isinstance(tmdb_value, dict) else {}
             parts = [
                 data.get("title"),
                 data.get("summary"),
-                data.get("plex", {}).get("title"),
-                data.get("plex", {}).get("summary"),
-                data.get("tmdb", {}).get("overview"),
+                plex_info.get("title"),
+                plex_info.get("summary"),
+                tmdb_data.get("overview"),
             ]
-            directors = data.get("directors") or data.get("plex", {}).get("directors")
-            writers = data.get("writers") or data.get("plex", {}).get("writers")
-            actors = data.get("actors") or data.get("plex", {}).get("actors")
+            directors = data.get("directors") or plex_info.get("directors")
+            writers = data.get("writers") or plex_info.get("writers")
+            actors = data.get("actors") or plex_info.get("actors")
 
             def _join_people(values: Any) -> str:
                 if isinstance(values, list):
@@ -648,7 +796,7 @@ async def search_media(
                 parts.append(f"Written by {writer_names}")
             if actor_names:
                 parts.append(f"Starring {actor_names}")
-            tagline = data.get("tagline") or data.get("plex", {}).get("tagline")
+            tagline = data.get("tagline") or plex_info.get("tagline")
             if tagline:
                 parts.append(tagline if isinstance(tagline, str) else "\n".join(tagline))
             reviews = data.get("reviews")
@@ -794,7 +942,7 @@ async def query_media(
         int,
         Field(description="Maximum number of results to return", ge=1, le=50, examples=[5]),
     ] = 5,
-) -> list[dict[str, Any]]:
+) -> list[AggregatedMediaItem]:
     """Run a structured query against indexed payload fields and optional vector searches."""
 
     def _listify(value: Sequence[str] | str | None) -> list[str]:
@@ -1000,7 +1148,7 @@ async def recommend_media(
             examples=[5],
         ),
     ] = 5,
-) -> list[dict[str, Any]]:
+) -> list[AggregatedMediaItem]:
     """Recommend similar media items based on a reference identifier."""
     record = None
     records = await _find_records(identifier, limit=1)
@@ -1035,7 +1183,7 @@ async def new_movies(
             examples=[5],
         ),
     ] = 5,
-) -> list[dict[str, Any]]:
+) -> list[AggregatedMediaItem]:
     """Return the most recently added movies."""
     query = models.OrderByQuery(
         order_by=models.OrderBy(key="added_at", direction=models.Direction.DESC)
@@ -1071,7 +1219,7 @@ async def new_shows(
             examples=[5],
         ),
     ] = 5,
-) -> list[dict[str, Any]]:
+) -> list[AggregatedMediaItem]:
     """Return the most recently added TV episodes."""
     query = models.OrderByQuery(
         order_by=models.OrderBy(key="added_at", direction=models.Direction.DESC)
@@ -1122,7 +1270,7 @@ async def actor_movies(
         int | None,
         Field(description="Maximum release year", examples=[1999]),
     ] = None,
-) -> list[dict[str, Any]]:
+) -> list[AggregatedMediaItem]:
     """Return movies featuring the given actor, optionally filtered by release year."""
     must = [
         models.FieldCondition(key="type", match=models.MatchValue(value="movie")),
@@ -1179,11 +1327,16 @@ async def media_ids(
 ) -> str:
     """Return external identifiers for the given media item."""
     data = await _get_media_data(identifier)
+    plex_info = _extract_plex_metadata(data)
+    imdb_value = data.get("imdb")
+    imdb_data = imdb_value if isinstance(imdb_value, dict) else {}
+    tmdb_value = data.get("tmdb")
+    tmdb_data = tmdb_value if isinstance(tmdb_value, dict) else {}
     ids = {
-        "rating_key": data.get("plex", {}).get("rating_key"),
-        "imdb": data.get("imdb", {}).get("id"),
-        "tmdb": data.get("tmdb", {}).get("id"),
-        "title": data.get("plex", {}).get("title"),
+        "rating_key": plex_info.get("rating_key"),
+        "imdb": imdb_data.get("id"),
+        "tmdb": tmdb_data.get("id"),
+        "title": plex_info.get("title"),
     }
     return json.dumps(ids)
 
@@ -1203,13 +1356,15 @@ async def media_poster(
     if cached:
         return cached
     data = await _get_media_data(identifier)
-    thumb = data.get("plex", {}).get("thumb")
+    plex_info = _extract_plex_metadata(data)
+    thumb = plex_info.get("thumb")
     if not thumb:
         raise ValueError("Poster not available")
-    server.cache.set_poster(
-        str(data.get("plex", {}).get("rating_key")), thumb
-    )
-    return thumb
+    thumb_str = str(thumb)
+    rating_key = _normalize_identifier(cast(JSONValue, plex_info.get("rating_key")))
+    if rating_key:
+        server.cache.set_poster(rating_key, thumb_str)
+    return thumb_str
 
 
 @server.resource("resource://media-background/{identifier}")
@@ -1227,13 +1382,15 @@ async def media_background(
     if cached:
         return cached
     data = await _get_media_data(identifier)
-    art = data.get("plex", {}).get("art")
+    plex_info = _extract_plex_metadata(data)
+    art = plex_info.get("art")
     if not art:
         raise ValueError("Background not available")
-    server.cache.set_background(
-        str(data.get("plex", {}).get("rating_key")), art
-    )
-    return art
+    art_str = str(art)
+    rating_key = _normalize_identifier(cast(JSONValue, plex_info.get("rating_key")))
+    if rating_key:
+        server.cache.set_background(rating_key, art_str)
+    return art_str
 
 
 @server.prompt("media-info")
@@ -1248,8 +1405,9 @@ async def media_info(
 ) -> list[Message]:
     """Return a basic description for the given media identifier."""
     data = await _get_media_data(identifier)
-    title = data.get("title") or data.get("plex", {}).get("title", "")
-    summary = data.get("summary") or data.get("plex", {}).get("summary", "")
+    plex_info = _extract_plex_metadata(data)
+    title = data.get("title") or plex_info.get("title", "")
+    summary = data.get("summary") or plex_info.get("summary", "")
     return [Message(f"{title}: {summary}")]
 
 
