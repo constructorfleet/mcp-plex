@@ -27,8 +27,8 @@ def test_settings_player_aliases(monkeypatch):
     )
     settings = Settings()
     assert settings.plex_player_aliases == {
-        "machine-1": ["Living Room TV", "Living Room"],
-        "client-2": ["Bedroom"],
+        "machine-1": ("Living Room TV", "Living Room"),
+        "client-2": ("Bedroom",),
     }
 
 
@@ -36,3 +36,42 @@ def test_settings_invalid_aliases(monkeypatch):
     monkeypatch.setenv("PLEX_PLAYER_ALIASES", "not-json")
     with pytest.raises(SettingsError):
         Settings()
+
+
+def test_settings_aliases_from_mapping():
+    settings = Settings.model_validate(
+        {
+            "PLEX_PLAYER_ALIASES": {
+                "machine-1": [" Living Room ", "Living Room"],
+                "client-2": "Bedroom",
+            }
+        }
+    )
+    assert settings.plex_player_aliases == {
+        "machine-1": ("Living Room",),
+        "client-2": ("Bedroom",),
+    }
+
+
+def test_settings_aliases_from_sequence():
+    settings = Settings.model_validate(
+        {
+            "PLEX_PLAYER_ALIASES": [
+                ("machine-1", ("Living Room", "Living Room TV")),
+                {"client-2": ["Bedroom", None]},
+            ]
+        }
+    )
+    assert settings.plex_player_aliases == {
+        "machine-1": ("Living Room", "Living Room TV"),
+        "client-2": ("Bedroom",),
+    }
+
+
+def test_settings_invalid_alias_sequence():
+    with pytest.raises(ValidationError):
+        Settings.model_validate(
+            {
+                "PLEX_PLAYER_ALIASES": [("machine-1", "Living Room", "Extra")]
+            }
+        )

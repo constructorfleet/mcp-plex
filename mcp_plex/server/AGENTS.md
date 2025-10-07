@@ -7,3 +7,7 @@
 - The cross-encoder reranker is loaded lazily via a `PlexServer` property so models are only downloaded when reranking is enabled and available.
 - Media payload and artwork caching are centralized in a `MediaCache` attached to `PlexServer` for consistent cache management across endpoints.
 
+## API Guidelines
+- New FastMCP/FastAPI endpoints must declare typed request payload and response models instead of returning or accepting untyped dictionaries.
+- Introducing new `Any` or `object` annotations requires an inline comment that justifies the loosened typing and references the relevant design constraint.
+

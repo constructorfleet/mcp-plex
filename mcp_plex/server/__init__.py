@@ -32,7 +32,7 @@ from rapidfuzz import fuzz, process
 
 from ..common.cache import MediaCache
 from ..common.types import JSONValue
-from .config import Settings
+from .config import PlexPlayerAliasMap, Settings
 
 
 class PlexTag(TypedDict, total=False):
@@ -456,7 +456,7 @@ async def _get_plex_players() -> list[PlexPlayerMetadata]:
         return list(plex_client.clients())
 
     raw_clients = await asyncio.to_thread(_load_clients)
-    aliases = server.settings.plex_player_aliases
+    aliases: PlexPlayerAliasMap = server.settings.plex_player_aliases
     players: list[PlexPlayerMetadata] = []
 
     for client in raw_clients:
