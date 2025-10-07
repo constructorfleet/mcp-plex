@@ -9,7 +9,8 @@ import json
 import logging
 import os
 import uuid
-from typing import Annotated, Any, Callable, Mapping, Sequence, cast
+from collections.abc import Callable, Mapping, Sequence
+from typing import Annotated, Any, ForwardRef, TypedDict, cast
 
 from fastapi import FastAPI
 from fastapi.openapi.docs import get_swagger_ui_html
@@ -138,19 +139,19 @@ class PlexServer(FastMCP):
 server = PlexServer(settings=settings)
 
 
-def _request_model(name: str, fn: Callable[..., Any]) -> type[BaseModel] | None:
+def _request_model(name: str, fn: Callable[..., object]) -> type[BaseModel] | None:
     """Generate a Pydantic model representing the callable's parameters."""
 
     signature = inspect.signature(fn)
     if not signature.parameters:
         return None
 
-    fields: dict[str, tuple[Any, Any]] = {}
+    fields: dict[str, tuple[object, object]] = {}
     for param_name, parameter in signature.parameters.items():
         annotation = (
             parameter.annotation
             if parameter.annotation is not inspect._empty
-            else Any
+            else object
         )
         default = (
             parameter.default
@@ -166,6 +167,18 @@ def _request_model(name: str, fn: Callable[..., Any]) -> type[BaseModel] | None:
     model_name = f"{model_name or 'Request'}Request"
     request_model = create_model(model_name, **fields)  # type: ignore[arg-type]
     return request_model
+
+
+def _sanitize_return_annotation(annotation: object) -> object:
+    """Return a return annotation safe for FastAPI schema generation."""
+
+    if annotation is inspect.Signature.empty:
+        return inspect.Signature.empty
+    if isinstance(annotation, str):
+        return inspect.Signature.empty
+    if isinstance(annotation, ForwardRef):
+        return inspect.Signature.empty
+    return annotation
 
 
 async def _find_records(identifier: str, limit: int = 5) -> list[models.Record]:
@@ -234,7 +247,7 @@ async def _get_media_data(identifier: str) -> dict[str, JSONValue]:
     )
     data = payload
 
-    def _normalize_identifier(value: JSONValue) -> str | None:
+    def _normalize_identifier(value: str | int | float | None) -> str | None:
         if value is None:
             return None
         if isinstance(value, str):
@@ -255,17 +268,26 @@ async def _get_media_data(identifier: str) -> dict[str, JSONValue]:
     plex_data: dict[str, JSONValue] = (
         plex_value if isinstance(plex_value, dict) else {}
     )
-    rating_key = _normalize_identifier(plex_data.get("rating_key"))
+    rating_value = plex_data.get("rating_key")
+    rating_key = _normalize_identifier(
+        rating_value if isinstance(rating_value, (str, int, float)) else None
+    )
     if rating_key:
         cache_keys.add(rating_key)
-    guid = _normalize_identifier(plex_data.get("guid"))
+    guid_value = plex_data.get("guid")
+    guid = _normalize_identifier(guid_value if isinstance(guid_value, str) else None)
     if guid:
         cache_keys.add(guid)
 
     for source_key in ("imdb", "tmdb", "tvdb"):
         source_value = data.get(source_key)
         if isinstance(source_value, dict):
-            source_id = _normalize_identifier(source_value.get("id"))
+            raw_source_id = source_value.get("id")
+            source_id = _normalize_identifier(
+                raw_source_id
+                if isinstance(raw_source_id, (str, int, float))
+                else None
+            )
             if source_id:
                 cache_keys.add(source_id)
 
@@ -1259,10 +1281,11 @@ async def rest_docs(request: Request) -> Response:
     return get_swagger_ui_html(openapi_url="/openapi.json", title="MCP REST API")
 
 
-def _build_openapi_schema() -> dict[str, Any]:
+def _build_openapi_schema() -> dict[str, object]:
     app = FastAPI()
     for name, tool in server._tool_manager._tools.items():
         request_model = _request_model(name, tool.fn)
+        tool_signature = inspect.signature(tool.fn)
 
         if request_model is None:
             app.post(f"/rest/{name}")(tool.fn)
@@ -1273,6 +1296,7 @@ def _build_openapi_schema() -> dict[str, Any]:
 
         _tool_stub.__name__ = f"tool_{name.replace('-', '_')}"
         _tool_stub.__doc__ = tool.fn.__doc__
+        tool_return = _sanitize_return_annotation(tool_signature.return_annotation)
         _tool_stub.__signature__ = inspect.Signature(
             parameters=[
                 inspect.Parameter(
@@ -1281,7 +1305,7 @@ def _build_openapi_schema() -> dict[str, Any]:
                     annotation=request_model,
                 )
             ],
-            return_annotation=Any,
+            return_annotation=tool_return,
         )
 
         app.post(f"/rest/{name}")(_tool_stub)
@@ -1291,11 +1315,13 @@ def _build_openapi_schema() -> dict[str, Any]:
         _p_stub.__name__ = f"prompt_{name.replace('-', '_')}"
         _p_stub.__doc__ = prompt.fn.__doc__
         request_model = _request_model(name, prompt.fn)
+        prompt_signature = inspect.signature(prompt.fn)
         if request_model is None:
-            _p_stub.__signature__ = inspect.signature(prompt.fn).replace(
-                return_annotation=Any
-            )
+            _p_stub.__signature__ = prompt_signature
         else:
+            prompt_return = _sanitize_return_annotation(
+                prompt_signature.return_annotation
+            )
             _p_stub.__signature__ = inspect.Signature(
                 parameters=[
                     inspect.Parameter(
@@ -1304,7 +1330,7 @@ def _build_openapi_schema() -> dict[str, Any]:
                         annotation=request_model,
                     )
                 ],
-                return_annotation=Any,
+                return_annotation=prompt_return,
             )
         app.post(f"/rest/prompt/{name}")(_p_stub)
     for uri, resource in server._resource_manager._templates.items():
@@ -1313,9 +1339,7 @@ def _build_openapi_schema() -> dict[str, Any]:
             pass
         _r_stub.__name__ = f"resource_{path.replace('/', '_').replace('{', '').replace('}', '')}"
         _r_stub.__doc__ = resource.fn.__doc__
-        _r_stub.__signature__ = inspect.signature(resource.fn).replace(
-            return_annotation=Any
-        )
+        _r_stub.__signature__ = inspect.signature(resource.fn)
         app.get(f"/rest/resource/{path}")(_r_stub)
     return get_openapi(title="MCP REST API", version="1.0.0", routes=app.routes)
 
@@ -1331,10 +1355,21 @@ async def openapi_json(request: Request) -> Response:  # noqa: ARG001
 
 
 def _register_rest_endpoints() -> None:
-    def _register(path: str, method: str, handler: Callable, fn: Callable, name: str) -> None:
+    def _register(
+        path: str,
+        method: str,
+        handler: Callable[..., object],
+        fn: Callable[..., object],
+        name: str,
+    ) -> None:
         handler.__name__ = name
         handler.__doc__ = fn.__doc__
-        handler.__signature__ = inspect.signature(fn).replace(return_annotation=Any)
+        original_signature = inspect.signature(fn)
+        handler.__signature__ = original_signature.replace(
+            return_annotation=_sanitize_return_annotation(
+                original_signature.return_annotation
+            )
+        )
         server.custom_route(path, methods=[method])(handler)
 
     for name, tool in server._tool_manager._tools.items():
@@ -1402,6 +1437,12 @@ def _register_rest_endpoints() -> None:
 _register_rest_endpoints()
 
 
+class RunConfig(TypedDict, total=False):
+    host: str
+    port: int
+    path: str
+
+
 def main(argv: list[str] | None = None) -> None:
     """CLI entrypoint for running the MCP server."""
     parser = argparse.ArgumentParser(description="Run the MCP server")
@@ -1458,16 +1499,18 @@ def main(argv: list[str] | None = None) -> None:
     if transport == "stdio" and mount:
         parser.error("--mount or MCP_MOUNT is not allowed when transport is stdio")
 
-    run_kwargs: dict[str, Any] = {}
+    run_config: RunConfig = {}
     if transport != "stdio":
-        run_kwargs.update({"host": host, "port": port})
+        assert host is not None
+        assert port is not None
+        run_config.update({"host": host, "port": port})
         if mount:
-            run_kwargs["path"] = mount
+            run_config["path"] = mount
 
     server.settings.dense_model = args.dense_model
     server.settings.sparse_model = args.sparse_model
 
-    server.run(transport=transport, **run_kwargs)
+    server.run(transport=transport, **run_config)
 
 
 if __name__ == "__main__":
