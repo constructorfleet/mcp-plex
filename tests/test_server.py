@@ -285,6 +285,25 @@ def test_play_media_with_alias(monkeypatch):
         assert play_call["kwargs"]["machineIdentifier"] == "server-001"
         assert play_call["kwargs"]["offset"] == 0
 
+        play_requests.clear()
+        fetch_requests.clear()
+
+        offset_seconds = 37
+        offset_result = asyncio.run(
+            server.play_media.fn(
+                identifier="49915", player="Living Room", offset_seconds=offset_seconds
+            )
+        )
+
+        assert offset_result["player"] == "Living Room"
+        assert offset_result["rating_key"] == "49915"
+        assert offset_result["offset_seconds"] == offset_seconds
+        assert fetch_requests == ["/library/metadata/49915"]
+        assert play_requests, "Expected plexapi playMedia call with offset"
+        offset_call = play_requests[0]
+        assert offset_call["kwargs"]["machineIdentifier"] == "server-001"
+        assert offset_call["kwargs"]["offset"] == offset_seconds * 1000
+
 
 def test_play_media_requires_player_capability(monkeypatch):
     monkeypatch.setenv("PLEX_URL", "http://plex.test:32400")
