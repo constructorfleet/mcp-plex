@@ -1,6 +1,6 @@
 import asyncio
 import logging
-from unittest.mock import Mock, create_autospec
+from unittest.mock import Mock, call, create_autospec
 
 import pytest
 from plexapi.server import PlexServer
@@ -178,28 +178,64 @@ def test_ingestion_stage_ingest_plex_batches_movies_and_episodes(caplog) -> None
             create_autospec(Movie, instance=True, title="Movie 2"),
             create_autospec(Movie, instance=True, title="Movie 3"),
         ]
-        movie_section.all.return_value = movies
+        movie_section.totalSize = len(movies)
+
+        def movie_search(*, container_start=None, container_size=None, **_kwargs):
+            start = container_start or 0
+            size = container_size or len(movies)
+            return movies[start : start + size]
+
+        movie_section.search.side_effect = movie_search
 
         def _episodes(titles: list[str]) -> list[Episode]:
             return [create_autospec(Episode, instance=True, title=title) for title in titles]
 
         show_a_season_1 = create_autospec(Season, instance=True)
-        show_a_season_1.episodes.return_value = _episodes(["S01E01", "S01E02"])
+        show_a_s1_eps = _episodes(["S01E01", "S01E02"])
+
+        def show_a_s1_side_effect(*, container_start=None, container_size=None, **_kwargs):
+            start = container_start or 0
+            size = container_size or len(show_a_s1_eps)
+            return show_a_s1_eps[start : start + size]
+
+        show_a_season_1.episodes.side_effect = show_a_s1_side_effect
+
         show_a_season_2 = create_autospec(Season, instance=True)
-        show_a_season_2.episodes.return_value = _episodes(["S01E03"])
+        show_a_s2_eps = _episodes(["S01E03"])
+
+        def show_a_s2_side_effect(*, container_start=None, container_size=None, **_kwargs):
+            start = container_start or 0
+            size = container_size or len(show_a_s2_eps)
+            return show_a_s2_eps[start : start + size]
+
+        show_a_season_2.episodes.side_effect = show_a_s2_side_effect
 
         show_a = create_autospec(Show, instance=True, title="Show A")
         show_a.seasons.return_value = [show_a_season_1, show_a_season_2]
 
         show_b_season_1 = create_autospec(Season, instance=True)
-        show_b_season_1.episodes.return_value = _episodes(["S01E01", "S01E02"])
+        show_b_s1_eps = _episodes(["S01E01", "S01E02"])
+
+        def show_b_s1_side_effect(*, container_start=None, container_size=None, **_kwargs):
+            start = container_start or 0
+            size = container_size or len(show_b_s1_eps)
+            return show_b_s1_eps[start : start + size]
+
+        show_b_season_1.episodes.side_effect = show_b_s1_side_effect
 
         show_b = create_autospec(Show, instance=True, title="Show B")
         show_b.seasons.return_value = [show_b_season_1]
 
         shows = [show_a, show_b]
         show_section = Mock()
-        show_section.all.return_value = shows
+        show_section.totalSize = len(shows)
+
+        def show_search(*, container_start=None, container_size=None, **_kwargs):
+            start = container_start or 0
+            size = container_size or len(shows)
+            return shows[start : start + size]
+
+        show_section.search.side_effect = show_search
 
         library = Mock()
         library.section.side_effect = lambda name: {
@@ -232,13 +268,52 @@ def test_ingestion_stage_ingest_plex_batches_movies_and_episodes(caplog) -> None
         while not queue.empty():
             batches.append(await queue.get())
 
-        return batches, stage.items_ingested, stage.batches_ingested, library
+        return (
+            batches,
+            stage.items_ingested,
+            stage.batches_ingested,
+            library,
+            movie_section,
+            show_section,
+            show_a_season_1,
+            show_a_season_2,
+            show_b_season_1,
+        )
 
-    batches, items_ingested, batches_ingested, library = asyncio.run(scenario())
+    (
+        batches,
+        items_ingested,
+        batches_ingested,
+        library,
+        movie_section,
+        show_section,
+        show_a_season_1,
+        show_a_season_2,
+        show_b_season_1,
+    ) = asyncio.run(scenario())
 
     assert library.section.call_args_list == [
         (("Movies",),),
         (("TV Shows",),),
+    ]
+    assert movie_section.search.call_args_list == [
+        call(container_start=0, container_size=2),
+        call(container_start=2, container_size=2),
+    ]
+    assert show_section.search.call_args_list == [
+        call(container_start=0, container_size=2),
+        call(container_start=2, container_size=2),
+    ]
+    assert show_a_season_1.episodes.call_args_list == [
+        call(container_start=0, container_size=2),
+        call(container_start=2, container_size=2),
+    ]
+    assert show_a_season_2.episodes.call_args_list == [
+        call(container_start=0, container_size=2),
+    ]
+    assert show_b_season_1.episodes.call_args_list == [
+        call(container_start=0, container_size=2),
+        call(container_start=2, container_size=2),
     ]
     assert items_ingested == 8
     assert batches_ingested == 5
@@ -271,3 +346,153 @@ def test_ingestion_stage_ingest_plex_batches_movies_and_episodes(caplog) -> None
             pytest.fail(f"Expected log message not found: {expected}")
     assert "Discovered 3 Plex movie(s) for ingestion." in caplog.messages
     assert "Discovered 2 Plex show(s) for ingestion." in caplog.messages
+
+
+def test_ingestion_stage_ingest_plex_large_library_batches(caplog) -> None:
+    caplog.set_level(logging.INFO)
+
+    async def scenario() -> tuple[
+        list[MovieBatch | EpisodeBatch],
+        int,
+        int,
+        list,
+        list,
+        list[list],
+    ]:
+        queue: asyncio.Queue = asyncio.Queue()
+
+        movie_batch_size = 50
+        episode_batch_size = 25
+
+        movie_section = Mock()
+        movie_count = 105
+        movies = [
+            create_autospec(Movie, instance=True, title=f"Movie {index + 1}")
+            for index in range(movie_count)
+        ]
+        movie_section.totalSize = movie_count
+
+        def movie_search(*, container_start=None, container_size=None, **_kwargs):
+            start = container_start or 0
+            size = container_size or movie_count
+            return movies[start : start + size]
+
+        movie_section.search.side_effect = movie_search
+
+        episode_counts = [30, 25, 10]
+        shows: list[Show] = []
+        season_mocks: list[Season] = []
+        show_section = Mock()
+        show_section.totalSize = len(episode_counts)
+
+        for show_index, episode_count in enumerate(episode_counts, start=1):
+            show = create_autospec(Show, instance=True, title=f"Show {show_index}")
+            season = create_autospec(Season, instance=True)
+            episodes = [
+                create_autospec(
+                    Episode,
+                    instance=True,
+                    title=f"S{show_index:02d}E{episode_index + 1:02d}",
+                )
+                for episode_index in range(episode_count)
+            ]
+
+            def _make_side_effect(eps: list[Episode]):
+                def _side_effect(*, container_start=None, container_size=None, **_kwargs):
+                    start = container_start or 0
+                    size = container_size or len(eps)
+                    return eps[start : start + size]
+
+                return _side_effect
+
+            season.episodes.side_effect = _make_side_effect(episodes)
+            show.seasons.return_value = [season]
+            shows.append(show)
+            season_mocks.append(season)
+
+        def show_search(*, container_start=None, container_size=None, **_kwargs):
+            start = container_start or 0
+            size = container_size or len(shows)
+            return shows[start : start + size]
+
+        show_section.search.side_effect = show_search
+
+        library = Mock()
+        library.section.side_effect = lambda name: {
+            "Movies": movie_section,
+            "TV Shows": show_section,
+        }[name]
+
+        plex = create_autospec(PlexServer, instance=True)
+        plex.library = library
+
+        stage = IngestionStage(
+            plex_server=plex,
+            sample_items=None,
+            movie_batch_size=movie_batch_size,
+            episode_batch_size=episode_batch_size,
+            sample_batch_size=10,
+            output_queue=queue,
+            completion_sentinel=INGEST_DONE,
+        )
+
+        await stage._ingest_plex(
+            plex_server=plex,
+            movie_batch_size=movie_batch_size,
+            episode_batch_size=episode_batch_size,
+            output_queue=queue,
+            logger=stage.logger,
+        )
+
+        batches: list[MovieBatch | EpisodeBatch] = []
+        while not queue.empty():
+            batches.append(await queue.get())
+
+        return (
+            batches,
+            stage.items_ingested,
+            stage.batches_ingested,
+            movie_section.search.call_args_list,
+            show_section.search.call_args_list,
+            [season.episodes.call_args_list for season in season_mocks],
+        )
+
+    (
+        batches,
+        items_ingested,
+        batches_ingested,
+        movie_search_calls,
+        show_search_calls,
+        season_episode_calls,
+    ) = asyncio.run(scenario())
+
+    movie_batches = [batch for batch in batches if isinstance(batch, MovieBatch)]
+    episode_batches = [batch for batch in batches if isinstance(batch, EpisodeBatch)]
+
+    assert [len(batch.movies) for batch in movie_batches] == [50, 50, 5]
+    assert [len(batch.episodes) for batch in episode_batches] == [25, 5, 25, 10]
+    assert items_ingested == 105 + 65
+    assert batches_ingested == 7
+
+    assert movie_search_calls == [
+        call(container_start=0, container_size=50),
+        call(container_start=50, container_size=50),
+        call(container_start=100, container_size=50),
+    ]
+    assert show_search_calls == [
+        call(container_start=0, container_size=25),
+    ]
+    assert season_episode_calls[0] == [
+        call(container_start=0, container_size=25),
+        call(container_start=25, container_size=25),
+    ]
+    assert season_episode_calls[1] == [
+        call(container_start=0, container_size=25),
+        call(container_start=25, container_size=25),
+    ]
+    assert season_episode_calls[2] == [
+        call(container_start=0, container_size=25),
+    ]
+
+    assert "Discovered 105 Plex movie(s) for ingestion." in caplog.messages
+    assert "Discovered 3 Plex show(s) for ingestion." in caplog.messages
