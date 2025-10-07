@@ -154,6 +154,35 @@ def test_server_tools(monkeypatch):
             asyncio.run(server.media_background.fn(identifier="0"))
 
 
+def test_get_media_data_caches_external_ids(monkeypatch):
+    with _load_server(monkeypatch) as server:
+        call_count = 0
+
+        original_find_records = server._find_records
+
+        async def _counting_find_records(identifier: str, limit: int = 1):
+            nonlocal call_count
+            call_count += 1
+            return await original_find_records(identifier, limit=limit)
+
+        monkeypatch.setattr(server, "_find_records", _counting_find_records)
+
+        imdb_id = "tt8367814"
+        tmdb_id = "522627"
+
+        data = asyncio.run(server._get_media_data(imdb_id))
+        assert data["plex"]["rating_key"] == "49915"
+        assert call_count == 1
+
+        cached_imdb = asyncio.run(server._get_media_data(imdb_id))
+        assert cached_imdb["plex"]["rating_key"] == "49915"
+        assert call_count == 1
+
+        cached_tmdb = asyncio.run(server._get_media_data(tmdb_id))
+        assert cached_tmdb["plex"]["rating_key"] == "49915"
+        assert call_count == 1
+
+
 def test_new_media_tools(monkeypatch):
     with _load_server(monkeypatch) as server:
         movies = asyncio.run(server.new_movies.fn(limit=1))
