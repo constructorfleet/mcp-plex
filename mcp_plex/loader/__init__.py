@@ -19,7 +19,7 @@ from qdrant_client.async_qdrant_client import AsyncQdrantClient
 from plexapi.base import PlexPartialObject as _PlexPartialObject
 from plexapi.server import PlexServer
 
-from .imdb_cache import IMDbCache, JSONValue
+from .imdb_cache import IMDbCache
 from .pipeline.channels import (
     IMDbRetryQueue,
     INGEST_DONE,
@@ -33,6 +33,7 @@ from .pipeline.persistence import PersistenceStage as _PersistenceStage
 from ..common.types import (
     AggregatedItem,
     IMDbTitle,
+    JSONValue,
     PlexGuid,
     PlexItem,
     PlexPerson,

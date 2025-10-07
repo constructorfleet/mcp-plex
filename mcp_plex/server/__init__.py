@@ -9,7 +9,7 @@ import json
 import logging
 import os
 import uuid
-from typing import Annotated, Any, Callable, Sequence
+from typing import Annotated, Any, Callable, Mapping, Sequence, cast
 
 from fastapi import FastAPI
 from fastapi.openapi.docs import get_swagger_ui_html
@@ -28,6 +28,7 @@ from starlette.responses import JSONResponse, PlainTextResponse, Response
 from rapidfuzz import fuzz, process
 
 from ..common.cache import MediaCache
+from ..common.types import JSONValue
 from .config import Settings
 
 
@@ -204,10 +205,15 @@ async def _find_records(identifier: str, limit: int = 5) -> list[models.Record]:
     return points
 
 
-def _flatten_payload(payload: dict[str, Any]) -> dict[str, Any]:
+def _flatten_payload(payload: Mapping[str, JSONValue] | None) -> dict[str, JSONValue]:
     """Merge top-level payload fields with the nested data block."""
 
-    data = dict(payload.get("data", {}))
+    data: dict[str, JSONValue] = {}
+    if not payload:
+        return data
+    base = payload.get("data")
+    if isinstance(base, dict):
+        data.update(base)
     for key, value in payload.items():
         if key == "data":
             continue
@@ -215,7 +221,7 @@ def _flatten_payload(payload: dict[str, Any]) -> dict[str, Any]:
     return data
 
 
-async def _get_media_data(identifier: str) -> dict[str, Any]:
+async def _get_media_data(identifier: str) -> dict[str, JSONValue]:
     """Return the first matching media record's payload."""
     cached = server.cache.get_payload(identifier)
     if cached is not None:
@@ -223,10 +229,12 @@ async def _get_media_data(identifier: str) -> dict[str, Any]:
     records = await _find_records(identifier, limit=1)
     if not records:
         raise ValueError("Media item not found")
-    payload = _flatten_payload(records[0].payload)
+    payload = _flatten_payload(
+        cast(Mapping[str, JSONValue] | None, records[0].payload)
+    )
     data = payload
 
-    def _normalize_identifier(value: Any) -> str | None:
+    def _normalize_identifier(value: JSONValue) -> str | None:
         if value is None:
             return None
         if isinstance(value, str):
@@ -243,7 +251,10 @@ async def _get_media_data(identifier: str) -> dict[str, Any]:
     if lookup_key:
         cache_keys.add(lookup_key)
 
-    plex_data = data.get("plex", {}) or {}
+    plex_value = data.get("plex")
+    plex_data: dict[str, JSONValue] = (
+        plex_value if isinstance(plex_value, dict) else {}
+    )
     rating_key = _normalize_identifier(plex_data.get("rating_key"))
     if rating_key:
         cache_keys.add(rating_key)
@@ -252,9 +263,9 @@ async def _get_media_data(identifier: str) -> dict[str, Any]:
         cache_keys.add(guid)
 
     for source_key in ("imdb", "tmdb", "tvdb"):
-        source_data = data.get(source_key)
-        if isinstance(source_data, dict):
-            source_id = _normalize_identifier(source_data.get("id"))
+        source_value = data.get(source_key)
+        if isinstance(source_value, dict):
+            source_id = _normalize_identifier(source_value.get("id"))
             if source_id:
                 cache_keys.add(source_id)
 
@@ -529,7 +540,10 @@ async def get_media(
 ) -> list[dict[str, Any]]:
     """Retrieve media items by rating key, IMDb/TMDb ID or title."""
     records = await _find_records(identifier, limit=10)
-    return [_flatten_payload(r.payload) for r in records]
+    return [
+        _flatten_payload(cast(Mapping[str, JSONValue] | None, r.payload))
+        for r in records
+    ]
 
 
 @server.tool("search-media")
@@ -578,7 +592,7 @@ async def search_media(
     hits = res.points
 
     async def _prefetch(hit: models.ScoredPoint) -> None:
-        data = _flatten_payload(hit.payload)
+        data = _flatten_payload(cast(Mapping[str, JSONValue] | None, hit.payload))
         rating_key = str(data.get("plex", {}).get("rating_key"))
         if rating_key:
             server.cache.set_payload(rating_key, data)
@@ -596,7 +610,9 @@ async def search_media(
             return hits
         docs: list[str] = []
         for h in hits:
-            data = _flatten_payload(h.payload)
+            data = _flatten_payload(
+                cast(Mapping[str, JSONValue] | None, h.payload)
+            )
             parts = [
                 data.get("title"),
                 data.get("summary"),
@@ -648,7 +664,10 @@ async def search_media(
 
     reranked = await asyncio.to_thread(_rerank, hits)
     await prefetch_task
-    return [_flatten_payload(h.payload) for h in reranked[:limit]]
+    return [
+        _flatten_payload(cast(Mapping[str, JSONValue] | None, h.payload))
+        for h in reranked[:limit]
+    ]
 
 
 @server.tool("query-media")
@@ -940,7 +959,10 @@ async def query_media(
         limit=limit,
         with_payload=True,
     )
-    return [_flatten_payload(p.payload) for p in res.points]
+    return [
+        _flatten_payload(cast(Mapping[str, JSONValue] | None, p.payload))
+        for p in res.points
+    ]
 
 
 @server.tool("recommend-media")
@@ -979,7 +1001,10 @@ async def recommend_media(
         with_payload=True,
         using="dense",
     )
-    return [_flatten_payload(r.payload) for r in response.points]
+    return [
+        _flatten_payload(cast(Mapping[str, JSONValue] | None, r.payload))
+        for r in response.points
+    ]
 
 
 @server.tool("new-movies")
@@ -1012,7 +1037,10 @@ async def new_movies(
         limit=limit,
         with_payload=True,
     )
-    return [_flatten_payload(p.payload) for p in res.points]
+    return [
+        _flatten_payload(cast(Mapping[str, JSONValue] | None, p.payload))
+        for p in res.points
+    ]
 
 
 @server.tool("new-shows")
@@ -1045,7 +1073,10 @@ async def new_shows(
         limit=limit,
         with_payload=True,
     )
-    return [_flatten_payload(p.payload) for p in res.points]
+    return [
+        _flatten_payload(cast(Mapping[str, JSONValue] | None, p.payload))
+        for p in res.points
+    ]
 
 
 @server.tool("actor-movies")
@@ -1098,7 +1129,10 @@ async def actor_movies(
         limit=limit,
         with_payload=True,
     )
-    return [_flatten_payload(p.payload) for p in res.points]
+    return [
+        _flatten_payload(cast(Mapping[str, JSONValue] | None, p.payload))
+        for p in res.points
+    ]
 
 
 @server.resource("resource://media-item/{identifier}")
