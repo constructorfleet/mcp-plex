@@ -6,6 +6,7 @@ import pytest
 from click.testing import CliRunner
 
 from mcp_plex import loader
+from mcp_plex.loader import cli as loader_cli
 from qdrant_client import models
 
 
@@ -164,14 +165,14 @@ def test_main_accepts_log_level(monkeypatch, tmp_path):
         coro.close()
         return None
 
-    monkeypatch.setattr(loader.logging, "basicConfig", fake_basic_config)
-    monkeypatch.setattr(loader.asyncio, "run", fake_asyncio_run)
+    monkeypatch.setattr(loader_cli.logging, "basicConfig", fake_basic_config)
+    monkeypatch.setattr(loader_cli.asyncio, "run", fake_asyncio_run)
 
     sample_dir = tmp_path / "samples"
     sample_dir.mkdir()
 
     result = runner.invoke(
-        loader.main,
+        loader_cli.main,
         [
             "--plex-url",
             "http://example.com",
