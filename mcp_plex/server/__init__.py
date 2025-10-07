@@ -225,13 +225,47 @@ async def _get_media_data(identifier: str) -> dict[str, Any]:
         raise ValueError("Media item not found")
     payload = _flatten_payload(records[0].payload)
     data = payload
-    rating_key = str(data.get("plex", {}).get("rating_key"))
+
+    def _normalize_identifier(value: Any) -> str | None:
+        if value is None:
+            return None
+        if isinstance(value, str):
+            normalized = value.strip()
+            return normalized or None
+        try:
+            return str(value)
+        except Exception:
+            return None
+
+    cache_keys: set[str] = set()
+
+    lookup_key = _normalize_identifier(identifier)
+    if lookup_key:
+        cache_keys.add(lookup_key)
+
+    plex_data = data.get("plex", {}) or {}
+    rating_key = _normalize_identifier(plex_data.get("rating_key"))
     if rating_key:
-        server.cache.set_payload(rating_key, payload)
-        thumb = data.get("plex", {}).get("thumb")
+        cache_keys.add(rating_key)
+    guid = _normalize_identifier(plex_data.get("guid"))
+    if guid:
+        cache_keys.add(guid)
+
+    for source_key in ("imdb", "tmdb", "tvdb"):
+        source_data = data.get(source_key)
+        if isinstance(source_data, dict):
+            source_id = _normalize_identifier(source_data.get("id"))
+            if source_id:
+                cache_keys.add(source_id)
+
+    for cache_key in cache_keys:
+        server.cache.set_payload(cache_key, payload)
+
+    if rating_key:
+        thumb = plex_data.get("thumb")
         if thumb:
             server.cache.set_poster(rating_key, thumb)
-        art = data.get("plex", {}).get("art")
+        art = plex_data.get("art")
         if art:
             server.cache.set_background(rating_key, art)
     return payload
