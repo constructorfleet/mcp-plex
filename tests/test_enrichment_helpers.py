@@ -7,6 +7,7 @@ from mcp_plex.loader.pipeline.enrichment import (
     _build_plex_item,
     _extract_external_ids,
     _fetch_tmdb_episode,
+    _fetch_tmdb_episode_chunk,
     _fetch_tmdb_movie,
     _fetch_tmdb_show,
     resolve_tmdb_season_number,
@@ -125,10 +126,24 @@ def test_fetch_functions_success_and_failure():
             return httpx.Response(200, json={"id": 1, "name": "E"})
         return httpx.Response(404)
 
+    async def tmdb_episode_chunk_mock(request):
+        assert request.headers.get("Authorization") == "Bearer k"
+        append = request.url.params.get("append_to_response")
+        if append == "season/1/episode/1,season/1/episode/2":
+            return httpx.Response(
+                200,
+                json={
+                    "season/1/episode/1": {"id": 11, "name": "Episode 1"},
+                    "season/1/episode/2": {"id": 12, "name": "Episode 2"},
+                },
+            )
+        return httpx.Response(404)
+
     async def main():
         movie_transport = httpx.MockTransport(tmdb_movie_mock)
         show_transport = httpx.MockTransport(tmdb_show_mock)
         episode_transport = httpx.MockTransport(tmdb_episode_mock)
+        episode_chunk_transport = httpx.MockTransport(tmdb_episode_chunk_mock)
 
         async with httpx.AsyncClient(transport=movie_transport) as client:
             assert (await _fetch_tmdb_movie(client, "good", "k")) is not None
@@ -141,6 +156,24 @@ def test_fetch_functions_success_and_failure():
         async with httpx.AsyncClient(transport=episode_transport) as client:
             assert (await _fetch_tmdb_episode(client, 1, 2, 3, "k")) is not None
             assert (await _fetch_tmdb_episode(client, 1, 2, 4, "k")) is None
+
+        async with httpx.AsyncClient(transport=episode_chunk_transport) as client:
+            chunk = await _fetch_tmdb_episode_chunk(
+                client,
+                1,
+                ["season/1/episode/1", "season/1/episode/2"],
+                "k",
+            )
+            assert set(chunk.keys()) == {
+                "season/1/episode/1",
+                "season/1/episode/2",
+            }
+            assert chunk["season/1/episode/1"].name == "Episode 1"
+            assert (
+                await _fetch_tmdb_episode_chunk(
+                    client, 1, ["season/1/episode/3"], "k"
+                )
+            ) == {}
 
     asyncio.run(main())
 
@@ -157,6 +190,10 @@ def test_fetch_functions_handle_http_error():
             assert await _fetch_tmdb_show(client, "1", "k") is None
         async with httpx.AsyncClient(transport=transport) as client:
             assert await _fetch_tmdb_episode(client, 1, 1, 1, "k") is None
+        async with httpx.AsyncClient(transport=transport) as client:
+            assert await _fetch_tmdb_episode_chunk(
+                client, 1, ["season/1/episode/1"], "k"
+            ) == {}
 
     asyncio.run(main())
 
