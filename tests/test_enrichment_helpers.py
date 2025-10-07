@@ -123,7 +123,14 @@ def test_fetch_functions_success_and_failure():
     async def tmdb_episode_mock(request):
         assert request.headers.get("Authorization") == "Bearer k"
         if "/tv/1/season/2/episode/3" in str(request.url):
-            return httpx.Response(200, json={"id": 1, "name": "E"})
+            return httpx.Response(
+                200,
+                json={
+                    "name": "E",
+                    "season_number": 2,
+                    "episode_number": 3,
+                },
+            )
         return httpx.Response(404)
 
     async def tmdb_episode_chunk_mock(request):
@@ -133,8 +140,36 @@ def test_fetch_functions_success_and_failure():
             return httpx.Response(
                 200,
                 json={
-                    "season/1/episode/1": {"id": 11, "name": "Episode 1"},
-                    "season/1/episode/2": {"id": 12, "name": "Episode 2"},
+                    "season/1/episode/1": {
+                        "name": "Episode 1",
+                        "runtime": 22,
+                        "episode_type": "standard",
+                        "season_number": 1,
+                        "episode_number": 1,
+                        "crew": [
+                            {
+                                "id": 1,
+                                "name": "Director A",
+                                "job": "Director",
+                            }
+                        ],
+                        "guest_stars": [
+                            {
+                                "id": 2,
+                                "name": "Guest Star A",
+                                "character": "Self",
+                            }
+                        ],
+                    },
+                    "season/1/episode/2": {
+                        "name": "Episode 2",
+                        "runtime": 24,
+                        "episode_type": "finale",
+                        "season_number": 1,
+                        "episode_number": 2,
+                        "crew": [],
+                        "guest_stars": [],
+                    },
                 },
             )
         return httpx.Response(404)
@@ -154,7 +189,9 @@ def test_fetch_functions_success_and_failure():
             assert (await _fetch_tmdb_show(client, "bad", "k")) is None
 
         async with httpx.AsyncClient(transport=episode_transport) as client:
-            assert (await _fetch_tmdb_episode(client, 1, 2, 3, "k")) is not None
+            episode = await _fetch_tmdb_episode(client, 1, 2, 3, "k")
+            assert episode is not None
+            assert episode.id == "1/season/2/episode/3"
             assert (await _fetch_tmdb_episode(client, 1, 2, 4, "k")) is None
 
         async with httpx.AsyncClient(transport=episode_chunk_transport) as client:
@@ -169,6 +206,10 @@ def test_fetch_functions_success_and_failure():
                 "season/1/episode/2",
             }
             assert chunk["season/1/episode/1"].name == "Episode 1"
+            assert chunk["season/1/episode/1"].runtime == 22
+            assert chunk["season/1/episode/1"].crew[0].job == "Director"
+            assert chunk["season/1/episode/1"].guest_stars[0].character == "Self"
+            assert chunk["season/1/episode/1"].id == "1/season/1/episode/1"
             assert (
                 await _fetch_tmdb_episode_chunk(
                     client, 1, ["season/1/episode/3"], "k"

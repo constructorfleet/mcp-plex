@@ -221,7 +221,10 @@ async def _fetch_tmdb_episode(
         )
         return None
     if resp.is_success:
-        return TMDBEpisode.model_validate(resp.json())
+        data = resp.json()
+        if isinstance(data, dict):
+            data.setdefault("show_id", show_id)
+        return TMDBEpisode.model_validate(data)
     return None
 
 
@@ -254,6 +257,7 @@ async def _fetch_tmdb_episode_chunk(
     for path in append_paths:
         payload = data.get(path)
         if isinstance(payload, dict):
+            payload.setdefault("show_id", show_id)
             try:
                 results[path] = TMDBEpisode.model_validate(payload)
             except ValidationError:
