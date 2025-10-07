@@ -5,7 +5,7 @@ from dataclasses import dataclass
 from datetime import datetime
 from typing import List, Literal, Mapping, MutableMapping, Optional, Sequence, TypeAlias
 
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, model_validator
 
 
 class IMDbRating(BaseModel):
@@ -56,6 +56,34 @@ class TMDBSeason(BaseModel):
     air_date: Optional[str] = None
 
 
+class TMDBCrewMember(BaseModel):
+    id: Optional[int] = None
+    name: Optional[str] = None
+    original_name: Optional[str] = None
+    known_for_department: Optional[str] = None
+    department: Optional[str] = None
+    job: Optional[str] = None
+    credit_id: Optional[str] = None
+    adult: Optional[bool] = None
+    gender: Optional[int] = None
+    popularity: Optional[float] = None
+    profile_path: Optional[str] = None
+
+
+class TMDBGuestStar(BaseModel):
+    id: Optional[int] = None
+    name: Optional[str] = None
+    original_name: Optional[str] = None
+    known_for_department: Optional[str] = None
+    character: Optional[str] = None
+    credit_id: Optional[str] = None
+    order: Optional[int] = None
+    adult: Optional[bool] = None
+    gender: Optional[int] = None
+    popularity: Optional[float] = None
+    profile_path: Optional[str] = None
+
+
 class TMDBMovie(BaseModel):
     id: int
     title: str
@@ -98,12 +126,46 @@ class TMDBShow(BaseModel):
 
 
 class TMDBEpisode(BaseModel):
-    id: int
+    id: str
     name: str
     overview: Optional[str] = None
     season_number: Optional[int] = None
     episode_number: Optional[int] = None
     air_date: Optional[str] = None
+    episode_type: Optional[str] = None
+    production_code: Optional[str] = None
+    runtime: Optional[int] = None
+    show_id: Optional[int] = None
+    still_path: Optional[str] = None
+    vote_average: Optional[float] = None
+    vote_count: Optional[int] = None
+    crew: List[TMDBCrewMember] = Field(default_factory=list)
+    guest_stars: List[TMDBGuestStar] = Field(default_factory=list)
+
+    @model_validator(mode="before")
+    @classmethod
+    def _normalise_episode_id(cls, data):
+        """Ensure episode IDs are populated when missing from TMDb payloads."""
+
+        if isinstance(data, dict):
+            payload = data.copy()
+            episode_id = payload.get("id")
+            if episode_id is not None:
+                payload["id"] = str(episode_id)
+            else:
+                show_id = payload.get("show_id")
+                season_number = payload.get("season_number")
+                episode_number = payload.get("episode_number")
+                if (
+                    show_id is not None
+                    and season_number is not None
+                    and episode_number is not None
+                ):
+                    payload["id"] = (
+                        f"{show_id}/season/{season_number}/episode/{episode_number}"
+                    )
+            return payload
+        return data
 
 
 TMDBItem = TMDBMovie | TMDBShow | TMDBEpisode
@@ -169,6 +231,8 @@ __all__ = [
     "TMDBSeason",
     "TMDBShow",
     "TMDBEpisode",
+    "TMDBCrewMember",
+    "TMDBGuestStar",
     "TMDBItem",
     "PlexGuid",
     "PlexPerson",
