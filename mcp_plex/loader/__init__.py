@@ -616,7 +616,7 @@ def _build_loader_orchestrator(
     from .pipeline.ingestion import IngestionStage
     from .pipeline.enrichment import EnrichmentStage
 
-    ingest_queue: IngestQueue = IngestQueue(maxsize=enrichment_workers * 2)
+    ingest_queue: IngestQueue = IngestQueue()
     persistence_queue: PersistenceQueue = PersistenceQueue()
     imdb_queue = imdb_config.retry_queue
 
