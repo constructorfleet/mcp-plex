@@ -29,7 +29,7 @@ dev = [
 
 [project.scripts]
 load-data = "mcp_plex.loader.cli:main"
-mcp-server = "mcp_plex.server:main"
+mcp-server = "mcp_plex.server.cli:main"
 
 [tool.setuptools.packages.find]
 include = ["mcp_plex*"]
