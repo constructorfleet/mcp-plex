@@ -527,31 +527,44 @@ class EnrichmentStage:
 
         movie_ids = [_extract_external_ids(movie) for movie in movies]
         imdb_ids = [ids.imdb for ids in movie_ids if ids.imdb]
-        retry_snapshot: set[str] = set()
-        imdb_map = {}
+        imdb_future: asyncio.Task[dict[str, IMDbTitle | None]] | None = None
         if imdb_ids:
-            imdb_map = await _fetch_imdb_batch(
-                client,
-                imdb_ids,
-                cache=self._imdb_cache,
-                throttle=self._imdb_throttle,
-                max_retries=self._imdb_max_retries,
-                backoff=self._imdb_backoff,
-                retry_queue=self._imdb_retry_queue,
-                batch_limit=self._imdb_batch_limit,
+            imdb_future = asyncio.create_task(
+                _fetch_imdb_batch(
+                    client,
+                    imdb_ids,
+                    cache=self._imdb_cache,
+                    throttle=self._imdb_throttle,
+                    max_retries=self._imdb_max_retries,
+                    backoff=self._imdb_backoff,
+                    retry_queue=self._imdb_retry_queue,
+                    batch_limit=self._imdb_batch_limit,
+                )
             )
-            retry_snapshot = set(self._imdb_retry_queue.snapshot())
 
-        tmdb_results: list[Any] = []
         api_key = self._tmdb_api_key
+        tmdb_tasks: list[asyncio.Task[Any]] = []
         if api_key:
-            tmdb_tasks = [
-                _fetch_tmdb_movie(client, ids.tmdb, api_key)
-                for ids in movie_ids
-                if ids.tmdb
-            ]
-            if tmdb_tasks:
-                tmdb_results = await asyncio.gather(*tmdb_tasks)
+            for ids in movie_ids:
+                if not ids.tmdb:
+                    continue
+                tmdb_tasks.append(
+                    asyncio.create_task(
+                        _fetch_tmdb_movie(client, ids.tmdb, api_key)
+                    )
+                )
+
+        imdb_map: dict[str, IMDbTitle | None] = {}
+        retry_snapshot: set[str] = set()
+        tmdb_results: list[Any] = []
+        if imdb_future is not None:
+            combined_results = await asyncio.gather(imdb_future, *tmdb_tasks)
+            imdb_map = combined_results[0]
+            tmdb_results = list(combined_results[1:])
+            retry_snapshot = set(self._imdb_retry_queue.snapshot())
+        elif tmdb_tasks:
+            tmdb_results = [await task for task in tmdb_tasks]
+
         tmdb_iter = iter(tmdb_results)
 
         aggregated: list[AggregatedItem] = []
@@ -588,31 +601,52 @@ class EnrichmentStage:
         """Fetch external metadata for *episodes* and aggregate the results."""
 
         show_ids = _extract_external_ids(show)
+        imdb_future: asyncio.Task[dict[str, IMDbTitle | None]] | None = None
+        show_future: asyncio.Task[TMDBShow | None] | None = None
         show_tmdb: TMDBShow | None = None
         if show_ids.tmdb:
-            show_tmdb = await self._get_tmdb_show(client, show_ids.tmdb)
+            show_future = asyncio.create_task(
+                self._get_tmdb_show(client, show_ids.tmdb)
+            )
         episode_ids = [_extract_external_ids(ep) for ep in episodes]
         imdb_ids = [ids.imdb for ids in episode_ids if ids.imdb]
-        retry_snapshot: set[str] = set()
-        imdb_map = {}
         if imdb_ids:
-            imdb_map = await _fetch_imdb_batch(
-                client,
-                imdb_ids,
-                cache=self._imdb_cache,
-                throttle=self._imdb_throttle,
-                max_retries=self._imdb_max_retries,
-                backoff=self._imdb_backoff,
-                retry_queue=self._imdb_retry_queue,
-                batch_limit=self._imdb_batch_limit,
+            imdb_future = asyncio.create_task(
+                _fetch_imdb_batch(
+                    client,
+                    imdb_ids,
+                    cache=self._imdb_cache,
+                    throttle=self._imdb_throttle,
+                    max_retries=self._imdb_max_retries,
+                    backoff=self._imdb_backoff,
+                    retry_queue=self._imdb_retry_queue,
+                    batch_limit=self._imdb_batch_limit,
+                )
+            )
+
+        if show_future is not None:
+            show_tmdb = await show_future
+
+        tmdb_future: asyncio.Task[list[TMDBEpisode | None]] | None = None
+        if show_tmdb:
+            tmdb_future = asyncio.create_task(
+                self._bulk_lookup_tmdb_episodes(client, show_tmdb, episodes)
+            )
+
+        imdb_map: dict[str, IMDbTitle | None] = {}
+        retry_snapshot: set[str] = set()
+        tmdb_results: list[TMDBEpisode | None] = [None] * len(episodes)
+        if imdb_future and tmdb_future:
+            imdb_map, tmdb_results = await asyncio.gather(
+                imdb_future, tmdb_future
             )
             retry_snapshot = set(self._imdb_retry_queue.snapshot())
+        elif imdb_future:
+            imdb_map = await imdb_future
+            retry_snapshot = set(self._imdb_retry_queue.snapshot())
+        elif tmdb_future:
+            tmdb_results = await tmdb_future
 
-        tmdb_results: list[TMDBEpisode | None] = [None] * len(episodes)
-        if show_tmdb:
-            tmdb_results = await self._bulk_lookup_tmdb_episodes(
-                client, show_tmdb, episodes
-            )
         tmdb_iter = iter(tmdb_results)
 
         aggregated: list[AggregatedItem] = []
