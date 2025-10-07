@@ -7,12 +7,7 @@ from typing import TypeAlias, cast
 
 from pydantic import ValidationError
 
-from ..common.types import IMDbTitle
-
-JSONScalar: TypeAlias = str | int | float | bool | None
-JSONValue: TypeAlias = (
-    JSONScalar | list["JSONValue"] | dict[str, "JSONValue"]
-)
+from ..common.types import IMDbTitle, JSONValue
 
 
 CachedIMDbPayload: TypeAlias = IMDbTitle | JSONValue

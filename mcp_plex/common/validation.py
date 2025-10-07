@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from typing import Any
+from typing import SupportsInt
 
 
 def require_positive(value: int, *, name: str) -> int:
@@ -15,9 +15,13 @@ def require_positive(value: int, *, name: str) -> int:
     return value
 
 
-def coerce_plex_tag_id(raw_id: Any) -> int:
+def coerce_plex_tag_id(raw_id: int | str | SupportsInt | None) -> int:
     """Best-effort conversion of Plex media tag identifiers to integers."""
 
+    if raw_id is None:
+        return 0
+    if isinstance(raw_id, bool):
+        return int(raw_id)
     if isinstance(raw_id, int):
         return raw_id
     if isinstance(raw_id, str):

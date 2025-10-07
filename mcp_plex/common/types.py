@@ -3,7 +3,7 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 from datetime import datetime
-from typing import List, Literal, Optional
+from typing import List, Literal, Mapping, MutableMapping, Optional, Sequence, TypeAlias
 
 from pydantic import BaseModel, Field
 
@@ -176,3 +176,8 @@ __all__ = [
     "AggregatedItem",
     "ExternalIDs",
 ]
+JSONScalar: TypeAlias = str | int | float | bool | None
+JSONValue: TypeAlias = JSONScalar | Sequence["JSONValue"] | Mapping[str, "JSONValue"]
+JSONMapping: TypeAlias = Mapping[str, JSONValue]
+MutableJSONMapping: TypeAlias = MutableMapping[str, JSONValue]
+

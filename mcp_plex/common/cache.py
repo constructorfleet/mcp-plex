@@ -2,7 +2,13 @@
 from __future__ import annotations
 
 from collections import OrderedDict
-from typing import Any
+from typing import TypeVar
+
+from .types import JSONValue
+
+
+CachedPayload = dict[str, JSONValue]
+_CacheValueT = TypeVar("_CacheValueT")
 
 
 class MediaCache:
@@ -10,27 +16,31 @@ class MediaCache:
 
     def __init__(self, size: int = 128) -> None:
         self.size = size
-        self._payload: OrderedDict[str, dict[str, Any]] = OrderedDict()
+        self._payload: OrderedDict[str, CachedPayload] = OrderedDict()
         self._poster: OrderedDict[str, str] = OrderedDict()
         self._background: OrderedDict[str, str] = OrderedDict()
 
-    def _set(self, cache: OrderedDict, key: str, value: Any) -> None:
+    def _set(
+        self, cache: OrderedDict[str, _CacheValueT], key: str, value: _CacheValueT
+    ) -> None:
         if key in cache:
             cache.move_to_end(key)
         cache[key] = value
         while len(cache) > self.size:
             cache.popitem(last=False)
 
-    def _get(self, cache: OrderedDict, key: str) -> Any | None:
+    def _get(
+        self, cache: OrderedDict[str, _CacheValueT], key: str
+    ) -> _CacheValueT | None:
         if key in cache:
             cache.move_to_end(key)
             return cache[key]
         return None
 
-    def get_payload(self, key: str) -> dict[str, Any] | None:
+    def get_payload(self, key: str) -> CachedPayload | None:
         return self._get(self._payload, key)
 
-    def set_payload(self, key: str, value: dict[str, Any]) -> None:
+    def set_payload(self, key: str, value: CachedPayload) -> None:
         self._set(self._payload, key, value)
 
     def get_poster(self, key: str) -> str | None:

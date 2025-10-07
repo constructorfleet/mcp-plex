@@ -21,14 +21,24 @@ def test_require_positive_enforces_int_type(bad_type: object) -> None:
         require_positive(bad_type, name="value")  # type: ignore[arg-type]
 
 
-def test_coerce_plex_tag_id_accepts_ints() -> None:
-    assert coerce_plex_tag_id(7) == 7
+class _SupportsInt:
+    def __int__(self) -> int:
+        return 128
 
 
-def test_coerce_plex_tag_id_coerces_strings() -> None:
-    assert coerce_plex_tag_id(" 42 ") == 42
+@pytest.mark.parametrize(
+    "raw, expected",
+    [
+        (7, 7),
+        (True, 1),
+        (" 42 ", 42),
+        (_SupportsInt(), 128),
+    ],
+)
+def test_coerce_plex_tag_id_normalizes_values(raw, expected) -> None:
+    assert coerce_plex_tag_id(raw) == expected
 
 
-def test_coerce_plex_tag_id_handles_invalid_values() -> None:
-    assert coerce_plex_tag_id(None) == 0
-    assert coerce_plex_tag_id("not-a-number") == 0
+@pytest.mark.parametrize("raw", [None, "", "not-a-number"])
+def test_coerce_plex_tag_id_handles_invalid_values(raw) -> None:
+    assert coerce_plex_tag_id(raw) == 0
