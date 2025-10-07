@@ -968,43 +968,18 @@ async def query_media(
             )
         )
 
-    prefetch_entries: list[models.Prefetch] = []
-    for name, doc in vector_queries:
-        prefetch_entries.append(
-            models.Prefetch(
-                query=models.NearestQuery(nearest=doc),
-                using=name,
-                limit=limit,
-            )
-        )
-
-    if len(prefetch_entries) > 1:
-        candidate_limit = limit * 3
-        prefetch_entries = [
-            models.Prefetch(query=p.query, using=p.using, limit=candidate_limit)
-            for p in prefetch_entries
-        ]
-        query_obj: models.Query = models.FusionQuery(fusion=models.Fusion.RRF)
-        using_param = None
-        prefetch_param: Sequence[models.Prefetch] | None = prefetch_entries
-    elif prefetch_entries:
-        query_obj = prefetch_entries[0].query
-        using_param = prefetch_entries[0].using
-        prefetch_param = None
-    else:
-        query_obj = None
-        using_param = None
-        prefetch_param = None
-
     must: list[models.FieldCondition] = []
+    keyword_prefetch_conditions: list[models.FieldCondition] = []
 
     if title:
         must.append(models.FieldCondition(key="title", match=models.MatchText(text=title)))
     media_type = type
     if media_type:
-        must.append(
-            models.FieldCondition(key="type", match=models.MatchValue(value=media_type))
+        condition = models.FieldCondition(
+            key="type", match=models.MatchValue(value=media_type)
         )
+        must.append(condition)
+        keyword_prefetch_conditions.append(condition)
     if year is not None:
         must.append(models.FieldCondition(key="year", match=models.MatchValue(value=year)))
     if year_from is not None or year_to is not None:
@@ -1023,30 +998,42 @@ async def query_media(
         must.append(models.FieldCondition(key="added_at", range=models.Range(**rng_at)))
 
     for actor in _listify(actors):
-        must.append(models.FieldCondition(key="actors", match=models.MatchValue(value=actor)))
+        condition = models.FieldCondition(
+            key="actors", match=models.MatchValue(value=actor)
+        )
+        must.append(condition)
+        keyword_prefetch_conditions.append(condition)
     for director in _listify(directors):
-        must.append(
-            models.FieldCondition(key="directors", match=models.MatchValue(value=director))
+        condition = models.FieldCondition(
+            key="directors", match=models.MatchValue(value=director)
         )
+        must.append(condition)
+        keyword_prefetch_conditions.append(condition)
     for writer in _listify(writers):
-        must.append(
-            models.FieldCondition(key="writers", match=models.MatchValue(value=writer))
+        condition = models.FieldCondition(
+            key="writers", match=models.MatchValue(value=writer)
         )
+        must.append(condition)
+        keyword_prefetch_conditions.append(condition)
     for genre in _listify(genres):
-        must.append(models.FieldCondition(key="genres", match=models.MatchValue(value=genre)))
-    for collection in _listify(collections):
-        must.append(
-            models.FieldCondition(
-                key="collections", match=models.MatchValue(value=collection)
-            )
+        condition = models.FieldCondition(
+            key="genres", match=models.MatchValue(value=genre)
         )
+        must.append(condition)
+        keyword_prefetch_conditions.append(condition)
+    for collection in _listify(collections):
+        condition = models.FieldCondition(
+            key="collections", match=models.MatchValue(value=collection)
+        )
+        must.append(condition)
+        keyword_prefetch_conditions.append(condition)
 
     if show_title:
-        must.append(
-            models.FieldCondition(
-                key="show_title", match=models.MatchValue(value=show_title)
-            )
+        condition = models.FieldCondition(
+            key="show_title", match=models.MatchValue(value=show_title)
         )
+        must.append(condition)
+        keyword_prefetch_conditions.append(condition)
     if season_number is not None:
         must.append(
             models.FieldCondition(
@@ -1072,18 +1059,18 @@ async def query_media(
         must.append(models.FieldCondition(key="reviews", match=models.MatchText(text=reviews)))
 
     if plex_rating_key:
-        must.append(
-            models.FieldCondition(
-                key="data.plex.rating_key",
-                match=models.MatchValue(value=plex_rating_key),
-            )
+        condition = models.FieldCondition(
+            key="data.plex.rating_key",
+            match=models.MatchValue(value=plex_rating_key),
         )
+        must.append(condition)
+        keyword_prefetch_conditions.append(condition)
     if imdb_id:
-        must.append(
-            models.FieldCondition(
-                key="data.imdb.id", match=models.MatchValue(value=imdb_id)
-            )
+        condition = models.FieldCondition(
+            key="data.imdb.id", match=models.MatchValue(value=imdb_id)
         )
+        must.append(condition)
+        keyword_prefetch_conditions.append(condition)
     if tmdb_id is not None:
         must.append(
             models.FieldCondition(
@@ -1094,6 +1081,36 @@ async def query_media(
     filter_obj: models.Filter | None = None
     if must:
         filter_obj = models.Filter(must=must)
+
+    prefetch_filter: models.Filter | None = None
+    if keyword_prefetch_conditions:
+        prefetch_filter = models.Filter(must=keyword_prefetch_conditions)
+        if filter_obj is None:
+            filter_obj = models.Filter(must=keyword_prefetch_conditions)
+
+    query_obj: models.Query | None = None
+    using_param: str | None = None
+    prefetch_param: Sequence[models.Prefetch] | None = None
+    if vector_queries:
+        candidate_limit = limit * 3 if len(vector_queries) > 1 else limit
+        prefetch_entries = [
+            models.Prefetch(
+                query=models.NearestQuery(nearest=doc),
+                using=name,
+                limit=candidate_limit,
+                filter=prefetch_filter,
+            )
+            for name, doc in vector_queries
+        ]
+        if len(prefetch_entries) > 1:
+            query_obj = models.FusionQuery(fusion=models.Fusion.RRF)
+            using_param = None
+            prefetch_param = prefetch_entries
+        else:
+            prefetch_entry = prefetch_entries[0]
+            query_obj = prefetch_entry.query
+            using_param = prefetch_entry.using
+            prefetch_param = None
 
     if query_obj is None:
         query_obj = models.SampleQuery(sample=models.Sample.RANDOM)
