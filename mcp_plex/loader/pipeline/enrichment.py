@@ -10,12 +10,16 @@ end processing mirrors the legacy worker implementation.
 from __future__ import annotations
 
 import asyncio
+import inspect
 import logging
 from collections import deque
-from collections.abc import AsyncIterator, Awaitable, Callable, Sequence
-from contextlib import asynccontextmanager
-import inspect
-from typing import Any, Optional
+from collections.abc import AsyncIterator, Awaitable, Callable, Mapping, Sequence
+from contextlib import (
+    AbstractAsyncContextManager,
+    AbstractContextManager,
+    asynccontextmanager,
+)
+from typing import Protocol, cast
 
 import httpx
 from pydantic import ValidationError
@@ -54,11 +58,38 @@ from plexapi.base import PlexPartialObject
 LOGGER = logging.getLogger(__name__)
 
 
+class AsyncHTTPClient(Protocol):
+    """Minimal async HTTP client interface used by the enrichment stage."""
+
+    async def get(
+        self,
+        url: str,
+        *,
+        params: Mapping[str, str] | None = None,
+        headers: Mapping[str, str] | None = None,
+    ) -> httpx.Response:
+        ...
+
+    async def aclose(self) -> None:
+        ...
+
+
+HTTPClientResource = (
+    AsyncHTTPClient
+    | AbstractAsyncContextManager[AsyncHTTPClient]
+    | AbstractContextManager[AsyncHTTPClient]
+)
+
+HTTPClientFactory = Callable[
+    [], HTTPClientResource | Awaitable[HTTPClientResource]
+]
+
+
 def _extract_external_ids(item: PlexPartialObject) -> ExternalIDs:
     """Extract IMDb and TMDb IDs from a Plex object."""
 
-    imdb_id: Optional[str] = None
-    tmdb_id: Optional[str] = None
+    imdb_id: str | None = None
+    tmdb_id: str | None = None
     for guid in getattr(item, "guids", []) or []:
         gid = getattr(guid, "id", "")
         if gid.startswith("imdb://"):
@@ -140,8 +171,8 @@ def _build_plex_item(item: PlexPartialObject) -> PlexItem:
 
 
 async def _fetch_tmdb_movie(
-    client: httpx.AsyncClient, tmdb_id: str, api_key: str
-) -> Optional[TMDBMovie]:
+    client: AsyncHTTPClient, tmdb_id: str, api_key: str
+) -> TMDBMovie | None:
     url = f"https://api.themoviedb.org/3/movie/{tmdb_id}?append_to_response=reviews"
     try:
         resp = await client.get(url, headers={"Authorization": f"Bearer {api_key}"})
@@ -154,8 +185,8 @@ async def _fetch_tmdb_movie(
 
 
 async def _fetch_tmdb_show(
-    client: httpx.AsyncClient, tmdb_id: str, api_key: str
-) -> Optional[TMDBShow]:
+    client: AsyncHTTPClient, tmdb_id: str, api_key: str
+) -> TMDBShow | None:
     url = f"https://api.themoviedb.org/3/tv/{tmdb_id}?append_to_response=reviews"
     try:
         resp = await client.get(url, headers={"Authorization": f"Bearer {api_key}"})
@@ -168,12 +199,12 @@ async def _fetch_tmdb_show(
 
 
 async def _fetch_tmdb_episode(
-    client: httpx.AsyncClient,
+    client: AsyncHTTPClient,
     show_id: int,
     season_number: int,
     episode_number: int,
     api_key: str,
-) -> Optional[TMDBEpisode]:
+) -> TMDBEpisode | None:
     """Fetch TMDb data for a TV episode."""
 
     url = (
@@ -195,7 +226,7 @@ async def _fetch_tmdb_episode(
 
 
 async def _fetch_tmdb_episode_chunk(
-    client: httpx.AsyncClient,
+    client: AsyncHTTPClient,
     show_id: int,
     append_paths: Sequence[str],
     api_key: str,
@@ -236,8 +267,8 @@ async def _fetch_tmdb_episode_chunk(
 
 
 def resolve_tmdb_season_number(
-    show_tmdb: Optional[TMDBShow], episode: PlexPartialObject
-) -> Optional[int]:
+    show_tmdb: TMDBShow | None, episode: PlexPartialObject
+) -> int | None:
     """Map a Plex episode to the appropriate TMDb season number.
 
     This resolves cases where Plex uses year-based season indices that do not
@@ -259,7 +290,7 @@ def resolve_tmdb_season_number(
                 return season.season_number
 
     # match by season name (e.g. "Season 2018" -> "2018")
-    title_norm: Optional[str] = None
+    title_norm: str | None = None
     if isinstance(parent_title, str):
         title_norm = parent_title.lower().lstrip("season ").strip()
         for season in seasons:
@@ -268,7 +299,7 @@ def resolve_tmdb_season_number(
                 return season.season_number
 
     # match by air date year when Plex uses year-based seasons
-    year: Optional[int] = None
+    year: int | None = None
     if isinstance(parent_year, int):
         year = parent_year
     elif isinstance(parent_index, int):
@@ -298,7 +329,7 @@ class EnrichmentStage:
     def __init__(
         self,
         *,
-        http_client_factory: Callable[[], Awaitable[Any] | Any],
+        http_client_factory: HTTPClientFactory,
         tmdb_api_key: str,
         ingest_queue: IngestQueue,
         persistence_queue: PersistenceQueue,
@@ -313,7 +344,7 @@ class EnrichmentStage:
         imdb_window_seconds: float = 1.0,
         logger: logging.Logger | None = None,
     ) -> None:
-        self._http_client_factory = http_client_factory
+        self._http_client_factory: HTTPClientFactory = http_client_factory
         self._tmdb_api_key = (tmdb_api_key or "").strip()
         self._ingest_queue = ingest_queue
         self._persistence_queue = persistence_queue
@@ -473,37 +504,45 @@ class EnrichmentStage:
                 )
 
     @asynccontextmanager
-    async def _acquire_http_client(self) -> AsyncIterator[Any]:
+    async def _acquire_http_client(self) -> AsyncIterator[AsyncHTTPClient]:
         """Yield an HTTP client from the injected factory."""
 
         resource = self._http_client_factory()
         if inspect.isawaitable(resource):
             resource = await resource
 
-        if hasattr(resource, "__aenter__") and hasattr(resource, "__aexit__"):
+        if isinstance(resource, AbstractAsyncContextManager):
             async with resource as client:
                 yield client
             return
 
-        if hasattr(resource, "__enter__") and hasattr(resource, "__exit__"):
+        if isinstance(resource, AbstractContextManager):
             with resource as client:
                 yield client
             return
 
+        if hasattr(resource, "__aenter__") and hasattr(resource, "__aexit__"):
+            async with cast(AbstractAsyncContextManager[AsyncHTTPClient], resource) as client:
+                yield client
+            return
+
+        if hasattr(resource, "__enter__") and hasattr(resource, "__exit__"):
+            with cast(AbstractContextManager[AsyncHTTPClient], resource) as client:
+                yield client
+            return
+
+        client = cast(AsyncHTTPClient, resource)
         try:
-            yield resource
+            yield client
         finally:
-            closer = getattr(resource, "aclose", None)
-            if callable(closer):
-                result = closer()
-                if inspect.isawaitable(result):
-                    await result
-                return
-            closer = getattr(resource, "close", None)
-            if callable(closer):
-                result = closer()
-                if inspect.isawaitable(result):
-                    await result
+            try:
+                await client.aclose()
+            except AttributeError:
+                closer = getattr(client, "close", None)
+                if callable(closer):
+                    result = closer()
+                    if inspect.isawaitable(result):
+                        await result
 
     async def _emit_persistence_batch(
         self, aggregated: Sequence[AggregatedItem]
@@ -521,7 +560,7 @@ class EnrichmentStage:
         )
 
     async def _enrich_movies(
-        self, client: Any, movies: Sequence[Any]
+        self, client: AsyncHTTPClient, movies: Sequence[PlexPartialObject]
     ) -> list[AggregatedItem]:
         """Fetch external metadata for *movies* and aggregate the results."""
 
@@ -543,7 +582,7 @@ class EnrichmentStage:
             )
 
         api_key = self._tmdb_api_key
-        tmdb_tasks: list[asyncio.Task[Any]] = []
+        tmdb_tasks: list[asyncio.Task[TMDBMovie | None]] = []
         if api_key:
             for ids in movie_ids:
                 if not ids.tmdb:
@@ -556,11 +595,14 @@ class EnrichmentStage:
 
         imdb_map: dict[str, IMDbTitle | None] = {}
         retry_snapshot: set[str] = set()
-        tmdb_results: list[Any] = []
+        tmdb_results: list[TMDBMovie | None] = []
         if imdb_future is not None:
             combined_results = await asyncio.gather(imdb_future, *tmdb_tasks)
-            imdb_map = combined_results[0]
-            tmdb_results = list(combined_results[1:])
+            imdb_map = cast(dict[str, IMDbTitle | None], combined_results[0])
+            tmdb_results = [
+                cast(TMDBMovie | None, result)
+                for result in combined_results[1:]
+            ]
             retry_snapshot = set(self._imdb_retry_queue.snapshot())
         elif tmdb_tasks:
             tmdb_results = [await task for task in tmdb_tasks]
@@ -596,7 +638,10 @@ class EnrichmentStage:
             )
 
     async def _enrich_episodes(
-        self, client: Any, show: Any, episodes: Sequence[Any]
+        self,
+        client: AsyncHTTPClient,
+        show: PlexPartialObject,
+        episodes: Sequence[PlexPartialObject],
     ) -> list[AggregatedItem]:
         """Fetch external metadata for *episodes* and aggregate the results."""
 
@@ -665,7 +710,7 @@ class EnrichmentStage:
         return aggregated
 
     async def _get_tmdb_show(
-        self, client: Any, tmdb_id: str
+        self, client: AsyncHTTPClient, tmdb_id: str
     ) -> TMDBShow | None:
         """Return the TMDb show for *tmdb_id*, using the in-memory cache."""
 
@@ -681,7 +726,10 @@ class EnrichmentStage:
         return show
 
     async def _bulk_lookup_tmdb_episodes(
-        self, client: Any, show_tmdb: TMDBShow, episodes: Sequence[Any]
+        self,
+        client: AsyncHTTPClient,
+        show_tmdb: TMDBShow,
+        episodes: Sequence[PlexPartialObject],
     ) -> list[TMDBEpisode | None]:
         """Fetch TMDb metadata for *episodes* in batches."""
 
@@ -834,7 +882,7 @@ class _RequestThrottler:
 
 
 async def _fetch_imdb(
-    client: httpx.AsyncClient,
+    client: AsyncHTTPClient,
     imdb_id: str,
     *,
     cache: IMDbCache | None,
@@ -882,7 +930,7 @@ async def _fetch_imdb(
 
 
 async def _fetch_imdb_batch(
-    client: httpx.AsyncClient,
+    client: AsyncHTTPClient,
     imdb_ids: Sequence[str],
     *,
     cache: IMDbCache | None,

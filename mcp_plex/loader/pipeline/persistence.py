@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import asyncio
 import logging
-from typing import TYPE_CHECKING, Any, Awaitable, Callable, Sequence
+from typing import Awaitable, Callable, Sequence, TypeAlias
 
 from .channels import (
     PERSIST_DONE,
@@ -14,13 +14,22 @@ from .channels import (
 )
 from ...common.validation import require_positive
 
-if TYPE_CHECKING:  # pragma: no cover - typing helpers only
+try:  # pragma: no cover - allow import to fail when qdrant_client is absent
     from qdrant_client import AsyncQdrantClient, models
+except ModuleNotFoundError:  # pragma: no cover - tooling without qdrant installed
+    class AsyncQdrantClient:  # type: ignore[too-few-public-methods]
+        """Fallback stub used when qdrant_client is unavailable."""
 
-    PersistencePayload = list[models.PointStruct]
-else:  # pragma: no cover - runtime fallback when qdrant_client is absent
-    AsyncQdrantClient = Any  # type: ignore[assignment]
-    PersistencePayload = list[Any]
+        pass
+
+    class _ModelsStub:  # type: ignore[too-few-public-methods]
+        class PointStruct:  # type: ignore[too-few-public-methods]
+            ...
+
+    models = _ModelsStub()  # type: ignore[assignment]
+
+
+PersistencePayload: TypeAlias = list["models.PointStruct"]
 
 
 class PersistenceStage:

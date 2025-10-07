@@ -27,3 +27,7 @@
   - `LoaderOrchestrator` must be initialised with the three stage instances, the ingest queue, the persistence queue, and the number of persistence workers (the CLI's `max_concurrent_upserts`).
 - Convert `AggregatedItem` batches into Qdrant `PointStruct` objects with `build_point` before handing them to the persistence stage's `enqueue_points` helper.
 - Prefer explicit keyword arguments when threading CLI options into stage constructors so the mapping is obvious to future readers.
+
+## Typing Guidelines
+- Avoid introducing new ``Any`` or bare ``object`` annotations in loader modules. Use ``TypedDict`` definitions, ``Protocol`` classes, or precise unions instead.
+- When wider typing is unavoidable, leave a brief comment explaining why the loosening is necessary so future contributors can revisit it.

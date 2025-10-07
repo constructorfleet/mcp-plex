@@ -2,6 +2,8 @@ import asyncio
 import logging
 from typing import Any
 
+import httpx
+
 import pytest
 
 from mcp_plex.common.types import (
@@ -27,12 +29,26 @@ from mcp_plex.loader.pipeline.enrichment import (
 )
 
 
+class _StubHTTPClient:
+    async def get(
+        self,
+        url: str,
+        *,
+        params: dict[str, str] | None = None,
+        headers: dict[str, str] | None = None,
+    ) -> httpx.Response:
+        raise AssertionError(f"Unexpected HTTP request: {url}")
+
+    async def aclose(self) -> None:
+        pass
+
+
 def test_enrichment_stage_logger_name() -> None:
     async def scenario() -> str:
         ingest_queue: asyncio.Queue = asyncio.Queue()
         persistence_queue: asyncio.Queue = asyncio.Queue()
         stage = EnrichmentStage(
-            http_client_factory=lambda: object(),
+            http_client_factory=lambda: _StubHTTPClient(),
             tmdb_api_key="tmdb",
             ingest_queue=ingest_queue,
             persistence_queue=persistence_queue,
@@ -52,7 +68,7 @@ def test_enrichment_stage_uses_injected_imdb_retry_queue() -> None:
         persistence_queue: asyncio.Queue = asyncio.Queue()
         retry_queue = IMDbRetryQueue()
         stage = EnrichmentStage(
-            http_client_factory=lambda: object(),
+            http_client_factory=lambda: _StubHTTPClient(),
             tmdb_api_key="tmdb",
             ingest_queue=ingest_queue,
             persistence_queue=persistence_queue,
@@ -71,7 +87,7 @@ def test_enrichment_stage_creates_retry_queue_when_missing() -> None:
         ingest_queue: asyncio.Queue = asyncio.Queue()
         persistence_queue: asyncio.Queue = asyncio.Queue()
         stage = EnrichmentStage(
-            http_client_factory=lambda: object(),
+            http_client_factory=lambda: _StubHTTPClient(),
             tmdb_api_key="tmdb",
             ingest_queue=ingest_queue,
             persistence_queue=persistence_queue,
@@ -125,7 +141,7 @@ def test_enrich_movies_runs_tmdb_and_imdb_requests_in_parallel(
         ingest_queue: asyncio.Queue = asyncio.Queue()
         persistence_queue: asyncio.Queue = asyncio.Queue()
         stage = EnrichmentStage(
-            http_client_factory=lambda: object(),
+            http_client_factory=lambda: _StubHTTPClient(),
             tmdb_api_key="token",
             ingest_queue=ingest_queue,
             persistence_queue=persistence_queue,
@@ -135,7 +151,7 @@ def test_enrich_movies_runs_tmdb_and_imdb_requests_in_parallel(
         )
         movie = _FakeMovie("1", imdb_id="tt0001", tmdb_id="101")
         return await asyncio.wait_for(
-            stage._enrich_movies(object(), [movie]), timeout=1
+            stage._enrich_movies(_StubHTTPClient(), [movie]), timeout=1
         )
 
     result = asyncio.run(scenario())
@@ -226,8 +242,9 @@ class _FakeEpisode:
         self.collections: list[Any] = []
 
 
-class _FakeClient:
+class _FakeClient(_StubHTTPClient):
     def __init__(self, log: list[str]) -> None:
+        super().__init__()
         self._log = log
 
     async def __aenter__(self) -> "_FakeClient":
@@ -599,7 +616,7 @@ def test_enrichment_stage_caches_tmdb_show_results(monkeypatch):
         ingest_queue: asyncio.Queue = asyncio.Queue()
         persistence_queue: asyncio.Queue = asyncio.Queue()
         stage = EnrichmentStage(
-            http_client_factory=lambda: object(),
+            http_client_factory=lambda: _StubHTTPClient(),
             tmdb_api_key="token",
             ingest_queue=ingest_queue,
             persistence_queue=persistence_queue,
@@ -712,7 +729,7 @@ def test_enrichment_stage_falls_back_to_individual_episode_fetch(monkeypatch):
         ingest_queue: asyncio.Queue = asyncio.Queue()
         persistence_queue: asyncio.Queue = asyncio.Queue()
         stage = EnrichmentStage(
-            http_client_factory=lambda: object(),
+            http_client_factory=lambda: _StubHTTPClient(),
             tmdb_api_key="token",
             ingest_queue=ingest_queue,
             persistence_queue=persistence_queue,
@@ -771,7 +788,7 @@ def test_enrichment_stage_sample_batches_pass_through(monkeypatch):
         logger.propagate = False
 
         stage = EnrichmentStage(
-            http_client_factory=lambda: object(),
+            http_client_factory=lambda: _StubHTTPClient(),
             tmdb_api_key="",
             ingest_queue=ingest_queue,
             persistence_queue=persistence_queue,
@@ -846,7 +863,7 @@ def test_enrichment_stage_retries_imdb_queue_when_idle(monkeypatch):
         retry_queue = IMDbRetryQueue(["tt1", "tt2"])
 
         stage = EnrichmentStage(
-            http_client_factory=lambda: object(),
+            http_client_factory=lambda: _StubHTTPClient(),
             tmdb_api_key="",
             ingest_queue=ingest_queue,
             persistence_queue=persistence_queue,
@@ -899,7 +916,7 @@ def test_enrichment_stage_idle_retry_emits_updated_items(monkeypatch):
         retry_queue = IMDbRetryQueue()
 
         stage = EnrichmentStage(
-            http_client_factory=lambda: object(),
+            http_client_factory=lambda: _StubHTTPClient(),
             tmdb_api_key="",
             ingest_queue=ingest_queue,
             persistence_queue=persistence_queue,
