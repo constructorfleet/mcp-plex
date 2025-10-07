@@ -57,6 +57,33 @@ def test_cli_invalid_delay_value():
     assert "Invalid value for '--delay'" in result.output
 
 
+def test_cli_rejects_negative_delay(monkeypatch):
+    called = False
+
+    async def fake_load_media(*args, **kwargs):
+        nonlocal called
+        called = True
+
+    monkeypatch.setattr(loader_cli, "load_media", fake_load_media)
+
+    runner = CliRunner()
+    result = runner.invoke(
+        loader_cli.main,
+        ["--delay", "-1", "--continuous"],
+        env={
+            "PLEX_URL": "http://localhost",
+            "PLEX_TOKEN": "token",
+            "TMDB_API_KEY": "key",
+        },
+    )
+
+    assert result.exit_code == 2
+    assert isinstance(result.exception, SystemExit)
+    assert result.exception.code == 2
+    assert "Invalid value for '--delay'" in result.output
+    assert not called
+
+
 def test_run_requires_credentials(monkeypatch):
     monkeypatch.setattr(loader, "PlexServer", object)
 
@@ -186,6 +213,51 @@ def test_load_media_passes_imdb_queue_path(monkeypatch, tmp_path):
 
     assert captured_kwargs["imdb_queue_path"] == imdb_queue
     assert captured_kwargs["imdb_cache_path"] == imdb_cache
+
+
+def test_load_media_rejects_negative_delay(monkeypatch, tmp_path):
+    async def fake_run(**kwargs):
+        raise AssertionError("run should not be called")
+
+    monkeypatch.setattr(loader, "run", fake_run)
+
+    with pytest.raises(
+        ValueError,
+        match="Delay between runs must be non-negative; received -1.0",
+    ):
+        asyncio.run(
+            loader.load_media(
+                plex_url="http://localhost",
+                plex_token="token",
+                tmdb_api_key="key",
+                sample_dir=None,
+                qdrant_url=":memory:",
+                qdrant_api_key=None,
+                qdrant_host=None,
+                qdrant_port=6333,
+                qdrant_grpc_port=6334,
+                qdrant_https=False,
+                qdrant_prefer_grpc=False,
+                dense_model_name="dense",
+                sparse_model_name="sparse",
+                continuous=False,
+                delay=-1.0,
+                imdb_cache=tmp_path / "cache.json",
+                imdb_max_retries=3,
+                imdb_backoff=1.0,
+                imdb_requests_per_window=None,
+                imdb_window_seconds=1.0,
+                imdb_queue=tmp_path / "queue.json",
+                upsert_buffer_size=1,
+                plex_chunk_size=1,
+                enrichment_batch_size=1,
+                enrichment_workers=1,
+                qdrant_batch_size=1,
+                max_concurrent_upserts=1,
+                qdrant_retry_attempts=1,
+                qdrant_retry_backoff=1.0,
+            )
+        )
 
 
 def test_loader_script_entrypoint(monkeypatch):

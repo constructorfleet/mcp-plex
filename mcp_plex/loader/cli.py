@@ -166,7 +166,7 @@ from . import DEFAULT_QDRANT_UPSERT_BUFFER_SIZE, load_media
 )
 @click.option(
     "--delay",
-    type=float,
+    type=click.FloatRange(min=0.0),
     default=300.0,
     show_default=True,
     required=False,

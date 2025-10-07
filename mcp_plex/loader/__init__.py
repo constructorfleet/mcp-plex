@@ -478,6 +478,11 @@ async def load_media(
 ) -> None:
     """Orchestrate one or more runs of :func:`run`."""
 
+    if delay < 0:
+        raise ValueError(
+            f"Delay between runs must be non-negative; received {delay!r}"
+        )
+
     while True:
         await run(
             plex_url=plex_url,
