@@ -1567,7 +1567,12 @@ _register_rest_endpoints()
 
 
 
-from .cli import main
+def main(argv: list[str] | None = None) -> None:
+    """Entry point retained for backwards compatibility."""
+
+    from .cli import main as cli_main
+
+    cli_main(argv)
 
 
 if __name__ == "__main__":

@@ -1,4 +1,5 @@
 """Command line interface for :mod:`mcp_plex.server`."""
+
 from __future__ import annotations
 
 import argparse
@@ -58,7 +59,11 @@ def main(argv: list[str] | None = None) -> None:
     args = parser.parse_args(argv)
 
     env_transport = os.getenv("MCP_TRANSPORT")
-    env_host = os.getenv("MCP_HOST") if os.getenv("MCP_HOST") is not None else os.getenv("MCP_BIND")
+    env_host = (
+        os.getenv("MCP_HOST")
+        if os.getenv("MCP_HOST") is not None
+        else os.getenv("MCP_BIND")
+    )
     env_port = os.getenv("MCP_PORT")
     env_mount = os.getenv("MCP_MOUNT")
 
@@ -83,7 +88,9 @@ def main(argv: list[str] | None = None) -> None:
 
     if transport != "stdio":
         if host is None or port is None:
-            parser.error("--bind/--port or MCP_HOST/MCP_PORT are required when transport is not stdio")
+            parser.error(
+                "--bind/--port or MCP_HOST/MCP_PORT are required when transport is not stdio"
+            )
     if transport == "stdio" and mount:
         parser.error("--mount or MCP_MOUNT is not allowed when transport is stdio")
 
