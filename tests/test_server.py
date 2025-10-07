@@ -18,6 +18,8 @@ from starlette.testclient import TestClient
 
 from mcp_plex import loader
 from mcp_plex import server as server_module
+from mcp_plex.server import media as media_helpers
+from mcp_plex.server.tools import media_library as media_library_tools
 from pydantic import ValidationError
 
 
@@ -81,6 +83,7 @@ def test_qdrant_env_config(monkeypatch):
 
 def test_server_tools(monkeypatch):
     with _load_server(monkeypatch) as server:
+        assert callable(media_library_tools.register_media_library_tools)
         movie_id = "49915"
         res = asyncio.run(server.get_media.fn(identifier=movie_id))
         assert res and res[0]["plex"]["title"] == "The Gentlemen"
@@ -159,27 +162,31 @@ def test_get_media_data_caches_external_ids(monkeypatch):
     with _load_server(monkeypatch) as server:
         call_count = 0
 
-        original_find_records = server._find_records
+        original_find_records = media_helpers._find_records
 
-        async def _counting_find_records(identifier: str, limit: int = 1):
+        async def _counting_find_records(
+            plex_server, identifier: str, limit: int = 1
+        ):
             nonlocal call_count
             call_count += 1
-            return await original_find_records(identifier, limit=limit)
+            return await original_find_records(plex_server, identifier, limit=limit)
 
-        monkeypatch.setattr(server, "_find_records", _counting_find_records)
+        monkeypatch.setattr(media_helpers, "_find_records", _counting_find_records)
 
         imdb_id = "tt8367814"
         tmdb_id = "522627"
 
-        data = asyncio.run(server._get_media_data(imdb_id))
+        plex_server = server.server
+
+        data = asyncio.run(media_helpers._get_media_data(plex_server, imdb_id))
         assert data["plex"]["rating_key"] == "49915"
         assert call_count == 1
 
-        cached_imdb = asyncio.run(server._get_media_data(imdb_id))
+        cached_imdb = asyncio.run(media_helpers._get_media_data(plex_server, imdb_id))
         assert cached_imdb["plex"]["rating_key"] == "49915"
         assert call_count == 1
 
-        cached_tmdb = asyncio.run(server._get_media_data(tmdb_id))
+        cached_tmdb = asyncio.run(media_helpers._get_media_data(plex_server, tmdb_id))
         assert cached_tmdb["plex"]["rating_key"] == "49915"
         assert call_count == 1
 
@@ -535,13 +542,11 @@ def test_request_model_missing_annotation_uses_object():
 
 
 def test_normalize_identifier_scalar_inputs():
-    module = importlib.import_module("mcp_plex.server")
-
-    assert module._normalize_identifier("  value  ") == "value"
-    assert module._normalize_identifier(123) == "123"
-    assert module._normalize_identifier(0.0) == "0.0"
-    assert module._normalize_identifier("") is None
-    assert module._normalize_identifier(None) is None
+    assert media_helpers._normalize_identifier("  value  ") == "value"
+    assert media_helpers._normalize_identifier(123) == "123"
+    assert media_helpers._normalize_identifier(0.0) == "0.0"
+    assert media_helpers._normalize_identifier("") is None
+    assert media_helpers._normalize_identifier(None) is None
 
 
 def test_run_config_to_kwargs():
@@ -571,7 +576,7 @@ def test_find_records_handles_retrieve_error(monkeypatch):
         monkeypatch.setattr(module.server.qdrant_client, "retrieve", fail_retrieve)
         monkeypatch.setattr(module.server.qdrant_client, "scroll", fake_scroll)
 
-        records = asyncio.run(module._find_records("123"))
+        records = asyncio.run(media_helpers._find_records(module.server, "123"))
         assert records and records[0].payload["data"]["plex"]["rating_key"] == "1"
 
 
