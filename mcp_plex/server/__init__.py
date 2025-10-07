@@ -1,4 +1,5 @@
 """FastMCP server exposing Plex metadata tools."""
+
 from __future__ import annotations
 
 import asyncio
@@ -117,9 +118,7 @@ class PlexServer(FastMCP):
             return None
         if not self._reranker_loaded:
             try:
-                self._reranker = CrossEncoder(
-                    "cross-encoder/ms-marco-MiniLM-L-6-v2"
-                )
+                self._reranker = CrossEncoder("cross-encoder/ms-marco-MiniLM-L-6-v2")
             except Exception as exc:
                 logger.warning(
                     "Failed to initialize CrossEncoder reranker: %s",
@@ -201,7 +200,9 @@ def _request_model(name: str, fn: Callable[..., object]) -> type[BaseModel] | No
     if not fields:
         return None
 
-    model_name = "".join(part.capitalize() for part in name.replace("-", "_").split("_"))
+    model_name = "".join(
+        part.capitalize() for part in name.replace("-", "_").split("_")
+    )
     model_name = f"{model_name or 'Request'}Request"
     request_model = create_model(model_name, **fields)  # type: ignore[arg-type]
     return request_model
@@ -299,11 +300,7 @@ async def _get_plex_players() -> list[PlexPlayerMetadata]:
         display_name = (
             friendly_names[0]
             if friendly_names
-            else name
-            or product
-            or machine_id
-            or client_id
-            or "Unknown player"
+            else name or product or machine_id or client_id or "Unknown player"
         )
 
         if display_name not in friendly_names:
@@ -336,7 +333,9 @@ async def _get_plex_players() -> list[PlexPlayerMetadata]:
 _FUZZY_MATCH_THRESHOLD = 70
 
 
-def _match_player(query: str, players: Sequence[PlexPlayerMetadata]) -> PlexPlayerMetadata:
+def _match_player(
+    query: str, players: Sequence[PlexPlayerMetadata]
+) -> PlexPlayerMetadata:
     """Locate a Plex player by friendly name or identifier."""
 
     normalized_query = query.strip()
@@ -368,9 +367,8 @@ def _match_player(query: str, players: Sequence[PlexPlayerMetadata]) -> PlexPlay
             candidate_entries.append((candidate_str, candidate_lower, player))
             if candidate_lower == normalized:
                 return player
-    def _process_choice(
-        choice: str | tuple[str, str, dict[str, Any]]
-    ) -> str:
+
+    def _process_choice(choice: str | tuple[str, str, dict[str, Any]]) -> str:
         if isinstance(choice, tuple):
             return choice[1]
         return str(choice).strip().lower()
@@ -505,8 +503,10 @@ def _build_openapi_schema() -> dict[str, object]:
 
         app.post(f"/rest/{name}")(_tool_stub)
     for name, prompt in server._prompt_manager._prompts.items():
+
         async def _p_stub(**kwargs):  # noqa: ARG001
             pass
+
         _p_stub.__name__ = f"prompt_{name.replace('-', '_')}"
         _p_stub.__doc__ = prompt.fn.__doc__
         request_model = _request_model(name, prompt.fn)
@@ -529,9 +529,13 @@ def _build_openapi_schema() -> dict[str, object]:
         app.post(f"/rest/prompt/{name}")(_p_stub)
     for uri, resource in server._resource_manager._templates.items():
         path = uri.replace("resource://", "")
+
         async def _r_stub(**kwargs):  # noqa: ARG001
             pass
-        _r_stub.__name__ = f"resource_{path.replace('/', '_').replace('{', '').replace('}', '')}"
+
+        _r_stub.__name__ = (
+            f"resource_{path.replace('/', '_').replace('{', '').replace('}', '')}"
+        )
         _r_stub.__doc__ = resource.fn.__doc__
         _r_stub.__signature__ = inspect.signature(resource.fn).replace(
             return_annotation=inspect.Signature.empty
@@ -549,9 +553,10 @@ async def openapi_json(request: Request) -> Response:  # noqa: ARG001
     return JSONResponse(_OPENAPI_SCHEMA)
 
 
-
 def _register_rest_endpoints() -> None:
-    def _register(path: str, method: str, handler: Callable, fn: Callable, name: str) -> None:
+    def _register(
+        path: str, method: str, handler: Callable, fn: Callable, name: str
+    ) -> None:
         handler.__name__ = name
         handler.__doc__ = fn.__doc__
         handler.__signature__ = inspect.signature(fn).replace(
@@ -560,6 +565,7 @@ def _register_rest_endpoints() -> None:
         server.custom_route(path, methods=[method])(handler)
 
     for name, tool in server._tool_manager._tools.items():
+
         async def _rest_tool(request: Request, _tool=tool) -> Response:  # noqa: ARG001
             try:
                 arguments = await request.json()
@@ -578,6 +584,7 @@ def _register_rest_endpoints() -> None:
         )
 
     for name, prompt in server._prompt_manager._prompts.items():
+
         async def _rest_prompt(request: Request, _prompt=prompt) -> Response:  # noqa: ARG001
             try:
                 arguments = await request.json()
@@ -598,7 +605,9 @@ def _register_rest_endpoints() -> None:
     for uri, resource in server._resource_manager._templates.items():
         path = uri.replace("resource://", "")
 
-        async def _rest_resource(request: Request, _uri_template=uri, _resource=resource) -> Response:
+        async def _rest_resource(
+            request: Request, _uri_template=uri, _resource=resource
+        ) -> Response:
             formatted = _uri_template
             for key, value in request.path_params.items():
                 formatted = formatted.replace(f"{{{key}}}", value)
@@ -611,7 +620,9 @@ def _register_rest_endpoints() -> None:
             except Exception:
                 return PlainTextResponse(str(data), media_type=_resource.mime_type)
 
-        handler_name = f"rest_resource_{path.replace('/', '_').replace('{', '').replace('}', '')}"
+        handler_name = (
+            f"rest_resource_{path.replace('/', '_').replace('{', '').replace('}', '')}"
+        )
         _register(
             f"/rest/resource/{path}",
             "GET",
@@ -622,8 +633,6 @@ def _register_rest_endpoints() -> None:
 
 
 _register_rest_endpoints()
-
-
 
 
 def main(argv: list[str] | None = None) -> None:

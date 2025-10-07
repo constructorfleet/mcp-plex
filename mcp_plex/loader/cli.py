@@ -1,4 +1,5 @@
 """Command-line interface for the loader pipeline."""
+
 from __future__ import annotations
 
 import asyncio
@@ -159,7 +160,10 @@ from . import DEFAULT_QDRANT_UPSERT_BUFFER_SIZE, load_media
     "--log-level",
     envvar="LOG_LEVEL",
     show_envvar=True,
-    type=click.Choice(["critical", "error", "warning", "info", "debug", "notset"], case_sensitive=False),
+    type=click.Choice(
+        ["critical", "error", "warning", "info", "debug", "notset"],
+        case_sensitive=False,
+    ),
     default="info",
     show_default=True,
     help="Logging level for console output",

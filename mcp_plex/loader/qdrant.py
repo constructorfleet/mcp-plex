@@ -1,4 +1,5 @@
 """Qdrant helper utilities shared across the loader pipeline."""
+
 from __future__ import annotations
 
 import asyncio
@@ -60,7 +61,9 @@ async def _ensure_collection(
     if not await client.collection_exists(collection_name):
         await client.create_collection(
             collection_name=collection_name,
-            vectors_config={"dense": models.VectorParams(size=dense_size, distance=dense_distance)},
+            vectors_config={
+                "dense": models.VectorParams(size=dense_size, distance=dense_distance)
+            },
             sparse_vectors_config={"sparse": models.SparseVectorParams()},
         )
         created_collection = True

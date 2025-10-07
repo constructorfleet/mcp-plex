@@ -150,6 +150,7 @@ def test_run_ensures_collection_before_loading(monkeypatch):
 
     monkeypatch.setattr(loader, "_ensure_collection", fake_ensure)
     sample_dir = Path(__file__).resolve().parents[1] / "sample-data"
+
     async def fake_run(self):
         order.append("execute")
 

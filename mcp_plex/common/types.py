@@ -1,4 +1,5 @@
 """Type definitions for Plex metadata and external services."""
+
 from __future__ import annotations
 
 from dataclasses import dataclass
@@ -221,6 +222,7 @@ class ExternalIDs:
     imdb: Optional[str] = None
     tmdb: Optional[str] = None
 
+
 __all__ = [
     "IMDbRating",
     "IMDbTitle",
@@ -244,4 +246,3 @@ JSONScalar: TypeAlias = str | int | float | bool | None
 JSONValue: TypeAlias = JSONScalar | Sequence["JSONValue"] | Mapping[str, "JSONValue"]
 JSONMapping: TypeAlias = Mapping[str, JSONValue]
 MutableJSONMapping: TypeAlias = MutableMapping[str, JSONValue]
-

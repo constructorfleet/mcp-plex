@@ -89,7 +89,10 @@ def test_run_writes_points(monkeypatch):
     assert any("Directed by" in t for t in texts)
     assert any("Starring" in t for t in texts)
     movie_point = next(p for p in captured if p.payload["type"] == "movie")
-    assert "directors" in movie_point.payload and "Guy Ritchie" in movie_point.payload["directors"]
+    assert (
+        "directors" in movie_point.payload
+        and "Guy Ritchie" in movie_point.payload["directors"]
+    )
     assert "writers" in movie_point.payload and movie_point.payload["writers"]
     assert "genres" in movie_point.payload and movie_point.payload["genres"]
     assert movie_point.payload.get("summary")
@@ -102,9 +105,11 @@ def test_run_writes_points(monkeypatch):
     assert episode_point.payload.get("season_title") == "Season 1"
     assert episode_point.payload.get("season_number") == 1
     assert episode_point.payload.get("episode_number") == 4
-    episode_vector = next(
-        p for p in captured if p.payload.get("type") == "episode"
-    ).vector["dense"].text
+    episode_vector = (
+        next(p for p in captured if p.payload.get("type") == "episode")
+        .vector["dense"]
+        .text
+    )
     assert "Alien: Earth" in episode_vector
     assert "S01E04" in episode_vector
 

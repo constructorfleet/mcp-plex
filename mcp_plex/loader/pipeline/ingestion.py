@@ -5,6 +5,7 @@ implementation.  The heavy lifting will be ported in subsequent commits, but
 having the stage skeleton in place allows other components to depend on the
 interface.
 """
+
 from __future__ import annotations
 
 import asyncio
@@ -80,7 +81,9 @@ class IngestionStage:
         else:
             await self._run_plex_ingestion()
 
-        self._logger.debug("Publishing ingestion completion sentinels to downstream stages.")
+        self._logger.debug(
+            "Publishing ingestion completion sentinels to downstream stages."
+        )
         await enqueue_nowait(self._output_queue, None)
         await enqueue_nowait(self._output_queue, self._completion_sentinel)
         self._logger.info(
@@ -346,9 +349,7 @@ class IngestionStage:
             episode_total,
         )
 
-    async def _enqueue_sample_batches(
-        self, items: Sequence[AggregatedItem]
-    ) -> None:
+    async def _enqueue_sample_batches(self, items: Sequence[AggregatedItem]) -> None:
         """Place sample items onto the ingest queue in configured batch sizes."""
 
         for chunk in chunk_sequence(items, self._sample_batch_size):
@@ -356,9 +357,7 @@ class IngestionStage:
             if not batch_items:
                 continue
 
-            await enqueue_nowait(
-                self._output_queue, SampleBatch(items=batch_items)
-            )
+            await enqueue_nowait(self._output_queue, SampleBatch(items=batch_items))
             self._items_ingested += len(batch_items)
             self._batches_ingested += 1
             self._logger.debug(

@@ -55,7 +55,9 @@ def test_build_plex_item_handles_full_metadata():
         contentRating="R",
         directors=[types.SimpleNamespace(id=1, tag="Lana Wachowski", thumb="lana.jpg")],
         writers=[types.SimpleNamespace(id=2, tag="Lilly Wachowski", thumb="lilly.jpg")],
-        actors=[types.SimpleNamespace(id=3, tag="Keanu Reeves", thumb="neo.jpg", role="Neo")],
+        actors=[
+            types.SimpleNamespace(id=3, tag="Keanu Reeves", thumb="neo.jpg", role="Neo")
+        ],
     )
 
     item = _build_plex_item(raw)
@@ -211,9 +213,7 @@ def test_fetch_functions_success_and_failure():
             assert chunk["season/1/episode/1"].guest_stars[0].character == "Self"
             assert chunk["season/1/episode/1"].id == "1/season/1/episode/1"
             assert (
-                await _fetch_tmdb_episode_chunk(
-                    client, 1, ["season/1/episode/3"], "k"
-                )
+                await _fetch_tmdb_episode_chunk(client, 1, ["season/1/episode/3"], "k")
             ) == {}
 
     asyncio.run(main())
@@ -232,9 +232,10 @@ def test_fetch_functions_handle_http_error():
         async with httpx.AsyncClient(transport=transport) as client:
             assert await _fetch_tmdb_episode(client, 1, 1, 1, "k") is None
         async with httpx.AsyncClient(transport=transport) as client:
-            assert await _fetch_tmdb_episode_chunk(
-                client, 1, ["season/1/episode/1"], "k"
-            ) == {}
+            assert (
+                await _fetch_tmdb_episode_chunk(client, 1, ["season/1/episode/1"], "k")
+                == {}
+            )
 
     asyncio.run(main())
 

@@ -1,4 +1,5 @@
 """Media helper functions for Plex server tools."""
+
 from __future__ import annotations
 
 from typing import Any, Mapping, TYPE_CHECKING, cast
@@ -95,9 +96,7 @@ def _extract_plex_metadata(media: AggregatedMediaItem) -> PlexMediaMetadata:
     return cast(PlexMediaMetadata, {})
 
 
-async def _get_media_data(
-    server: "PlexServer", identifier: str
-) -> AggregatedMediaItem:
+async def _get_media_data(server: "PlexServer", identifier: str) -> AggregatedMediaItem:
     """Return the first matching media record's payload."""
 
     cached = server.cache.get_payload(identifier)
@@ -106,9 +105,7 @@ async def _get_media_data(
     records = await _find_records(server, identifier, limit=1)
     if not records:
         raise ValueError("Media item not found")
-    payload = _flatten_payload(
-        cast(Mapping[str, JSONValue] | None, records[0].payload)
-    )
+    payload = _flatten_payload(cast(Mapping[str, JSONValue] | None, records[0].payload))
     data = payload
 
     cache_keys: set[str] = set()

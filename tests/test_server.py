@@ -65,6 +65,7 @@ def test_qdrant_env_config(monkeypatch):
     class CaptureClient:
         def __init__(self, *args, **kwargs):
             captured.update(kwargs)
+
         async def close(self):
             pass
 
@@ -111,8 +112,7 @@ def test_server_tools(monkeypatch):
         item = json.loads(asyncio.run(server.media_item.fn(identifier=movie_id)))
         assert item["plex"]["rating_key"] == movie_id
         assert (
-            server.server.cache.get_payload(movie_id)["plex"]["rating_key"]
-            == movie_id
+            server.server.cache.get_payload(movie_id)["plex"]["rating_key"] == movie_id
         )
 
         ids = json.loads(asyncio.run(server.media_ids.fn(identifier=movie_id)))
@@ -144,7 +144,10 @@ def test_server_tools(monkeypatch):
                 limit=1,
             )
         )
-        assert episode_structured and episode_structured[0]["plex"]["rating_key"] == "61960"
+        assert (
+            episode_structured
+            and episode_structured[0]["plex"]["rating_key"] == "61960"
+        )
         assert episode_structured[0]["show_title"] == "Alien: Earth"
 
         rec = asyncio.run(server.recommend_media.fn(identifier=movie_id, limit=1))
@@ -168,9 +171,7 @@ def test_get_media_data_caches_external_ids(monkeypatch):
 
         original_find_records = media_helpers._find_records
 
-        async def _counting_find_records(
-            plex_server, identifier: str, limit: int = 1
-        ):
+        async def _counting_find_records(plex_server, identifier: str, limit: int = 1):
             nonlocal call_count
             call_count += 1
             return await original_find_records(plex_server, identifier, limit=limit)
@@ -227,9 +228,7 @@ def test_actor_movies(monkeypatch):
 def test_play_media_requires_configuration(monkeypatch):
     with _load_server(monkeypatch) as server:
         with pytest.raises(RuntimeError):
-            asyncio.run(
-                server.play_media.fn(identifier="49915", player="Living Room")
-            )
+            asyncio.run(server.play_media.fn(identifier="49915", player="Living Room"))
 
 
 def test_play_media_with_alias(monkeypatch):
@@ -350,9 +349,7 @@ def test_play_media_requires_player_capability(monkeypatch):
     with _load_server(monkeypatch) as server:
         monkeypatch.setattr(server, "PlexServerClient", FakePlex)
         with pytest.raises(ValueError, match="cannot be controlled for playback"):
-            asyncio.run(
-                server.play_media.fn(identifier="49915", player="machine-999")
-            )
+            asyncio.run(server.play_media.fn(identifier="49915", player="machine-999"))
 
 
 def test_match_player_fuzzy_alias_resolution():
@@ -424,8 +421,7 @@ def test_reranker_import_failure(monkeypatch, caplog):
         module = importlib.reload(importlib.import_module("mcp_plex.server"))
     assert module.server.reranker is None
     assert any(
-        "Failed to import CrossEncoder" in message
-        for message in caplog.messages
+        "Failed to import CrossEncoder" in message for message in caplog.messages
     )
     asyncio.run(module.server.close())
 
@@ -469,6 +465,7 @@ def test_rest_endpoints(monkeypatch):
         assert resp.json()["rating_key"] == "49915"
 
         spec = client.get("/openapi.json").json()
+
         def _resolve(schema: dict):
             if "$ref" in schema:
                 ref = schema["$ref"].split("/")[-1]
@@ -482,17 +479,15 @@ def test_rest_endpoints(monkeypatch):
             "schema"
         ]
         get_media_schema = _resolve(get_media_schema)
-        assert (
-            get_media_schema["properties"]["identifier"]["description"].startswith(
-                "Rating key"
-            )
+        assert get_media_schema["properties"]["identifier"]["description"].startswith(
+            "Rating key"
         )
 
         search_media = spec["paths"]["/rest/search-media"]["post"]
         assert "parameters" not in search_media or not search_media["parameters"]
-        search_schema = search_media["requestBody"]["content"][
-            "application/json"
-        ]["schema"]
+        search_schema = search_media["requestBody"]["content"]["application/json"][
+            "schema"
+        ]
         search_schema = _resolve(search_schema)
         assert "query" in search_schema["required"]
         assert "/rest/prompt/media-info" in spec["paths"]
@@ -570,6 +565,7 @@ def test_run_config_to_kwargs():
 
 def test_find_records_handles_retrieve_error(monkeypatch):
     with _load_server(monkeypatch) as module:
+
         async def fail_retrieve(*args, **kwargs):
             raise RuntimeError("boom")
 
@@ -591,8 +587,12 @@ def test_media_resources_cache_hits(monkeypatch):
         poster_cached = asyncio.run(module.media_poster.fn(identifier=rating_key))
         assert poster_cached == poster_first
 
-        background_first = asyncio.run(module.media_background.fn(identifier=rating_key))
-        background_cached = asyncio.run(module.media_background.fn(identifier=rating_key))
+        background_first = asyncio.run(
+            module.media_background.fn(identifier=rating_key)
+        )
+        background_cached = asyncio.run(
+            module.media_background.fn(identifier=rating_key)
+        )
         assert background_cached == background_first
 
 
@@ -627,6 +627,7 @@ def test_rest_prompt_invalid_json(monkeypatch):
 
 def test_rest_resource_content_types(monkeypatch):
     with _load_server(monkeypatch) as module:
+
         async def fake_read_resource(formatted: str):
             if formatted.endswith("binary"):
                 return b"binary"
@@ -667,7 +668,9 @@ def test_search_media_without_reranker(monkeypatch):
         async def immediate_to_thread(fn, *args, **kwargs):
             return fn(*args, **kwargs)
 
-        monkeypatch.setattr(module.server.qdrant_client, "query_points", fake_query_points)
+        monkeypatch.setattr(
+            module.server.qdrant_client, "query_points", fake_query_points
+        )
         monkeypatch.setattr(module.asyncio, "to_thread", immediate_to_thread)
         monkeypatch.setattr(module.server, "_reranker", None)
         monkeypatch.setattr(module.server, "_reranker_loaded", True)
@@ -717,7 +720,9 @@ def test_search_media_with_reranker(monkeypatch):
             def predict(self, pairs):
                 return [0.9, 0.1]
 
-        monkeypatch.setattr(module.server.qdrant_client, "query_points", fake_query_points)
+        monkeypatch.setattr(
+            module.server.qdrant_client, "query_points", fake_query_points
+        )
         monkeypatch.setattr(module.asyncio, "to_thread", immediate_to_thread)
         monkeypatch.setattr(module.server, "_reranker", DummyReranker())
         monkeypatch.setattr(module.server, "_reranker_loaded", True)
@@ -734,9 +739,13 @@ def test_query_media_filters(monkeypatch):
         async def fake_query_points(*args, **kwargs):
             captured.update(kwargs)
             payload = {"title": "Result", "plex": {"rating_key": "1"}}
-            return types.SimpleNamespace(points=[types.SimpleNamespace(payload=payload, score=1.0)])
+            return types.SimpleNamespace(
+                points=[types.SimpleNamespace(payload=payload, score=1.0)]
+            )
 
-        monkeypatch.setattr(module.server.qdrant_client, "query_points", fake_query_points)
+        monkeypatch.setattr(
+            module.server.qdrant_client, "query_points", fake_query_points
+        )
 
         result = asyncio.run(
             module.query_media.fn(
@@ -804,7 +813,9 @@ def test_query_media_filters_without_vectors(monkeypatch):
                 points=[types.SimpleNamespace(payload=payload, score=1.0)]
             )
 
-        monkeypatch.setattr(module.server.qdrant_client, "query_points", fake_query_points)
+        monkeypatch.setattr(
+            module.server.qdrant_client, "query_points", fake_query_points
+        )
 
         result = asyncio.run(
             module.query_media.fn(

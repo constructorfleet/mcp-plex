@@ -9,7 +9,7 @@ import pytest
 from plexapi.exceptions import PlexApiException
 
 from mcp_plex import server as server_module
-from mcp_plex.server import PlexServer, Settings
+from mcp_plex.server import PlexServer
 
 
 def test_version_fallback(monkeypatch):
@@ -29,7 +29,9 @@ def test_clear_plex_identity_cache_resets_state():
         async def close(self) -> None:
             return None
 
-    settings = server_module.server.settings.model_copy(update={"qdrant_url": ":memory:"})
+    settings = server_module.server.settings.model_copy(
+        update={"qdrant_url": ":memory:"}
+    )
     plex_server = PlexServer(settings=settings, qdrant_client=DummyClient())
     plex_server._plex_identity = {"machineIdentifier": "abc"}
     plex_server._plex_client = SimpleNamespace()
@@ -58,7 +60,9 @@ def test_request_model_returns_none_for_no_params():
 
 def test_ensure_plex_configuration_requires_settings(monkeypatch):
     original_settings = server_module.server.settings
-    modified = original_settings.model_copy(update={"plex_url": None, "plex_token": None})
+    modified = original_settings.model_copy(
+        update={"plex_url": None, "plex_token": None}
+    )
     monkeypatch.setattr(server_module.server, "_settings", modified)
     try:
         with pytest.raises(RuntimeError):

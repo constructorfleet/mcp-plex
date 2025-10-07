@@ -36,7 +36,9 @@ def test_run_requires_plex_configuration(monkeypatch):
 
         monkeypatch.setattr(loader, "_ensure_collection", _noop)
 
-        with pytest.raises(RuntimeError, match="PLEX_URL and PLEX_TOKEN must be provided"):
+        with pytest.raises(
+            RuntimeError, match="PLEX_URL and PLEX_TOKEN must be provided"
+        ):
             await loader.run(
                 plex_url=None,
                 plex_token=None,

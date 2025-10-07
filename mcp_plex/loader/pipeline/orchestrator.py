@@ -31,18 +31,15 @@ class _StageFailure(Exception):
 
 
 class IngestionStageProtocol(Protocol):
-    async def run(self) -> None:
-        ...
+    async def run(self) -> None: ...
 
 
 class EnrichmentStageProtocol(Protocol):
-    async def run(self) -> None:
-        ...
+    async def run(self) -> None: ...
 
 
 class PersistenceStageProtocol(Protocol):
-    async def run(self, worker_id: int) -> None:
-        ...
+    async def run(self, worker_id: int) -> None: ...
 
 
 class LoaderOrchestrator:
@@ -127,9 +124,7 @@ class LoaderOrchestrator:
             self._logger.debug("%s cancelled.", stage_name)
             raise
         except BaseException as exc:
-            self._logger.debug(
-                "%s raised %s", stage_name, exc, exc_info=exc
-            )
+            self._logger.debug("%s raised %s", stage_name, exc, exc_info=exc)
             raise _StageFailure(spec, exc) from exc
         else:
             self._logger.info("%s completed successfully.", stage_name)

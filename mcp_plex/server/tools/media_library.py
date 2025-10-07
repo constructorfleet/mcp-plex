@@ -1,4 +1,5 @@
 """Media discovery and metadata tools for the Plex MCP server."""
+
 from __future__ import annotations
 
 import asyncio
@@ -28,7 +29,7 @@ def register_media_library_tools(server: "PlexServer") -> None:
                 description="Rating key, IMDb/TMDb ID, or media title",
                 examples=["49915", "tt8367814", "The Gentlemen"],
             ),
-        ]
+        ],
     ) -> list[AggregatedMediaItem]:
         """Retrieve media items by rating key, IMDb/TMDb ID or title."""
 
@@ -95,9 +96,7 @@ def register_media_library_tools(server: "PlexServer") -> None:
                 plex_info.get("rating_key")
             )
             if rating_key:
-                server.cache.set_payload(
-                    rating_key, cast(dict[str, JSONValue], data)
-                )
+                server.cache.set_payload(rating_key, cast(dict[str, JSONValue], data))
                 thumb = plex_info.get("thumb")
                 if isinstance(thumb, str) and thumb:
                     server.cache.set_poster(rating_key, thumb)
@@ -233,7 +232,9 @@ def register_media_library_tools(server: "PlexServer") -> None:
         ] = None,
         actors: Annotated[
             Sequence[str] | None,
-            Field(description="Match actors by name", examples=[["Matthew McConaughey"]]),
+            Field(
+                description="Match actors by name", examples=[["Matthew McConaughey"]]
+            ),
         ] = None,
         directors: Annotated[
             Sequence[str] | None,
@@ -249,7 +250,10 @@ def register_media_library_tools(server: "PlexServer") -> None:
         ] = None,
         collections: Annotated[
             Sequence[str] | None,
-            Field(description="Match Plex collection names", examples=[["John Wick Collection"]]),
+            Field(
+                description="Match Plex collection names",
+                examples=[["John Wick Collection"]],
+            ),
         ] = None,
         show_title: Annotated[
             str | None,
@@ -337,14 +341,18 @@ def register_media_library_tools(server: "PlexServer") -> None:
             vector_queries.append(
                 (
                     "dense",
-                    models.Document(text=dense_query, model=server.settings.dense_model),
+                    models.Document(
+                        text=dense_query, model=server.settings.dense_model
+                    ),
                 )
             )
         if sparse_query:
             vector_queries.append(
                 (
                     "sparse",
-                    models.Document(text=sparse_query, model=server.settings.sparse_model),
+                    models.Document(
+                        text=sparse_query, model=server.settings.sparse_model
+                    ),
                 )
             )
 
@@ -352,7 +360,9 @@ def register_media_library_tools(server: "PlexServer") -> None:
         keyword_prefetch_conditions: list[models.FieldCondition] = []
 
         if title:
-            must.append(models.FieldCondition(key="title", match=models.MatchText(text=title)))
+            must.append(
+                models.FieldCondition(key="title", match=models.MatchText(text=title))
+            )
         media_type = type
         if media_type:
             condition = models.FieldCondition(
@@ -361,7 +371,9 @@ def register_media_library_tools(server: "PlexServer") -> None:
             must.append(condition)
             keyword_prefetch_conditions.append(condition)
         if year is not None:
-            must.append(models.FieldCondition(key="year", match=models.MatchValue(value=year)))
+            must.append(
+                models.FieldCondition(key="year", match=models.MatchValue(value=year))
+            )
         if year_from is not None or year_to is not None:
             rng: dict[str, int] = {}
             if year_from is not None:
@@ -375,7 +387,9 @@ def register_media_library_tools(server: "PlexServer") -> None:
                 rng_at["gte"] = added_after
             if added_before is not None:
                 rng_at["lte"] = added_before
-            must.append(models.FieldCondition(key="added_at", range=models.Range(**rng_at)))
+            must.append(
+                models.FieldCondition(key="added_at", range=models.Range(**rng_at))
+            )
 
         for actor in _listify(actors):
             condition = models.FieldCondition(
@@ -429,21 +443,31 @@ def register_media_library_tools(server: "PlexServer") -> None:
 
         if summary:
             must.append(
-                models.FieldCondition(key="summary", match=models.MatchText(text=summary))
+                models.FieldCondition(
+                    key="summary", match=models.MatchText(text=summary)
+                )
             )
         if overview:
             must.append(
-                models.FieldCondition(key="overview", match=models.MatchText(text=overview))
+                models.FieldCondition(
+                    key="overview", match=models.MatchText(text=overview)
+                )
             )
         if plot:
-            must.append(models.FieldCondition(key="plot", match=models.MatchText(text=plot)))
+            must.append(
+                models.FieldCondition(key="plot", match=models.MatchText(text=plot))
+            )
         if tagline:
             must.append(
-                models.FieldCondition(key="tagline", match=models.MatchText(text=tagline))
+                models.FieldCondition(
+                    key="tagline", match=models.MatchText(text=tagline)
+                )
             )
         if reviews:
             must.append(
-                models.FieldCondition(key="reviews", match=models.MatchText(text=reviews))
+                models.FieldCondition(
+                    key="reviews", match=models.MatchText(text=reviews)
+                )
             )
 
         if plex_rating_key:

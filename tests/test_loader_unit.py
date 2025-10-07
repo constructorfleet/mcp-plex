@@ -81,6 +81,8 @@ def test_loader_import_requires_plexapi(monkeypatch):
     assert module.PlexServer is PlexServer
     assert module.PlexPartialObject is PlexPartialObject
     assert not hasattr(module, "PartialPlexObject")
+
+
 def test_load_from_sample_returns_items():
     sample_dir = Path(__file__).resolve().parents[1] / "sample-data"
     items = loader_samples._load_from_sample(sample_dir)
@@ -102,7 +104,9 @@ def test_fetch_imdb_cache_miss(tmp_path):
         )
 
     async def main():
-        async with httpx.AsyncClient(transport=httpx.MockTransport(imdb_mock)) as client:
+        async with httpx.AsyncClient(
+            transport=httpx.MockTransport(imdb_mock)
+        ) as client:
             result = await _fetch_imdb(client, "tt1", config)
             assert result is not None
 
@@ -123,7 +127,9 @@ def test_fetch_imdb_cache_hit(tmp_path):
         raise AssertionError("network should not be called")
 
     async def main():
-        async with httpx.AsyncClient(transport=httpx.MockTransport(error_mock)) as client:
+        async with httpx.AsyncClient(
+            transport=httpx.MockTransport(error_mock)
+        ) as client:
             result = await _fetch_imdb(client, "tt1", config)
             assert result is not None
             assert result.id == "tt1"
@@ -158,7 +164,9 @@ def test_fetch_imdb_retries_on_429(monkeypatch, tmp_path):
     monkeypatch.setattr(asyncio, "sleep", fake_sleep)
 
     async def main():
-        async with httpx.AsyncClient(transport=httpx.MockTransport(imdb_mock)) as client:
+        async with httpx.AsyncClient(
+            transport=httpx.MockTransport(imdb_mock)
+        ) as client:
             result = await _fetch_imdb(client, "tt1", config)
             assert result is not None
 
@@ -192,7 +200,9 @@ def test_imdb_retry_queue_persists_and_retries(tmp_path):
             backoff=0,
             retry_queue=queue,
         )
-        async with httpx.AsyncClient(transport=httpx.MockTransport(first_transport)) as client:
+        async with httpx.AsyncClient(
+            transport=httpx.MockTransport(first_transport)
+        ) as client:
             await _process_imdb_retry_queue(client, config)
             await _fetch_imdb(client, "tt0111161", config)
         _persist_imdb_retry_queue(queue_path, config.retry_queue)
@@ -211,7 +221,9 @@ def test_imdb_retry_queue_persists_and_retries(tmp_path):
         )
         assert config.retry_queue.qsize() == 1
         assert config.retry_queue.snapshot() == ["tt0111161"]
-        async with httpx.AsyncClient(transport=httpx.MockTransport(second_transport)) as client:
+        async with httpx.AsyncClient(
+            transport=httpx.MockTransport(second_transport)
+        ) as client:
             await _process_imdb_retry_queue(client, config)
         _persist_imdb_retry_queue(queue_path, config.retry_queue)
         return config
@@ -245,6 +257,8 @@ def test_process_imdb_retry_queue_requeues(monkeypatch):
     asyncio.run(run_test())
     assert queue.qsize() == 1
     assert queue.snapshot() == ["tt0111161"]
+
+
 def test_upsert_in_batches_handles_errors():
     class DummyClient:
         def __init__(self):
@@ -309,9 +323,7 @@ def test_process_qdrant_retry_queue_retries_batches(monkeypatch):
     retry_queue: asyncio.Queue[list[models.PointStruct]] = asyncio.Queue()
 
     async def main() -> None:
-        retry_queue.put_nowait(
-            [models.PointStruct(id=1, vector={}, payload={})]
-        )
+        retry_queue.put_nowait([models.PointStruct(id=1, vector={}, payload={})])
         config = QdrantRuntimeConfig(retry_attempts=2, retry_backoff=0.01)
 
         sleeps: list[float] = []

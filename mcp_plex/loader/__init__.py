@@ -1,4 +1,5 @@
 """Loader orchestration utilities and staged pipeline helpers."""
+
 from __future__ import annotations
 
 import asyncio
@@ -183,7 +184,9 @@ def _build_loader_orchestrator(
     max_concurrent_upserts: int,
     imdb_config: IMDbRuntimeConfig,
     qdrant_config: QdrantRuntimeConfig,
-) -> tuple[LoaderOrchestrator, list[AggregatedItem], asyncio.Queue[list[models.PointStruct]]]:
+) -> tuple[
+    LoaderOrchestrator, list[AggregatedItem], asyncio.Queue[list[models.PointStruct]]
+]:
     """Wire the staged loader pipeline and return the orchestrator helpers."""
 
     from .pipeline.ingestion import IngestionStage
@@ -206,8 +209,7 @@ def _build_loader_orchestrator(
             return
         items.extend(batch)
         points = [
-            build_point(item, dense_model_name, sparse_model_name)
-            for item in batch
+            build_point(item, dense_model_name, sparse_model_name) for item in batch
         ]
         for point_chunk in chunk_sequence(points, upsert_buffer_size):
             await _upsert_in_batches(
@@ -332,7 +334,9 @@ async def run(
     require_positive(max_concurrent_upserts, name="max_concurrent_upserts")
     require_positive(qdrant_retry_attempts, name="qdrant_retry_attempts")
 
-    imdb_retry_queue = _load_imdb_retry_queue(imdb_queue_path) if imdb_queue_path else IMDbRetryQueue()
+    imdb_retry_queue = (
+        _load_imdb_retry_queue(imdb_queue_path) if imdb_queue_path else IMDbRetryQueue()
+    )
     imdb_config = IMDbRuntimeConfig(
         cache=imdb_cache,
         max_retries=imdb_max_retries,
@@ -443,7 +447,9 @@ async def run(
         if imdb_queue_path:
             _persist_imdb_retry_queue(imdb_queue_path, imdb_config.retry_queue)
 
-        json.dump([item.model_dump(mode="json") for item in items], fp=sys.stdout, indent=2)
+        json.dump(
+            [item.model_dump(mode="json") for item in items], fp=sys.stdout, indent=2
+        )
         sys.stdout.write("\n")
     finally:
         await client.close()
@@ -483,9 +489,7 @@ async def load_media(
     """Orchestrate one or more runs of :func:`run`."""
 
     if delay < 0:
-        raise ValueError(
-            f"Delay between runs must be non-negative; received {delay!r}"
-        )
+        raise ValueError(f"Delay between runs must be non-negative; received {delay!r}")
 
     while True:
         await run(
@@ -521,4 +525,3 @@ async def load_media(
             break
 
         await asyncio.sleep(delay)
-
