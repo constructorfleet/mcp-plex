@@ -2,12 +2,19 @@
 
 from __future__ import annotations
 
-from typing import Any, Mapping, TYPE_CHECKING, cast
+from typing import Any, Mapping, Sequence, TYPE_CHECKING, cast
 
 from qdrant_client import models
 
 from ..common.types import JSONValue
-from .models import AggregatedMediaItem, PlexMediaMetadata, QdrantMediaPayload
+from .models import (
+    AggregatedMediaItem,
+    MediaSummaryIdentifiers,
+    MediaSummaryResponse,
+    PlexMediaMetadata,
+    QdrantMediaPayload,
+    SummarizedMediaItem,
+)
 
 if TYPE_CHECKING:  # pragma: no cover - imported for type checking only
     from . import PlexServer
@@ -140,3 +147,196 @@ async def _get_media_data(server: "PlexServer", identifier: str) -> AggregatedMe
         if isinstance(art, str) and art:
             server.cache.set_background(rating_key, art)
     return payload
+
+
+def _coerce_text(value: Any) -> str | None:
+    """Convert raw values into a cleaned string when possible."""
+
+    if isinstance(value, str):
+        text = value.strip()
+        return text or None
+    if isinstance(value, Sequence) and not isinstance(value, (str, bytes, bytearray)):
+        parts = [
+            str(item).strip()
+            for item in value
+            if isinstance(item, str) and item.strip()
+        ]
+        if parts:
+            return "; ".join(parts)
+    return None
+
+
+def _coerce_string_list(value: Any) -> list[str]:
+    """Extract a list of readable strings from mixed payload values."""
+
+    items: list[str] = []
+    if isinstance(value, str):
+        text = value.strip()
+        if text:
+            items.append(text)
+        return items
+    if isinstance(value, Sequence) and not isinstance(value, (str, bytes, bytearray)):
+        for entry in value:
+            if isinstance(entry, str):
+                text = entry.strip()
+                if text:
+                    items.append(text)
+            elif isinstance(entry, Mapping):
+                for key in ("tag", "name", "title", "role"):
+                    maybe = entry.get(key)
+                    if isinstance(maybe, str):
+                        text = maybe.strip()
+                        if text:
+                            items.append(text)
+                            break
+    return items
+
+
+def _first_text(*values: Any) -> str | None:
+    """Return the first non-empty string from the provided values."""
+
+    for value in values:
+        text = _coerce_text(value)
+        if text:
+            return text
+    return None
+
+
+def _extract_review_snippet(value: Any) -> str | None:
+    """Return a representative review snippet if one exists."""
+
+    if not isinstance(value, Sequence) or isinstance(value, (str, bytes, bytearray)):
+        return None
+    for entry in value:
+        if isinstance(entry, str):
+            text = entry.strip()
+            if text:
+                return text
+        elif isinstance(entry, Mapping):
+            for key in ("quote", "summary", "text", "content"):
+                maybe = entry.get(key)
+                if isinstance(maybe, str):
+                    text = maybe.strip()
+                    if text:
+                        return text
+    return None
+
+
+def summarize_media_items_for_llm(
+    items: Sequence[AggregatedMediaItem],
+) -> MediaSummaryResponse:
+    """Create a concise summary that can be read by a voice assistant or LLM."""
+
+    summaries: list[SummarizedMediaItem] = []
+    for media in items:
+        plex_info = _extract_plex_metadata(media)
+        summary_item: SummarizedMediaItem = {}
+
+        title = _first_text(media.get("title"), plex_info.get("title"))
+        if title:
+            summary_item["title"] = title
+
+        media_type = _first_text(media.get("type"), plex_info.get("type"))
+        if media_type:
+            summary_item["type"] = media_type
+
+        year = media.get("year")
+        if year is None:
+            year = plex_info.get("year")
+        if isinstance(year, int):
+            summary_item["year"] = year
+
+        show = _first_text(
+            media.get("show_title"),
+            plex_info.get("grandparent_title"),
+            plex_info.get("parent_title"),
+        )
+        if show:
+            summary_item["show"] = show
+
+        season = media.get("season_number")
+        if season is None:
+            season = plex_info.get("parent_index")
+        if isinstance(season, int):
+            summary_item["season"] = season
+
+        episode = media.get("episode_number")
+        if episode is None:
+            episode = plex_info.get("index")
+        if isinstance(episode, int):
+            summary_item["episode"] = episode
+
+        genres = _coerce_string_list(media.get("genres"))
+        if genres:
+            summary_item["genres"] = genres
+
+        collections = _coerce_string_list(media.get("collections"))
+        if collections:
+            summary_item["collections"] = collections
+
+        actors = _coerce_string_list(media.get("actors"))
+        if not actors:
+            actors = _coerce_string_list(plex_info.get("actors"))
+        if actors:
+            summary_item["actors"] = actors
+
+        directors = _coerce_string_list(media.get("directors"))
+        if not directors:
+            directors = _coerce_string_list(plex_info.get("directors"))
+        if directors:
+            summary_item["directors"] = directors
+
+        writers = _coerce_string_list(media.get("writers"))
+        if not writers:
+            writers = _coerce_string_list(plex_info.get("writers"))
+        if writers:
+            summary_item["writers"] = writers
+
+        tagline = _first_text(media.get("tagline"), plex_info.get("tagline"))
+        main_summary = _first_text(
+            media.get("summary"),
+            plex_info.get("summary"),
+            media.get("overview"),
+            media.get("plot"),
+        )
+        review_snippet = _extract_review_snippet(media.get("reviews"))
+
+        description_parts: list[str] = []
+        if tagline:
+            description_parts.append(tagline)
+        if main_summary:
+            description_parts.append(main_summary)
+        elif review_snippet:
+            description_parts.append(review_snippet)
+        if actors:
+            description_parts.append(f"Starring {', '.join(actors[:5])}")
+        if show and summary_item.get("type") == "episode":
+            description_parts.append(f"Episode of {show}")
+
+        description = " ".join(description_parts)
+        if description:
+            summary_item["description"] = description
+
+        identifiers: MediaSummaryIdentifiers = {}
+        rating_key = _normalize_identifier(plex_info.get("rating_key"))
+        if rating_key:
+            identifiers["rating_key"] = rating_key
+        imdb_value = media.get("imdb")
+        if isinstance(imdb_value, Mapping):
+            imdb_id = _normalize_identifier(imdb_value.get("id"))
+            if imdb_id:
+                identifiers["imdb"] = imdb_id
+        tmdb_value = media.get("tmdb")
+        if isinstance(tmdb_value, Mapping):
+            tmdb_id = _normalize_identifier(tmdb_value.get("id"))
+            if tmdb_id:
+                identifiers["tmdb"] = tmdb_id
+        if identifiers:
+            summary_item["identifiers"] = identifiers
+
+        summaries.append(summary_item)
+
+    return {
+        "total_results": len(items),
+        "results": summaries,
+    }
