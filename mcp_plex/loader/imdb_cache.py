@@ -17,7 +17,7 @@ class IMDbCache:
         if path.exists():
             try:
                 raw_contents = path.read_text(encoding="utf-8")
-            except (OSError, UnicodeDecodeError) as exc:
+            except Exception as exc:  # noqa: BLE001 - ensure any read failure is surfaced
                 self._logger.warning(
                     "Failed to read IMDb cache from %s; starting with empty cache.",
                     path,
@@ -26,7 +26,7 @@ class IMDbCache:
             else:
                 try:
                     self._data = json.loads(raw_contents)
-                except json.JSONDecodeError as exc:
+                except (json.JSONDecodeError, UnicodeError) as exc:
                     self._logger.warning(
                         "Failed to decode IMDb cache JSON from %s; starting with empty cache.",
                         path,
