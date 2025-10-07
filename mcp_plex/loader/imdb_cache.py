@@ -5,6 +5,8 @@ import logging
 from pathlib import Path
 from typing import TypeAlias, cast
 
+from pydantic import ValidationError
+
 from ..common.types import IMDbTitle
 
 JSONScalar: TypeAlias = str | int | float | bool | None
@@ -44,10 +46,24 @@ class IMDbCache:
                     )
                 else:
                     if isinstance(loaded, dict):
-                        self._data = {
-                            str(key): cast(CachedIMDbPayload, value)
-                            for key, value in loaded.items()
-                        }
+                        hydrated: dict[str, CachedIMDbPayload] = {}
+                        for key, value in loaded.items():
+                            imdb_id = str(key)
+                            payload: CachedIMDbPayload
+                            if isinstance(value, dict):
+                                try:
+                                    payload = IMDbTitle.model_validate(value)
+                                except ValidationError as exc:
+                                    self._logger.debug(
+                                        "Failed to validate cached IMDb payload for %s; falling back to raw JSON.",
+                                        imdb_id,
+                                        exc_info=exc,
+                                    )
+                                    payload = cast(JSONValue, value)
+                            else:
+                                payload = cast(JSONValue, value)
+                            hydrated[imdb_id] = payload
+                        self._data = hydrated
                     else:
                         self._logger.warning(
                             "IMDb cache at %s did not contain an object; ignoring its contents.",
