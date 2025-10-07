@@ -163,6 +163,7 @@ async def _process_imdb_retry_queue(
 def _persist_imdb_retry_queue(path: Path, queue: IMDbRetryQueue) -> None:
     """Persist the retry queue to disk."""
 
+    path.parent.mkdir(parents=True, exist_ok=True)
     path.write_text(json.dumps(queue.snapshot()))
 
 
