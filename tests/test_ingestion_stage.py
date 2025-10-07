@@ -117,6 +117,47 @@ def test_ingestion_stage_sample_partial_batches() -> None:
     assert batches_ingested == 2
 
 
+@pytest.mark.parametrize(
+    ("movie_batch_size", "episode_batch_size", "expected_name"),
+    [
+        (0, 1, "movie_batch_size"),
+        (1, 0, "episode_batch_size"),
+        (-3, 1, "movie_batch_size"),
+        (1, -7, "episode_batch_size"),
+    ],
+)
+def test_ingestion_stage_ingest_plex_requires_positive_batch_sizes(
+    movie_batch_size: int, episode_batch_size: int, expected_name: str
+) -> None:
+    async def scenario() -> ValueError:
+        queue: asyncio.Queue = asyncio.Queue()
+        stage = IngestionStage(
+            plex_server=create_autospec(PlexServer, instance=True),
+            sample_items=None,
+            movie_batch_size=1,
+            episode_batch_size=1,
+            sample_batch_size=1,
+            output_queue=queue,
+            completion_sentinel=INGEST_DONE,
+        )
+
+        plex_server = create_autospec(PlexServer, instance=True)
+
+        with pytest.raises(ValueError) as excinfo:
+            await stage._ingest_plex(
+                plex_server=plex_server,
+                movie_batch_size=movie_batch_size,
+                episode_batch_size=episode_batch_size,
+                output_queue=queue,
+                logger=stage.logger,
+            )
+
+        return excinfo.value
+
+    error = asyncio.run(scenario())
+    assert str(error) == f"{expected_name} must be positive"
+
+
 def test_ingestion_stage_backpressure_handling() -> None:
     async def scenario() -> tuple[
         list[SampleBatch],

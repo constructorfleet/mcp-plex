@@ -12,6 +12,7 @@ import logging
 from typing import Callable, Iterable, Sequence
 
 from ...common.types import AggregatedItem
+from ...common.validation import require_positive
 from .channels import (
     EpisodeBatch,
     IngestQueue,
@@ -156,6 +157,15 @@ class IngestionStage:
         logger: logging.Logger,
     ) -> None:
         """Retrieve Plex media and place batches onto *output_queue*."""
+
+        movie_batch_size = require_positive(
+            int(movie_batch_size),
+            name="movie_batch_size",
+        )
+        episode_batch_size = require_positive(
+            int(episode_batch_size),
+            name="episode_batch_size",
+        )
 
         library = plex_server.library
 
