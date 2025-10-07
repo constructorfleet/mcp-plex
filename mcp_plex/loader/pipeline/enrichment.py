@@ -272,7 +272,7 @@ class EnrichmentStage:
         logger: logging.Logger | None = None,
     ) -> None:
         self._http_client_factory = http_client_factory
-        self._tmdb_api_key = str(tmdb_api_key)
+        self._tmdb_api_key = (tmdb_api_key or "").strip()
         self._ingest_queue = ingest_queue
         self._persistence_queue = persistence_queue
         self._imdb_retry_queue = imdb_retry_queue or IMDbRetryQueue()
@@ -596,6 +596,8 @@ class EnrichmentStage:
     ) -> TMDBShow | None:
         """Return the TMDb show for *tmdb_id*, using the in-memory cache."""
 
+        if not self._tmdb_api_key:
+            return None
         tmdb_id_str = str(tmdb_id)
         if tmdb_id_str in self._show_tmdb_cache:
             return self._show_tmdb_cache[tmdb_id_str]
