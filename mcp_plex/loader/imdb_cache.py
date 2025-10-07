@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import json
+import logging
 from pathlib import Path
 from typing import Any, Dict
 
@@ -8,13 +9,27 @@ from typing import Any, Dict
 class IMDbCache:
     """Simple persistent cache for IMDb API responses."""
 
+    _logger = logging.getLogger(__name__)
+
     def __init__(self, path: Path) -> None:
         self.path = path
         self._data: Dict[str, Any]
         if path.exists():
             try:
                 self._data = json.loads(path.read_text())
-            except Exception:
+            except json.JSONDecodeError as exc:
+                self._logger.warning(
+                    "Failed to load IMDb cache from %s; starting with empty cache.",
+                    path,
+                    exc_info=exc,
+                )
+                self._data = {}
+            except OSError as exc:
+                self._logger.warning(
+                    "Failed to read IMDb cache from %s; starting with empty cache.",
+                    path,
+                    exc_info=exc,
+                )
                 self._data = {}
         else:
             self._data = {}
