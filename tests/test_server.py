@@ -42,6 +42,10 @@ def _load_server(monkeypatch):
             super().__init__(*args, **kwargs)
             self.__class__._initialized = True
 
+        async def close(self) -> None:  # type: ignore[override]
+            """Prevent sample data teardown from closing the shared instance."""
+            return None
+
     monkeypatch.setattr(loader, "AsyncQdrantClient", SharedClient)
     monkeypatch.setattr(async_qdrant_client, "AsyncQdrantClient", SharedClient)
     sample_dir = Path(__file__).resolve().parents[1] / "sample-data"
