@@ -10,6 +10,7 @@ from qdrant_client import models
 import pytest
 
 from mcp_plex import loader
+import mcp_plex.loader.qdrant as loader_qdrant
 from mcp_plex.loader.imdb_cache import IMDbCache
 from mcp_plex.loader import (
     IMDbRuntimeConfig,
@@ -20,7 +21,12 @@ from mcp_plex.loader import (
     _load_imdb_retry_queue,
     _persist_imdb_retry_queue,
     _process_imdb_retry_queue,
+)
+from mcp_plex.loader.qdrant import (
+    _ensure_collection,
+    _process_qdrant_retry_queue,
     _resolve_dense_model_params,
+    _upsert_in_batches,
     build_point,
 )
 from mcp_plex.loader.pipeline.channels import IMDbRetryQueue
@@ -239,7 +245,7 @@ def test_process_imdb_retry_queue_requeues(monkeypatch):
     asyncio.run(run_test())
     assert queue.qsize() == 1
     assert queue.snapshot() == ["tt0111161"]
-def test_upsert_in_batches_handles_errors(monkeypatch):
+def test_upsert_in_batches_handles_errors():
     class DummyClient:
         def __init__(self):
             self.calls = 0
@@ -252,7 +258,7 @@ def test_upsert_in_batches_handles_errors(monkeypatch):
     client = DummyClient()
     points = [models.PointStruct(id=i, vector={}, payload={}) for i in range(3)]
     asyncio.run(
-        loader._upsert_in_batches(
+        _upsert_in_batches(
             client,
             "c",
             points,
@@ -262,7 +268,7 @@ def test_upsert_in_batches_handles_errors(monkeypatch):
     assert client.calls == 3
 
 
-def test_upsert_in_batches_enqueues_retry_batches(monkeypatch):
+def test_upsert_in_batches_enqueues_retry_batches():
     class DummyClient:
         def __init__(self):
             self.calls = 0
@@ -277,7 +283,7 @@ def test_upsert_in_batches_enqueues_retry_batches(monkeypatch):
     retry_queue: asyncio.Queue[list[models.PointStruct]] = asyncio.Queue()
 
     async def main() -> None:
-        await loader._upsert_in_batches(
+        await _upsert_in_batches(
             client,
             "collection",
             points,
@@ -313,9 +319,9 @@ def test_process_qdrant_retry_queue_retries_batches(monkeypatch):
         async def fake_sleep(delay: float) -> None:
             sleeps.append(delay)
 
-        monkeypatch.setattr(loader.asyncio, "sleep", fake_sleep)
+        monkeypatch.setattr(loader_qdrant.asyncio, "sleep", fake_sleep)
 
-        await loader._process_qdrant_retry_queue(
+        await _process_qdrant_retry_queue(
             client,
             "collection",
             retry_queue,
@@ -370,7 +376,7 @@ def test_ensure_collection_skips_existing():
             raise AssertionError("should not create index")
 
     asyncio.run(
-        loader._ensure_collection(
+        _ensure_collection(
             DummyClient(),
             "media-items",
             dense_size=1,
