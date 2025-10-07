@@ -9,9 +9,10 @@ from __future__ import annotations
 
 import asyncio
 import logging
-from typing import Sequence
+from typing import Callable, Iterable, Sequence
 
 from ...common.types import AggregatedItem
+from ...common.validation import require_positive
 from .channels import (
     EpisodeBatch,
     IngestQueue,
@@ -157,27 +158,76 @@ class IngestionStage:
     ) -> None:
         """Retrieve Plex media and place batches onto *output_queue*."""
 
+        movie_batch_size = require_positive(
+            int(movie_batch_size),
+            name="movie_batch_size",
+        )
+        episode_batch_size = require_positive(
+            int(episode_batch_size),
+            name="episode_batch_size",
+        )
+
         library = plex_server.library
 
+        def _log_discovered_count(
+            *, section: object, descriptor: str
+        ) -> int | None:
+            try:
+                total = getattr(section, "totalSize")  # type: ignore[assignment]
+            except Exception:  # pragma: no cover - defensive guard
+                total = None
+            if isinstance(total, int):
+                logger.info(
+                    "Discovered %d Plex %s(s) for ingestion.",
+                    total,
+                    descriptor,
+                )
+                return total
+            return None
+
+        def _iter_section_items(
+            *,
+            fetch_page: Callable[[int], Sequence[Movie | Show]],
+            batch_size: int,
+        ) -> Iterable[Sequence[Movie | Show]]:
+            start = 0
+            while True:
+                page = list(fetch_page(start))
+                if not page:
+                    break
+                yield page
+                if len(page) < batch_size:
+                    break
+                start += len(page)
+
         movies_section = library.section("Movies")
-        movies: list[Movie] = list(movies_section.all())
-        logger.info(
-            "Discovered %d Plex movie(s) for ingestion.",
-            len(movies),
+        discovered_movies = _log_discovered_count(
+            section=movies_section,
+            descriptor="movie",
         )
+
         movie_batches = 0
-        for batch_index, chunk in enumerate(
-            chunk_sequence(movies, movie_batch_size), start=1
+        movie_total = 0
+
+        def _fetch_movies(start: int) -> Sequence[Movie]:
+            return movies_section.search(
+                container_start=start,
+                container_size=movie_batch_size,
+            )
+
+        for batch_index, batch_movies in enumerate(
+            _iter_section_items(fetch_page=_fetch_movies, batch_size=movie_batch_size),
+            start=1,
         ):
-            batch_movies = list(chunk)
             if not batch_movies:
                 continue
 
-            batch = MovieBatch(movies=batch_movies)
+            batch = MovieBatch(movies=list(batch_movies))
             await output_queue.put(batch)
             self._items_ingested += len(batch_movies)
             self._batches_ingested += 1
             movie_batches += 1
+            movie_total += len(batch_movies)
             logger.info(
                 "Queued Plex movie batch %d with %d movies (total items=%d).",
                 batch_index,
@@ -185,42 +235,110 @@ class IngestionStage:
                 self._items_ingested,
             )
 
+        if discovered_movies is None:
+            logger.info(
+                "Discovered %d Plex movie(s) for ingestion.",
+                movie_total,
+            )
+
         shows_section = library.section("TV Shows")
-        shows: list[Show] = list(shows_section.all())
-        logger.info(
-            "Discovered %d Plex show(s) for ingestion.",
-            len(shows),
+        discovered_shows = _log_discovered_count(
+            section=shows_section,
+            descriptor="show",
         )
+
+        def _fetch_shows(start: int) -> Sequence[Show]:
+            return shows_section.search(
+                container_start=start,
+                container_size=max(1, episode_batch_size),
+            )
+
+        show_total = 0
         episode_batches = 0
         episode_total = 0
-        for show in shows:
-            show_title = getattr(show, "title", str(show))
-            seasons: list[Season] = list(show.seasons())
-            episodes: list[Episode] = []
-            for season in seasons:
-                episodes.extend(season.episodes())
-            if not episodes:
-                logger.debug("Show %s yielded no episodes for ingestion.", show_title)
-            for batch_index, chunk in enumerate(
-                chunk_sequence(episodes, episode_batch_size), start=1
-            ):
-                batch_episodes = list(chunk)
-                if not batch_episodes:
-                    continue
 
-                batch = EpisodeBatch(show=show, episodes=batch_episodes)
-                await output_queue.put(batch)
-                self._items_ingested += len(batch_episodes)
-                self._batches_ingested += 1
-                episode_batches += 1
-                episode_total += len(batch_episodes)
-                logger.info(
-                    "Queued Plex episode batch %d for %s with %d episodes (total items=%d).",
-                    batch_index,
-                    show_title,
-                    len(batch_episodes),
-                    self._items_ingested,
-                )
+        for show_batch in _iter_section_items(
+            fetch_page=_fetch_shows,
+            batch_size=max(1, episode_batch_size),
+        ):
+            for show in show_batch:
+                show_total += 1
+                show_title = getattr(show, "title", str(show))
+                show_episode_count = 0
+                pending_episodes: list[Episode] = []
+                show_batch_index = 0
+
+                seasons: Sequence[Season] = show.seasons()
+                for season in seasons:
+                    start = 0
+                    while True:
+                        season_page = list(
+                            season.episodes(
+                                container_start=start,
+                                container_size=episode_batch_size,
+                            )
+                        )
+                        if not season_page:
+                            break
+
+                        show_episode_count += len(season_page)
+                        pending_episodes.extend(season_page)
+
+                        while len(pending_episodes) >= episode_batch_size:
+                            batch_episodes = pending_episodes[:episode_batch_size]
+                            pending_episodes = pending_episodes[episode_batch_size:]
+                            show_batch_index += 1
+                            batch = EpisodeBatch(
+                                show=show,
+                                episodes=list(batch_episodes),
+                            )
+                            await output_queue.put(batch)
+                            self._items_ingested += len(batch_episodes)
+                            self._batches_ingested += 1
+                            episode_batches += 1
+                            episode_total += len(batch_episodes)
+                            logger.info(
+                                "Queued Plex episode batch %d for %s with %d episodes (total items=%d).",
+                                show_batch_index,
+                                show_title,
+                                len(batch_episodes),
+                                self._items_ingested,
+                            )
+
+                        if len(season_page) < episode_batch_size:
+                            break
+                        start += len(season_page)
+
+                if pending_episodes:
+                    show_batch_index += 1
+                    batch = EpisodeBatch(
+                        show=show,
+                        episodes=list(pending_episodes),
+                    )
+                    await output_queue.put(batch)
+                    self._items_ingested += len(pending_episodes)
+                    self._batches_ingested += 1
+                    episode_batches += 1
+                    episode_total += len(pending_episodes)
+                    logger.info(
+                        "Queued Plex episode batch %d for %s with %d episodes (total items=%d).",
+                        show_batch_index,
+                        show_title,
+                        len(pending_episodes),
+                        self._items_ingested,
+                    )
+
+                if show_episode_count == 0:
+                    logger.debug(
+                        "Show %s yielded no episodes for ingestion.",
+                        show_title,
+                    )
+
+        if discovered_shows is None:
+            logger.info(
+                "Discovered %d Plex show(s) for ingestion.",
+                show_total,
+            )
 
         logger.debug(
             "Plex ingestion summary: %d movie batch(es), %d episode batch(es), %d episode(s).",
