@@ -4,7 +4,8 @@ import asyncio
 import importlib
 import pytest
 
-from mcp_plex import server
+from mcp_plex import server as server_package
+from mcp_plex.server import cli as server
 
 
 @pytest.fixture(scope="module", autouse=True)
@@ -54,12 +55,14 @@ def test_env_model_overrides(monkeypatch):
     monkeypatch.setenv("DENSE_MODEL", "foo")
     monkeypatch.setenv("SPARSE_MODEL", "bar")
     asyncio.run(server.server.close())
+    importlib.reload(server_package)
     importlib.reload(server)
     assert server.settings.dense_model == "foo"
     assert server.settings.sparse_model == "bar"
 
     # reload to reset globals
     asyncio.run(server.server.close())
+    importlib.reload(server_package)
     importlib.reload(server)
 
 
@@ -103,3 +106,9 @@ def test_env_invalid_port(monkeypatch):
     monkeypatch.setenv("MCP_PORT", "not-a-port")
     with pytest.raises(SystemExit):
         server.main([])
+
+
+def test_run_config_reexport():
+    from mcp_plex.server import RunConfig as ExportedRunConfig
+
+    assert ExportedRunConfig is server.RunConfig

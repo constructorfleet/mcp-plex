@@ -545,7 +545,7 @@ def test_normalize_identifier_scalar_inputs():
 
 
 def test_run_config_to_kwargs():
-    module = importlib.import_module("mcp_plex.server")
+    module = importlib.import_module("mcp_plex.server.cli")
 
     config = module.RunConfig()
     assert config.to_kwargs() == {}

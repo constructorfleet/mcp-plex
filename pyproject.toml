@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "mcp-plex"
-version = "1.0.24"
+version = "2.0.0"
 
 description = "Plex-Oriented Model Context Protocol Server"
 requires-python = ">=3.11,<3.13"
@@ -29,7 +29,7 @@ dev = [
 
 [project.scripts]
 load-data = "mcp_plex.loader.cli:main"
-mcp-server = "mcp_plex.server:main"
+mcp-server = "mcp_plex.server.cli:main"
 
 [tool.setuptools.packages.find]
 include = ["mcp_plex*"]
