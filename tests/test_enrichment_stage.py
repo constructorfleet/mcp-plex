@@ -338,6 +338,10 @@ class _RecordingQueue(asyncio.Queue):
         self.put_payloads.append(item)
         await super().put(item)
 
+    def put_nowait(self, item: Any) -> None:  # type: ignore[override]
+        self.put_payloads.append(item)
+        super().put_nowait(item)
+
 
 def test_enrichment_stage_caches_tmdb_show_results(monkeypatch):
     show_requests: list[tuple[str, str]] = []

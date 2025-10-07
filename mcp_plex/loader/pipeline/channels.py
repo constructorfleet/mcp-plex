@@ -127,6 +127,15 @@ class IMDbRetryQueue(asyncio.Queue[str]):
         return list(self._items)
 
 
+async def enqueue_nowait(queue: asyncio.Queue[T], item: T) -> None:
+    """Place *item* onto *queue* using ``put_nowait`` with fallback backpressure."""
+
+    try:
+        queue.put_nowait(item)
+    except asyncio.QueueFull:
+        await queue.put(item)
+
+
 __all__ = [
     "MovieBatch",
     "EpisodeBatch",
@@ -140,4 +149,5 @@ __all__ = [
     "PersistenceQueue",
     "chunk_sequence",
     "IMDbRetryQueue",
+    "enqueue_nowait",
 ]

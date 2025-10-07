@@ -10,6 +10,7 @@ from .channels import (
     PERSIST_DONE,
     PersistenceQueue,
     chunk_sequence,
+    enqueue_nowait,
 )
 from ...common.validation import require_positive
 
@@ -176,7 +177,7 @@ class PersistenceStage:
                 continue
             await self._upsert_semaphore.acquire()
             try:
-                await self._persistence_queue.put(batch)
+                await enqueue_nowait(self._persistence_queue, batch)
             except BaseException:
                 self._upsert_semaphore.release()
                 raise
@@ -206,12 +207,14 @@ class PersistenceStage:
                         if drained_retry:
                             self._retry_flush_attempted = True
                             for _ in range(sentinel_budget):
-                                await self._persistence_queue.put(PERSIST_DONE)
+                                await enqueue_nowait(
+                                    self._persistence_queue, PERSIST_DONE
+                                )
                             continue
 
                     drained_sentinels = max(sentinel_budget - 1, 0)
                     for _ in range(drained_sentinels):
-                        await self._persistence_queue.put(PERSIST_DONE)
+                        await enqueue_nowait(self._persistence_queue, PERSIST_DONE)
 
                     self._shutdown_tokens_seen += 1
                     outstanding_workers = max(
@@ -222,7 +225,9 @@ class PersistenceStage:
                     )
                     if additional_tokens:
                         for _ in range(additional_tokens):
-                            await self._persistence_queue.put(PERSIST_DONE)
+                            await enqueue_nowait(
+                                self._persistence_queue, PERSIST_DONE
+                            )
                     self._logger.debug(
                         "Persistence queue sentinel received; finishing run for worker %d.",
                         worker_id,
