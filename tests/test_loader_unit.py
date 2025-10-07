@@ -358,10 +358,11 @@ def test_imdb_retry_queue_desync_errors():
 
 
 def test_persist_imdb_retry_queue_writes_snapshot(tmp_path):
-    path = tmp_path / "retry.json"
+    path = tmp_path / "nested" / "dirs" / "retry.json"
     queue = IMDbRetryQueue(["tt1"])
     _persist_imdb_retry_queue(path, queue)
     assert json.loads(path.read_text()) == ["tt1"]
+    assert path.exists()
 
 
 def test_ensure_collection_skips_existing():
