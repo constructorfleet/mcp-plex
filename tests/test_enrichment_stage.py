@@ -121,10 +121,12 @@ def test_enrich_movies_runs_tmdb_and_imdb_requests_in_parallel(
     async def fake_fetch_tmdb_movie(client, tmdb_id, api_key):
         events["tmdb_started"].set()
         await asyncio.wait_for(events["imdb_started"].wait(), timeout=1)
-        return TMDBMovie.model_validate({
-            "id": int(tmdb_id),
-            "title": f"TMDb {tmdb_id}",
-        })
+        return TMDBMovie.model_validate(
+            {
+                "id": int(tmdb_id),
+                "title": f"TMDb {tmdb_id}",
+            }
+        )
 
     monkeypatch.setattr(
         "mcp_plex.loader.pipeline.enrichment._fetch_imdb_batch",
@@ -269,10 +271,12 @@ def test_enrichment_stage_enriches_movie_batches_and_emits_chunks(monkeypatch):
 
     async def fake_fetch_tmdb_movie(client, tmdb_id, api_key):
         tmdb_requests.append(tmdb_id)
-        return TMDBMovie.model_validate({
-            "id": int(tmdb_id),
-            "title": f"TMDb {tmdb_id}",
-        })
+        return TMDBMovie.model_validate(
+            {
+                "id": int(tmdb_id),
+                "title": f"TMDb {tmdb_id}",
+            }
+        )
 
     monkeypatch.setattr(
         EnrichmentStage, "_handle_episode_batch", lambda self, batch: asyncio.sleep(0)
@@ -419,9 +423,13 @@ def test_enrichment_stage_skips_tmdb_fetch_without_api_key(monkeypatch):
 
     async def fake_fetch_tmdb_show(client, tmdb_id, api_key):
         show_calls.append(tmdb_id)
-        return TMDBShow.model_validate({"id": int(tmdb_id), "name": tmdb_id, "seasons": []})
+        return TMDBShow.model_validate(
+            {"id": int(tmdb_id), "name": tmdb_id, "seasons": []}
+        )
 
-    async def fake_fetch_tmdb_episode(client, show_id, season_number, episode_number, api_key):
+    async def fake_fetch_tmdb_episode(
+        client, show_id, season_number, episode_number, api_key
+    ):
         episode_calls.append((show_id, season_number, episode_number))
         return TMDBEpisode.model_validate(
             {
@@ -627,11 +635,17 @@ def test_enrichment_stage_caches_tmdb_show_results(monkeypatch):
 
         show = _FakeShow("show", tmdb_id="301")
         episodes_first = [
-            _FakeEpisode("e1", show=show, season_index=1, episode_index=1, imdb_id="ttA"),
-            _FakeEpisode("e2", show=show, season_index=1, episode_index=2, imdb_id="ttB"),
+            _FakeEpisode(
+                "e1", show=show, season_index=1, episode_index=1, imdb_id="ttA"
+            ),
+            _FakeEpisode(
+                "e2", show=show, season_index=1, episode_index=2, imdb_id="ttB"
+            ),
         ]
         episodes_second = [
-            _FakeEpisode("e3", show=show, season_index=1, episode_index=3, imdb_id="ttC"),
+            _FakeEpisode(
+                "e3", show=show, season_index=1, episode_index=3, imdb_id="ttC"
+            ),
         ]
 
         await ingest_queue.put(EpisodeBatch(show=show, episodes=episodes_first))
@@ -663,7 +677,11 @@ def test_enrichment_stage_caches_tmdb_show_results(monkeypatch):
     assert [item.plex.rating_key for item in first] == ["e1", "e2"]
     assert [item.plex.rating_key for item in second] == ["e3"]
     assert all(item.tmdb for item in first + second)
-    assert [item.tmdb.episode_number for item in first + second if isinstance(item.tmdb, TMDBEpisode)] == [1, 2, 3]
+    assert [
+        item.tmdb.episode_number
+        for item in first + second
+        if isinstance(item.tmdb, TMDBEpisode)
+    ] == [1, 2, 3]
 
 
 def test_enrichment_stage_falls_back_to_individual_episode_fetch(monkeypatch):
@@ -740,8 +758,12 @@ def test_enrichment_stage_falls_back_to_individual_episode_fetch(monkeypatch):
 
         show = _FakeShow("show", tmdb_id="302")
         episodes = [
-            _FakeEpisode("e1", show=show, season_index=1, episode_index=1, imdb_id="ttA"),
-            _FakeEpisode("e2", show=show, season_index=1, episode_index=2, imdb_id="ttB"),
+            _FakeEpisode(
+                "e1", show=show, season_index=1, episode_index=1, imdb_id="ttA"
+            ),
+            _FakeEpisode(
+                "e2", show=show, season_index=1, episode_index=2, imdb_id="ttB"
+            ),
         ]
 
         await ingest_queue.put(EpisodeBatch(show=show, episodes=episodes))
@@ -760,7 +782,9 @@ def test_enrichment_stage_falls_back_to_individual_episode_fetch(monkeypatch):
     payloads = asyncio.run(scenario())
 
     assert show_requests == ["302"]
-    assert chunk_requests == [(302, ("season/1/episode/1", "season/1/episode/2"), "token")]
+    assert chunk_requests == [
+        (302, ("season/1/episode/1", "season/1/episode/2"), "token")
+    ]
     assert fallback_requests == [
         (302, 1, 1, "token"),
         (302, 1, 2, "token"),
@@ -770,15 +794,16 @@ def test_enrichment_stage_falls_back_to_individual_episode_fetch(monkeypatch):
     first, sentinel = payloads
     assert sentinel is PERSIST_DONE
     assert [
-        item.tmdb.episode_number
-        for item in first
-        if isinstance(item.tmdb, TMDBEpisode)
+        item.tmdb.episode_number for item in first if isinstance(item.tmdb, TMDBEpisode)
     ] == [1, 2]
+
 
 def test_enrichment_stage_sample_batches_pass_through(monkeypatch):
     handler = _ListHandler()
 
-    async def scenario() -> tuple[list[list[AggregatedItem] | None], list[Any], list[AggregatedItem]]:
+    async def scenario() -> tuple[
+        list[list[AggregatedItem] | None], list[Any], list[AggregatedItem]
+    ]:
         ingest_queue: asyncio.Queue = asyncio.Queue()
         persistence_queue: _RecordingQueue = _RecordingQueue()
 
@@ -910,7 +935,9 @@ def test_enrichment_stage_idle_retry_emits_updated_items(monkeypatch):
         fake_fetch_imdb_batch,
     )
 
-    async def scenario() -> tuple[list[list[AggregatedItem] | None], int, list[list[str]]]:
+    async def scenario() -> tuple[
+        list[list[AggregatedItem] | None], int, list[list[str]]
+    ]:
         ingest_queue: asyncio.Queue = asyncio.Queue()
         persistence_queue: asyncio.Queue = asyncio.Queue()
         retry_queue = IMDbRetryQueue()

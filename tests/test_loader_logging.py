@@ -18,6 +18,10 @@ class DummyClient:
     def _get_model_params(self, model_name):
         return 1, models.Distance.COSINE
 
+    async def close(self):
+        """Match the AsyncQdrantClient interface used by the loader."""
+        return None
+
     async def collection_exists(self, name):
         return False
 
@@ -146,6 +150,7 @@ def test_run_ensures_collection_before_loading(monkeypatch):
 
     monkeypatch.setattr(loader, "_ensure_collection", fake_ensure)
     sample_dir = Path(__file__).resolve().parents[1] / "sample-data"
+
     async def fake_run(self):
         order.append("execute")
 

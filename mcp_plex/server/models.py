@@ -1,4 +1,5 @@
 """Typed models shared across the Plex server package."""
+
 from __future__ import annotations
 
 from typing import NotRequired, TypedDict

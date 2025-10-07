@@ -67,11 +67,9 @@ class AsyncHTTPClient(Protocol):
         *,
         params: Mapping[str, str] | None = None,
         headers: Mapping[str, str] | None = None,
-    ) -> httpx.Response:
-        ...
+    ) -> httpx.Response: ...
 
-    async def aclose(self) -> None:
-        ...
+    async def aclose(self) -> None: ...
 
 
 HTTPClientResource = (
@@ -80,9 +78,7 @@ HTTPClientResource = (
     | AbstractContextManager[AsyncHTTPClient]
 )
 
-HTTPClientFactory = Callable[
-    [], HTTPClientResource | Awaitable[HTTPClientResource]
-]
+HTTPClientFactory = Callable[[], HTTPClientResource | Awaitable[HTTPClientResource]]
 
 
 def _extract_external_ids(item: PlexPartialObject) -> ExternalIDs:
@@ -207,9 +203,7 @@ async def _fetch_tmdb_episode(
 ) -> TMDBEpisode | None:
     """Fetch TMDb data for a TV episode."""
 
-    url = (
-        f"https://api.themoviedb.org/3/tv/{show_id}/season/{season_number}/episode/{episode_number}"
-    )
+    url = f"https://api.themoviedb.org/3/tv/{show_id}/season/{season_number}/episode/{episode_number}"
     try:
         resp = await client.get(url, headers={"Authorization": f"Bearer {api_key}"})
     except httpx.HTTPError:
@@ -245,9 +239,7 @@ async def _fetch_tmdb_episode_chunk(
             url, params=params, headers={"Authorization": f"Bearer {api_key}"}
         )
     except httpx.HTTPError:
-        LOGGER.exception(
-            "HTTP error fetching TMDb episode chunk for show %s", show_id
-        )
+        LOGGER.exception("HTTP error fetching TMDb episode chunk for show %s", show_id)
         return {}
     if not resp.is_success:
         return {}
@@ -364,9 +356,7 @@ class EnrichmentStage:
             int(imdb_batch_limit), name="imdb_batch_limit"
         )
         if imdb_requests_per_window is not None and imdb_requests_per_window <= 0:
-            raise ValueError(
-                "imdb_requests_per_window must be positive when provided"
-            )
+            raise ValueError("imdb_requests_per_window must be positive when provided")
         if imdb_window_seconds <= 0:
             raise ValueError("imdb_window_seconds must be positive")
         self._imdb_throttle = _RequestThrottler(
@@ -416,9 +406,7 @@ class EnrichmentStage:
                 got_item = True
             try:
                 if batch is None:
-                    self._logger.debug(
-                        "Received legacy completion token; ignoring."
-                    )
+                    self._logger.debug("Received legacy completion token; ignoring.")
                     continue
 
                 if batch is INGEST_DONE:
@@ -450,9 +438,7 @@ class EnrichmentStage:
                     )
                     await self._handle_sample_batch(batch)
                 else:  # pragma: no cover - defensive logging for future types
-                    self._logger.warning(
-                        "Received unsupported batch type: %r", batch
-                    )
+                    self._logger.warning("Received unsupported batch type: %r", batch)
             finally:
                 if got_item:
                     self._ingest_queue.task_done()
@@ -526,7 +512,9 @@ class EnrichmentStage:
             return
 
         if hasattr(resource, "__aenter__") and hasattr(resource, "__aexit__"):
-            async with cast(AbstractAsyncContextManager[AsyncHTTPClient], resource) as client:
+            async with cast(
+                AbstractAsyncContextManager[AsyncHTTPClient], resource
+            ) as client:
                 yield client
             return
 
@@ -592,9 +580,7 @@ class EnrichmentStage:
                 if not ids.tmdb:
                     continue
                 tmdb_tasks.append(
-                    asyncio.create_task(
-                        _fetch_tmdb_movie(client, ids.tmdb, api_key)
-                    )
+                    asyncio.create_task(_fetch_tmdb_movie(client, ids.tmdb, api_key))
                 )
 
         imdb_map: dict[str, IMDbTitle | None] = {}
@@ -604,8 +590,7 @@ class EnrichmentStage:
             combined_results = await asyncio.gather(imdb_future, *tmdb_tasks)
             imdb_map = cast(dict[str, IMDbTitle | None], combined_results[0])
             tmdb_results = [
-                cast(TMDBMovie | None, result)
-                for result in combined_results[1:]
+                cast(TMDBMovie | None, result) for result in combined_results[1:]
             ]
             retry_snapshot = set(self._imdb_retry_queue.snapshot())
         elif tmdb_tasks:
@@ -686,9 +671,7 @@ class EnrichmentStage:
         retry_snapshot: set[str] = set()
         tmdb_results: list[TMDBEpisode | None] = [None] * len(episodes)
         if imdb_future and tmdb_future:
-            imdb_map, tmdb_results = await asyncio.gather(
-                imdb_future, tmdb_future
-            )
+            imdb_map, tmdb_results = await asyncio.gather(imdb_future, tmdb_future)
             retry_snapshot = set(self._imdb_retry_queue.snapshot())
         elif imdb_future:
             imdb_map = await imdb_future
@@ -723,9 +706,7 @@ class EnrichmentStage:
         tmdb_id_str = str(tmdb_id)
         if tmdb_id_str in self._show_tmdb_cache:
             return self._show_tmdb_cache[tmdb_id_str]
-        show = await _fetch_tmdb_show(
-            client, tmdb_id_str, self._tmdb_api_key or ""
-        )
+        show = await _fetch_tmdb_show(client, tmdb_id_str, self._tmdb_api_key or "")
         self._show_tmdb_cache[tmdb_id_str] = show
         return show
 
@@ -972,9 +953,7 @@ async def _fetch_imdb_batch(
             try:
                 response = await client.get(url, params=params)
             except httpx.HTTPError:
-                LOGGER.exception(
-                    "HTTP error fetching IMDb IDs %s", ",".join(chunk)
-                )
+                LOGGER.exception("HTTP error fetching IMDb IDs %s", ",".join(chunk))
                 for imdb_id in chunk:
                     results[imdb_id] = None
                 break

@@ -5,6 +5,7 @@ integration tests can assert on hand-off behavior without duplicating
 constants.  The loader still emits ``None`` as a completion token for
 compatibility while downstream components migrate to sentinel-only signaling.
 """
+
 from __future__ import annotations
 
 import asyncio
@@ -74,9 +75,7 @@ class SampleBatch:
 IngestBatch = MovieBatch | EpisodeBatch | SampleBatch
 
 IngestQueueItem: TypeAlias = IngestBatch | None | IngestSentinel
-PersistenceQueueItem: TypeAlias = (
-    PersistencePayload | None | PersistenceSentinel
-)
+PersistenceQueueItem: TypeAlias = PersistencePayload | None | PersistenceSentinel
 
 IngestQueue: TypeAlias = asyncio.Queue[IngestQueueItem]
 PersistenceQueue: TypeAlias = asyncio.Queue[PersistenceQueueItem]

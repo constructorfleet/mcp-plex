@@ -1,4 +1,5 @@
 """Helpers for working with built-in sample data files."""
+
 from __future__ import annotations
 
 import json
@@ -68,7 +69,9 @@ def _load_plex_movie(data: dict[str, Any]) -> PlexItem:
         summary=data.get("summary"),
         year=data.get("year"),
         added_at=data.get("addedAt"),
-        guids=[PlexGuid(id=str(guid.get("id", ""))) for guid in data.get("Guid", []) or []],
+        guids=[
+            PlexGuid(id=str(guid.get("id", ""))) for guid in data.get("Guid", []) or []
+        ],
         thumb=data.get("thumb"),
         art=data.get("art"),
         tagline=data.get("tagline"),
@@ -100,7 +103,9 @@ def _load_plex_episode(data: dict[str, Any]) -> PlexItem:
         summary=data.get("summary"),
         year=data.get("year"),
         added_at=data.get("addedAt"),
-        guids=[PlexGuid(id=str(guid.get("id", ""))) for guid in data.get("Guid", []) or []],
+        guids=[
+            PlexGuid(id=str(guid.get("id", ""))) for guid in data.get("Guid", []) or []
+        ],
         thumb=data.get("thumb"),
         art=data.get("art"),
         tagline=data.get("tagline"),
@@ -127,7 +132,9 @@ def _load_from_sample(sample_dir: Path) -> list[AggregatedItem]:
     imdb_movie = IMDbTitle.model_validate(_read_json(movie_dir / "imdb.json"))
     tmdb_movie = TMDBMovie.model_validate(_read_json(movie_dir / "tmdb.json"))
 
-    episode_data = _read_json(episode_dir / "plex.tv.json")["MediaContainer"]["Metadata"][0]
+    episode_data = _read_json(episode_dir / "plex.tv.json")["MediaContainer"][
+        "Metadata"
+    ][0]
     imdb_episode = IMDbTitle.model_validate(_read_json(episode_dir / "imdb.tv.json"))
     tmdb_show = TMDBShow.model_validate(_read_json(episode_dir / "tmdb.tv.json"))
 

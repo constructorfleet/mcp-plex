@@ -17,6 +17,7 @@ from ...common.validation import require_positive
 try:  # pragma: no cover - allow import to fail when qdrant_client is absent
     from qdrant_client import AsyncQdrantClient, models
 except ModuleNotFoundError:  # pragma: no cover - tooling without qdrant installed
+
     class AsyncQdrantClient:  # type: ignore[too-few-public-methods]
         """Fallback stub used when qdrant_client is unavailable."""
 
@@ -166,9 +167,7 @@ class PersistenceStage:
 
         return drained
 
-    async def enqueue_points(
-        self, points: Sequence["models.PointStruct"]
-    ) -> None:
+    async def enqueue_points(self, points: Sequence["models.PointStruct"]) -> None:
         """Chunk *points* and place them on the persistence queue."""
 
         if not points:
@@ -229,14 +228,10 @@ class PersistenceStage:
                     outstanding_workers = max(
                         self._worker_count - self._shutdown_tokens_seen, 0
                     )
-                    additional_tokens = max(
-                        outstanding_workers - drained_sentinels, 0
-                    )
+                    additional_tokens = max(outstanding_workers - drained_sentinels, 0)
                     if additional_tokens:
                         for _ in range(additional_tokens):
-                            await enqueue_nowait(
-                                self._persistence_queue, PERSIST_DONE
-                            )
+                            await enqueue_nowait(self._persistence_queue, PERSIST_DONE)
                     self._logger.debug(
                         "Persistence queue sentinel received; finishing run for worker %d.",
                         worker_id,

@@ -1,4 +1,5 @@
 """In-memory LRU cache for media payload and artwork data."""
+
 from __future__ import annotations
 
 from collections import OrderedDict

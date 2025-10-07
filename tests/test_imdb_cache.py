@@ -22,9 +22,7 @@ def test_imdb_cache_loads_existing_and_persists(tmp_path: Path):
         "primaryTitle": "The Shawshank Redemption",
     }
 
-    cache.set(
-        "tt0068646", {"id": "tt0068646", "primaryTitle": "The Godfather"}
-    )
+    cache.set("tt0068646", {"id": "tt0068646", "primaryTitle": "The Godfather"})
     assert json.loads(path.read_text()) == {
         "tt0111161": {
             "id": "tt0111161",

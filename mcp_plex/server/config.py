@@ -17,25 +17,15 @@ RawAliases = str | RawAliasMapping | RawAliasItems | None
 class Settings(BaseSettings):
     """Application configuration settings."""
 
-    qdrant_url: str | None = Field(
-        default=None, validation_alias="QDRANT_URL"
-    )
-    qdrant_api_key: str | None = Field(
-        default=None, validation_alias="QDRANT_API_KEY"
-    )
-    qdrant_host: str | None = Field(
-        default=None, validation_alias="QDRANT_HOST"
-    )
+    qdrant_url: str | None = Field(default=None, validation_alias="QDRANT_URL")
+    qdrant_api_key: str | None = Field(default=None, validation_alias="QDRANT_API_KEY")
+    qdrant_host: str | None = Field(default=None, validation_alias="QDRANT_HOST")
     qdrant_port: int = Field(default=6333, validation_alias="QDRANT_PORT")
-    qdrant_grpc_port: int = Field(
-        default=6334, validation_alias="QDRANT_GRPC_PORT"
-    )
+    qdrant_grpc_port: int = Field(default=6334, validation_alias="QDRANT_GRPC_PORT")
     qdrant_prefer_grpc: bool = Field(
         default=False, validation_alias="QDRANT_PREFER_GRPC"
     )
-    qdrant_https: bool | None = Field(
-        default=None, validation_alias="QDRANT_HTTPS"
-    )
+    qdrant_https: bool | None = Field(default=None, validation_alias="QDRANT_HTTPS")
     dense_model: str = Field(
         default="BAAI/bge-small-en-v1.5", validation_alias="DENSE_MODEL"
     )
@@ -91,7 +81,9 @@ class Settings(BaseSettings):
         for entry in value:
             if isinstance(entry, Mapping):
                 items.extend(entry.items())
-            elif isinstance(entry, Sequence) and not isinstance(entry, (str, bytes, bytearray)):
+            elif isinstance(entry, Sequence) and not isinstance(
+                entry, (str, bytes, bytearray)
+            ):
                 entry_list = list(entry)
                 if len(entry_list) != 2:
                     raise ValueError(

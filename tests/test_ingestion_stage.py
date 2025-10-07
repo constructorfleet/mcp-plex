@@ -47,7 +47,9 @@ def test_ingestion_stage_logger_name() -> None:
 
 
 def test_ingestion_stage_sample_empty_batches() -> None:
-    async def scenario() -> tuple[SampleBatch | None, None | IngestSentinel, bool, int, int]:
+    async def scenario() -> tuple[
+        SampleBatch | None, None | IngestSentinel, bool, int, int
+    ]:
         queue: asyncio.Queue = asyncio.Queue()
         stage = IngestionStage(
             plex_server=None,
@@ -63,7 +65,13 @@ def test_ingestion_stage_sample_empty_batches() -> None:
 
         first = await queue.get()
         second = await queue.get()
-        return first, second, queue.empty(), stage.items_ingested, stage.batches_ingested
+        return (
+            first,
+            second,
+            queue.empty(),
+            stage.items_ingested,
+            stage.batches_ingested,
+        )
 
     first, second, empty, items_ingested, batches_ingested = asyncio.run(scenario())
 
@@ -103,7 +111,13 @@ def test_ingestion_stage_sample_partial_batches() -> None:
         batches = [await queue.get(), await queue.get()]
         first_token = await queue.get()
         second_token = await queue.get()
-        return batches, first_token, second_token, stage.items_ingested, stage.batches_ingested
+        return (
+            batches,
+            first_token,
+            second_token,
+            stage.items_ingested,
+            stage.batches_ingested,
+        )
 
     batches, first_token, second_token, items_ingested, batches_ingested = asyncio.run(
         scenario()
@@ -238,12 +252,16 @@ def test_ingestion_stage_ingest_plex_batches_movies_and_episodes(caplog) -> None
         movie_section.search.side_effect = movie_search
 
         def _episodes(titles: list[str]) -> list[Episode]:
-            return [create_autospec(Episode, instance=True, title=title) for title in titles]
+            return [
+                create_autospec(Episode, instance=True, title=title) for title in titles
+            ]
 
         show_a_season_1 = create_autospec(Season, instance=True)
         show_a_s1_eps = _episodes(["S01E01", "S01E02"])
 
-        def show_a_s1_side_effect(*, container_start=None, container_size=None, **_kwargs):
+        def show_a_s1_side_effect(
+            *, container_start=None, container_size=None, **_kwargs
+        ):
             start = container_start or 0
             size = container_size or len(show_a_s1_eps)
             return show_a_s1_eps[start : start + size]
@@ -253,7 +271,9 @@ def test_ingestion_stage_ingest_plex_batches_movies_and_episodes(caplog) -> None
         show_a_season_2 = create_autospec(Season, instance=True)
         show_a_s2_eps = _episodes(["S01E03"])
 
-        def show_a_s2_side_effect(*, container_start=None, container_size=None, **_kwargs):
+        def show_a_s2_side_effect(
+            *, container_start=None, container_size=None, **_kwargs
+        ):
             start = container_start or 0
             size = container_size or len(show_a_s2_eps)
             return show_a_s2_eps[start : start + size]
@@ -266,7 +286,9 @@ def test_ingestion_stage_ingest_plex_batches_movies_and_episodes(caplog) -> None
         show_b_season_1 = create_autospec(Season, instance=True)
         show_b_s1_eps = _episodes(["S01E01", "S01E02"])
 
-        def show_b_s1_side_effect(*, container_start=None, container_size=None, **_kwargs):
+        def show_b_s1_side_effect(
+            *, container_start=None, container_size=None, **_kwargs
+        ):
             start = container_start or 0
             size = container_size or len(show_b_s1_eps)
             return show_b_s1_eps[start : start + size]
@@ -448,7 +470,9 @@ def test_ingestion_stage_ingest_plex_large_library_batches(caplog) -> None:
             ]
 
             def _make_side_effect(eps: list[Episode]):
-                def _side_effect(*, container_start=None, container_size=None, **_kwargs):
+                def _side_effect(
+                    *, container_start=None, container_size=None, **_kwargs
+                ):
                     start = container_start or 0
                     size = container_size or len(eps)
                     return eps[start : start + size]
