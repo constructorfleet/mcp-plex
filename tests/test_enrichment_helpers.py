@@ -86,6 +86,26 @@ def test_build_plex_item_converts_string_indices():
     assert item.episode_number == 3
 
 
+def test_build_plex_item_normalises_person_ids():
+    raw = types.SimpleNamespace(
+        ratingKey="1",
+        guid="g",
+        type="movie",
+        title="T",
+        directors=[types.SimpleNamespace(id=None, tag="Director")],
+        writers=[types.SimpleNamespace(id="5", tag="Writer")],
+        actors=[
+            types.SimpleNamespace(id="", tag="Actor"),
+            types.SimpleNamespace(id="7", tag="Lead"),
+        ],
+    )
+
+    item = _build_plex_item(raw)
+    assert [p.id for p in item.directors] == [0]
+    assert [p.id for p in item.writers] == [5]
+    assert [p.id for p in item.actors] == [0, 7]
+
+
 def test_fetch_functions_success_and_failure():
     async def tmdb_movie_mock(request):
         assert request.headers.get("Authorization") == "Bearer k"

@@ -27,7 +27,7 @@ from .pipeline.channels import (
     PersistenceQueue,
     chunk_sequence,
 )
-from ..common.validation import require_positive
+from ..common.validation import coerce_plex_tag_id, require_positive
 from .pipeline.orchestrator import LoaderOrchestrator
 from .pipeline.persistence import PersistenceStage as _PersistenceStage
 from ..common.types import (
@@ -494,16 +494,24 @@ def _load_from_sample(sample_dir: Path) -> List[AggregatedItem]:
         tagline=movie_data.get("tagline"),
         content_rating=movie_data.get("contentRating"),
         directors=[
-            PlexPerson(id=d.get("id", 0), tag=d.get("tag", ""), thumb=d.get("thumb"))
+            PlexPerson(
+                id=coerce_plex_tag_id(d.get("id", 0)),
+                tag=d.get("tag", ""),
+                thumb=d.get("thumb"),
+            )
             for d in movie_data.get("Director", [])
         ],
         writers=[
-            PlexPerson(id=w.get("id", 0), tag=w.get("tag", ""), thumb=w.get("thumb"))
+            PlexPerson(
+                id=coerce_plex_tag_id(w.get("id", 0)),
+                tag=w.get("tag", ""),
+                thumb=w.get("thumb"),
+            )
             for w in movie_data.get("Writer", [])
         ],
         actors=[
             PlexPerson(
-                id=a.get("id", 0),
+                id=coerce_plex_tag_id(a.get("id", 0)),
                 tag=a.get("tag", ""),
                 role=a.get("role"),
                 thumb=a.get("thumb"),
@@ -545,16 +553,24 @@ def _load_from_sample(sample_dir: Path) -> List[AggregatedItem]:
         tagline=episode_data.get("tagline"),
         content_rating=episode_data.get("contentRating"),
         directors=[
-            PlexPerson(id=d.get("id", 0), tag=d.get("tag", ""), thumb=d.get("thumb"))
+            PlexPerson(
+                id=coerce_plex_tag_id(d.get("id", 0)),
+                tag=d.get("tag", ""),
+                thumb=d.get("thumb"),
+            )
             for d in episode_data.get("Director", [])
         ],
         writers=[
-            PlexPerson(id=w.get("id", 0), tag=w.get("tag", ""), thumb=w.get("thumb"))
+            PlexPerson(
+                id=coerce_plex_tag_id(w.get("id", 0)),
+                tag=w.get("tag", ""),
+                thumb=w.get("thumb"),
+            )
             for w in episode_data.get("Writer", [])
         ],
         actors=[
             PlexPerson(
-                id=a.get("id", 0),
+                id=coerce_plex_tag_id(a.get("id", 0)),
                 tag=a.get("tag", ""),
                 role=a.get("role"),
                 thumb=a.get("thumb"),
