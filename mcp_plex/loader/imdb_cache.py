@@ -3,7 +3,7 @@ from __future__ import annotations
 import json
 import logging
 from pathlib import Path
-from typing import Any, Dict
+from typing import Any
 
 
 class IMDbCache:
@@ -13,26 +13,25 @@ class IMDbCache:
 
     def __init__(self, path: Path) -> None:
         self.path = path
-        self._data: Dict[str, Any]
+        self._data: dict[str, Any] = {}
         if path.exists():
             try:
-                self._data = json.loads(path.read_text())
-            except json.JSONDecodeError as exc:
-                self._logger.warning(
-                    "Failed to load IMDb cache from %s; starting with empty cache.",
-                    path,
-                    exc_info=exc,
-                )
-                self._data = {}
-            except OSError as exc:
+                raw_contents = path.read_text(encoding="utf-8")
+            except (OSError, UnicodeDecodeError) as exc:
                 self._logger.warning(
                     "Failed to read IMDb cache from %s; starting with empty cache.",
                     path,
                     exc_info=exc,
                 )
-                self._data = {}
-        else:
-            self._data = {}
+            else:
+                try:
+                    self._data = json.loads(raw_contents)
+                except json.JSONDecodeError as exc:
+                    self._logger.warning(
+                        "Failed to decode IMDb cache JSON from %s; starting with empty cache.",
+                        path,
+                        exc_info=exc,
+                    )
 
     def get(self, imdb_id: str) -> dict[str, Any] | None:
         """Return cached data for ``imdb_id`` if present."""
