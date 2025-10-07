@@ -717,6 +717,52 @@ def test_query_media_filters(monkeypatch):
         assert query_filter is not None
         assert len(query_filter.must) >= 10
         assert isinstance(captured["query"], models.FusionQuery)
+        prefetch = captured["prefetch"]
+        assert prefetch is not None
+        expected_prefetch_keys = {
+            "type",
+            "actors",
+            "directors",
+            "writers",
+            "genres",
+            "collections",
+            "show_title",
+            "data.plex.rating_key",
+            "data.imdb.id",
+        }
+        for entry in prefetch:
+            assert entry.filter is not None
+            keys = {condition.key for condition in entry.filter.must}
+            assert keys == expected_prefetch_keys
+
+
+def test_query_media_filters_without_vectors(monkeypatch):
+    with _load_server(monkeypatch) as module:
+        captured: dict[str, object] = {}
+
+        async def fake_query_points(*args, **kwargs):
+            captured.update(kwargs)
+            payload = {"title": "Result", "plex": {"rating_key": "1"}}
+            return types.SimpleNamespace(
+                points=[types.SimpleNamespace(payload=payload, score=1.0)]
+            )
+
+        monkeypatch.setattr(module.server.qdrant_client, "query_points", fake_query_points)
+
+        result = asyncio.run(
+            module.query_media.fn(
+                type="movie",
+                actors=["Actor"],
+                limit=1,
+            )
+        )
+
+        assert result and result[0]["plex"]["rating_key"] == "1"
+        query_filter = captured["query_filter"]
+        assert query_filter is not None
+        keys = {condition.key for condition in query_filter.must}
+        assert keys == {"type", "actors"}
+        assert captured["prefetch"] is None
 
 
 def test_openapi_schema_tool_without_params(monkeypatch):
