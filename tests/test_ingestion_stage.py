@@ -158,15 +158,16 @@ def test_ingestion_stage_ingest_plex_requires_positive_batch_sizes(
     assert str(error) == f"{expected_name} must be positive"
 
 
-def test_ingestion_stage_backpressure_handling() -> None:
+def test_ingestion_stage_queues_sample_batches_with_completion_tokens() -> None:
     async def scenario() -> tuple[
         list[SampleBatch],
         None | SampleBatch,
         None | IngestSentinel,
+        bool,
         int,
         int,
     ]:
-        queue: asyncio.Queue = asyncio.Queue(maxsize=1)
+        queue: asyncio.Queue = asyncio.Queue()
         sample_items = [
             _make_aggregated_item("1"),
             _make_aggregated_item("2"),
@@ -181,28 +182,36 @@ def test_ingestion_stage_backpressure_handling() -> None:
             completion_sentinel=INGEST_DONE,
         )
 
-        run_task = asyncio.create_task(stage.run())
-        await asyncio.sleep(0)
-        assert run_task.done() is False
+        await stage.run()
 
         first_batch = await queue.get()
-        assert isinstance(first_batch, SampleBatch)
-        await asyncio.sleep(0)
-
         second_batch = await queue.get()
         first_token = await queue.get()
         second_token = await queue.get()
 
-        await run_task
-        return [first_batch, second_batch], first_token, second_token, stage.items_ingested, stage.batches_ingested
+        return (
+            [first_batch, second_batch],
+            first_token,
+            second_token,
+            queue.empty(),
+            stage.items_ingested,
+            stage.batches_ingested,
+        )
 
-    batches, first_token, second_token, items_ingested, batches_ingested = asyncio.run(
-        scenario()
-    )
+    (
+        batches,
+        first_token,
+        second_token,
+        queue_empty,
+        items_ingested,
+        batches_ingested,
+    ) = asyncio.run(scenario())
 
+    assert all(isinstance(batch, SampleBatch) for batch in batches)
     assert [len(batch.items) for batch in batches] == [1, 1]
     assert first_token is None
     assert second_token is INGEST_DONE
+    assert queue_empty is True
     assert items_ingested == 2
     assert batches_ingested == 2
 
