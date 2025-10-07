@@ -6,6 +6,7 @@ import pytest
 from click.testing import CliRunner
 
 from mcp_plex import loader
+from mcp_plex.loader import cli as loader_cli
 
 
 def test_cli_continuous_respects_delay(monkeypatch):
@@ -28,7 +29,7 @@ def test_cli_continuous_respects_delay(monkeypatch):
     runner = CliRunner()
     with pytest.raises(RuntimeError, match="stop"):
         runner.invoke(
-            loader.main,
+            loader_cli.main,
             ["--continuous", "--delay", "7.5"],
             catch_exceptions=False,
             env={
@@ -44,7 +45,7 @@ def test_cli_continuous_respects_delay(monkeypatch):
 def test_cli_invalid_delay_value():
     runner = CliRunner()
     result = runner.invoke(
-        loader.main,
+        loader_cli.main,
         ["--delay", "not-a-number"],
         env={
             "PLEX_URL": "http://localhost",
@@ -97,7 +98,7 @@ def test_cli_model_overrides(monkeypatch):
 
     runner = CliRunner()
     runner.invoke(
-        loader.main,
+        loader_cli.main,
         ["--dense-model", "foo", "--sparse-model", "bar"],
         catch_exceptions=False,
         env={
@@ -122,7 +123,7 @@ def test_cli_model_env(monkeypatch):
 
     runner = CliRunner()
     runner.invoke(
-        loader.main,
+        loader_cli.main,
         [],
         catch_exceptions=False,
         env={
@@ -189,11 +190,11 @@ def test_load_media_passes_imdb_queue_path(monkeypatch, tmp_path):
 
 def test_loader_script_entrypoint(monkeypatch):
     monkeypatch.setattr(sys, "argv", ["loader", "--help"])
-    module = sys.modules.pop("mcp_plex.loader", None)
+    module = sys.modules.pop("mcp_plex.loader.cli", None)
     try:
         with pytest.raises(SystemExit) as exc:
-            runpy.run_module("mcp_plex.loader", run_name="__main__")
+            runpy.run_module("mcp_plex.loader.cli", run_name="__main__")
     finally:
         if module is not None:
-            sys.modules["mcp_plex.loader"] = module
+            sys.modules["mcp_plex.loader.cli"] = module
     assert exc.value.code == 0
