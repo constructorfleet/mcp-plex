@@ -30,7 +30,7 @@ from .channels import (
     SampleBatch,
     chunk_sequence,
 )
-from ...common.validation import require_positive
+from ...common.validation import coerce_plex_tag_id, require_positive
 
 from ...common.types import (
     AggregatedItem,
@@ -72,7 +72,7 @@ def _build_plex_item(item: PlexPartialObject) -> PlexItem:
     guids = [PlexGuid(id=g.id) for g in getattr(item, "guids", [])]
     directors = [
         PlexPerson(
-            id=getattr(d, "id", 0),
+            id=coerce_plex_tag_id(getattr(d, "id", 0)),
             tag=str(getattr(d, "tag", "")),
             thumb=getattr(d, "thumb", None),
         )
@@ -80,7 +80,7 @@ def _build_plex_item(item: PlexPartialObject) -> PlexItem:
     ]
     writers = [
         PlexPerson(
-            id=getattr(w, "id", 0),
+            id=coerce_plex_tag_id(getattr(w, "id", 0)),
             tag=str(getattr(w, "tag", "")),
             thumb=getattr(w, "thumb", None),
         )
@@ -88,7 +88,7 @@ def _build_plex_item(item: PlexPartialObject) -> PlexItem:
     ]
     actors = [
         PlexPerson(
-            id=getattr(a, "id", 0),
+            id=coerce_plex_tag_id(getattr(a, "id", 0)),
             tag=str(getattr(a, "tag", "")),
             thumb=getattr(a, "thumb", None),
             role=getattr(a, "role", None),
