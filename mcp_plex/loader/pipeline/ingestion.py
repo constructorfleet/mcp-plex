@@ -20,6 +20,7 @@ from .channels import (
     MovieBatch,
     SampleBatch,
     chunk_sequence,
+    enqueue_nowait,
 )
 
 from plexapi.server import PlexServer
@@ -79,8 +80,8 @@ class IngestionStage:
             await self._run_plex_ingestion()
 
         self._logger.debug("Publishing ingestion completion sentinels to downstream stages.")
-        await self._output_queue.put(None)
-        await self._output_queue.put(self._completion_sentinel)
+        await enqueue_nowait(self._output_queue, None)
+        await enqueue_nowait(self._output_queue, self._completion_sentinel)
         self._logger.info(
             "Ingestion stage finished after queuing %d batch(es) covering %d item(s).",
             self._batches_ingested,
@@ -223,7 +224,7 @@ class IngestionStage:
                 continue
 
             batch = MovieBatch(movies=list(batch_movies))
-            await output_queue.put(batch)
+            await enqueue_nowait(output_queue, batch)
             self._items_ingested += len(batch_movies)
             self._batches_ingested += 1
             movie_batches += 1
@@ -292,7 +293,7 @@ class IngestionStage:
                                 show=show,
                                 episodes=list(batch_episodes),
                             )
-                            await output_queue.put(batch)
+                            await enqueue_nowait(output_queue, batch)
                             self._items_ingested += len(batch_episodes)
                             self._batches_ingested += 1
                             episode_batches += 1
@@ -315,7 +316,7 @@ class IngestionStage:
                         show=show,
                         episodes=list(pending_episodes),
                     )
-                    await output_queue.put(batch)
+                    await enqueue_nowait(output_queue, batch)
                     self._items_ingested += len(pending_episodes)
                     self._batches_ingested += 1
                     episode_batches += 1
@@ -357,7 +358,9 @@ class IngestionStage:
             if not batch_items:
                 continue
 
-            await self._output_queue.put(SampleBatch(items=batch_items))
+            await enqueue_nowait(
+                self._output_queue, SampleBatch(items=batch_items)
+            )
             self._items_ingested += len(batch_items)
             self._batches_ingested += 1
             self._logger.debug(

@@ -29,6 +29,7 @@ from .channels import (
     PersistenceQueue,
     SampleBatch,
     chunk_sequence,
+    enqueue_nowait,
 )
 from ...common.validation import coerce_plex_tag_id, require_positive
 
@@ -379,7 +380,7 @@ class EnrichmentStage:
                 if got_item:
                     self._ingest_queue.task_done()
 
-        await self._persistence_queue.put(PERSIST_DONE)
+        await enqueue_nowait(self._persistence_queue, PERSIST_DONE)
         self._logger.info(
             "Enrichment stage completed; persistence sentinel emitted (retry queue=%d).",
             self._imdb_retry_queue.qsize(),
@@ -470,7 +471,7 @@ class EnrichmentStage:
         if not aggregated:
             return
         payload = list(aggregated)
-        await self._persistence_queue.put(payload)
+        await enqueue_nowait(self._persistence_queue, payload)
         self._logger.debug(
             "Enqueued %d aggregated item(s) for persistence (queue size=%d).",
             len(payload),
@@ -676,7 +677,7 @@ class EnrichmentStage:
             imdb_id for imdb_id in imdb_ids if imdb_results.get(imdb_id) is None
         ]
         for imdb_id in stalled_ids:
-            await self._imdb_retry_queue.put(imdb_id)
+            self._imdb_retry_queue.put_nowait(imdb_id)
 
         self._logger.info(
             "Retried IMDb batch with %d updates (retry queue=%d)",
@@ -758,7 +759,7 @@ async def _fetch_imdb(
         if response.status_code == 429:
             if attempt == max_retries:
                 if retry_queue is not None:
-                    await retry_queue.put(imdb_id)
+                    retry_queue.put_nowait(imdb_id)
                 return None
             await asyncio.sleep(delay)
             delay *= 2
@@ -825,7 +826,7 @@ async def _fetch_imdb_batch(
                 if attempt == max_retries:
                     if retry_queue is not None:
                         for imdb_id in chunk:
-                            await retry_queue.put(imdb_id)
+                            retry_queue.put_nowait(imdb_id)
                     for imdb_id in chunk:
                         results[imdb_id] = None
                     break
