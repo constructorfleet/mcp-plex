@@ -17,7 +17,6 @@ from mcp_plex.loader import (
     QdrantRuntimeConfig,
     _build_loader_orchestrator,
     _fetch_imdb,
-    _load_from_sample,
     _load_imdb_retry_queue,
     _persist_imdb_retry_queue,
     _process_imdb_retry_queue,
@@ -30,6 +29,7 @@ from mcp_plex.loader.qdrant import (
     build_point,
 )
 from mcp_plex.loader.pipeline.channels import IMDbRetryQueue
+from mcp_plex.loader import samples as loader_samples
 from mcp_plex.common.types import (
     AggregatedItem,
     IMDbName,
@@ -83,7 +83,7 @@ def test_loader_import_requires_plexapi(monkeypatch):
     assert not hasattr(module, "PartialPlexObject")
 def test_load_from_sample_returns_items():
     sample_dir = Path(__file__).resolve().parents[1] / "sample-data"
-    items = _load_from_sample(sample_dir)
+    items = loader_samples._load_from_sample(sample_dir)
     assert len(items) == 2
     assert {i.plex.type for i in items} == {"movie", "episode"}
 
@@ -434,7 +434,7 @@ def test_build_point_includes_metadata():
 
 
 def test_loader_pipeline_processes_sample_batches(monkeypatch):
-    sample_items = _load_from_sample(
+    sample_items = loader_samples._load_from_sample(
         Path(__file__).resolve().parents[1] / "sample-data"
     )
 
