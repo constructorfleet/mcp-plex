@@ -12,7 +12,7 @@ from qdrant_client import models
 
 from ...common.types import JSONValue
 from .. import media as media_helpers
-from ..models import AggregatedMediaItem
+from ..models import AggregatedMediaItem, MediaSummaryResponse
 
 if TYPE_CHECKING:  # pragma: no cover - imported for type checking only
     from .. import PlexServer
@@ -30,16 +30,29 @@ def register_media_library_tools(server: "PlexServer") -> None:
                 examples=["49915", "tt8367814", "The Gentlemen"],
             ),
         ],
-    ) -> list[AggregatedMediaItem]:
+        summarize_for_llm: Annotated[
+            bool,
+            Field(
+                description=(
+                    "Return a compact summary optimized for LLM consumption. "
+                    "Set to false to receive the full JSON payload."
+                ),
+                examples=[True],
+            ),
+        ] = True,
+    ) -> MediaSummaryResponse | list[AggregatedMediaItem]:
         """Retrieve media items by rating key, IMDb/TMDb ID or title."""
 
         records = await media_helpers._find_records(server, identifier, limit=10)
-        return [
+        results = [
             media_helpers._flatten_payload(
                 cast(Mapping[str, JSONValue] | None, r.payload)
             )
             for r in records
         ]
+        if summarize_for_llm:
+            return media_helpers.summarize_media_items_for_llm(results)
+        return results
 
     @server.tool("search-media")
     async def search_media(
@@ -59,7 +72,17 @@ def register_media_library_tools(server: "PlexServer") -> None:
                 examples=[5],
             ),
         ] = 5,
-    ) -> list[AggregatedMediaItem]:
+        summarize_for_llm: Annotated[
+            bool,
+            Field(
+                description=(
+                    "Return a compact summary optimized for LLM consumption. "
+                    "Set to false to receive the full JSON payload."
+                ),
+                examples=[True],
+            ),
+        ] = True,
+    ) -> MediaSummaryResponse | list[AggregatedMediaItem]:
         """Hybrid similarity search across media items using dense and sparse vectors."""
 
         dense_doc = models.Document(text=query, model=server.settings.dense_model)
@@ -170,12 +193,15 @@ def register_media_library_tools(server: "PlexServer") -> None:
 
         reranked = await asyncio.to_thread(_rerank, hits)
         await prefetch_task
-        return [
+        results = [
             media_helpers._flatten_payload(
                 cast(Mapping[str, JSONValue] | None, h.payload)
             )
             for h in reranked[:limit]
         ]
+        if summarize_for_llm:
+            return media_helpers.summarize_media_items_for_llm(results)
+        return results
 
     @server.tool("query-media")
     async def query_media(
@@ -333,7 +359,17 @@ def register_media_library_tools(server: "PlexServer") -> None:
                 examples=[5],
             ),
         ] = 5,
-    ) -> list[AggregatedMediaItem]:
+        summarize_for_llm: Annotated[
+            bool,
+            Field(
+                description=(
+                    "Return a compact summary optimized for LLM consumption. "
+                    "Set to false to receive the full JSON payload."
+                ),
+                examples=[True],
+            ),
+        ] = True,
+    ) -> MediaSummaryResponse | list[AggregatedMediaItem]:
         """Run a structured query against indexed payload fields and optional vector searches."""
 
         def _listify(value: Sequence[str] | str | None) -> list[str]:
@@ -342,6 +378,13 @@ def register_media_library_tools(server: "PlexServer") -> None:
             if isinstance(value, str):
                 return [value]
             return [v for v in value if isinstance(v, str) and v]
+
+        def _finalize(
+            items: list[AggregatedMediaItem],
+        ) -> MediaSummaryResponse | list[AggregatedMediaItem]:
+            if summarize_for_llm:
+                return media_helpers.summarize_media_items_for_llm(items)
+            return items
 
         vector_queries: list[tuple[str, models.Document]] = []
         positive_point_ids: list[Any] = []
@@ -355,7 +398,7 @@ def register_media_library_tools(server: "PlexServer") -> None:
                     if record.id is not None:
                         positive_point_ids.append(record.id)
             if not positive_point_ids:
-                return []
+                return _finalize([])
         if not positive_point_ids:
             if dense_query:
                 vector_queries.append(
@@ -571,12 +614,13 @@ def register_media_library_tools(server: "PlexServer") -> None:
             limit=limit,
             with_payload=True,
         )
-        return [
+        results = [
             media_helpers._flatten_payload(
                 cast(Mapping[str, JSONValue] | None, p.payload)
             )
             for p in res.points
         ]
+        return _finalize(results)
 
     @server.tool("recommend-media")
     async def recommend_media(
@@ -596,7 +640,17 @@ def register_media_library_tools(server: "PlexServer") -> None:
                 examples=[5],
             ),
         ] = 5,
-    ) -> list[AggregatedMediaItem]:
+        summarize_for_llm: Annotated[
+            bool,
+            Field(
+                description=(
+                    "Return a compact summary optimized for LLM consumption. "
+                    "Set to false to receive the full JSON payload."
+                ),
+                examples=[True],
+            ),
+        ] = True,
+    ) -> MediaSummaryResponse | list[AggregatedMediaItem]:
         """Recommend similar media items based on a reference identifier."""
 
         record = None
@@ -604,6 +658,8 @@ def register_media_library_tools(server: "PlexServer") -> None:
         if records:
             record = records[0]
         if record is None:
+            if summarize_for_llm:
+                return media_helpers.summarize_media_items_for_llm([])
             return []
         rec_query = models.RecommendQuery(
             recommend=models.RecommendInput(positive=[record.id])
@@ -615,12 +671,15 @@ def register_media_library_tools(server: "PlexServer") -> None:
             with_payload=True,
             using="dense",
         )
-        return [
+        results = [
             media_helpers._flatten_payload(
                 cast(Mapping[str, JSONValue] | None, r.payload)
             )
             for r in response.points
         ]
+        if summarize_for_llm:
+            return media_helpers.summarize_media_items_for_llm(results)
+        return results
 
     @server.tool("new-movies")
     async def new_movies(
@@ -633,7 +692,17 @@ def register_media_library_tools(server: "PlexServer") -> None:
                 examples=[5],
             ),
         ] = 5,
-    ) -> list[AggregatedMediaItem]:
+        summarize_for_llm: Annotated[
+            bool,
+            Field(
+                description=(
+                    "Return a compact summary optimized for LLM consumption. "
+                    "Set to false to receive the full JSON payload."
+                ),
+                examples=[True],
+            ),
+        ] = True,
+    ) -> MediaSummaryResponse | list[AggregatedMediaItem]:
         """Return the most recently added movies."""
 
         query = models.OrderByQuery(
@@ -653,12 +722,15 @@ def register_media_library_tools(server: "PlexServer") -> None:
             limit=limit,
             with_payload=True,
         )
-        return [
+        results = [
             media_helpers._flatten_payload(
                 cast(Mapping[str, JSONValue] | None, p.payload)
             )
             for p in res.points
         ]
+        if summarize_for_llm:
+            return media_helpers.summarize_media_items_for_llm(results)
+        return results
 
     @server.tool("new-shows")
     async def new_shows(
@@ -671,7 +743,17 @@ def register_media_library_tools(server: "PlexServer") -> None:
                 examples=[5],
             ),
         ] = 5,
-    ) -> list[AggregatedMediaItem]:
+        summarize_for_llm: Annotated[
+            bool,
+            Field(
+                description=(
+                    "Return a compact summary optimized for LLM consumption. "
+                    "Set to false to receive the full JSON payload."
+                ),
+                examples=[True],
+            ),
+        ] = True,
+    ) -> MediaSummaryResponse | list[AggregatedMediaItem]:
         """Return the most recently added TV episodes."""
 
         query = models.OrderByQuery(
@@ -691,12 +773,15 @@ def register_media_library_tools(server: "PlexServer") -> None:
             limit=limit,
             with_payload=True,
         )
-        return [
+        results = [
             media_helpers._flatten_payload(
                 cast(Mapping[str, JSONValue] | None, p.payload)
             )
             for p in res.points
         ]
+        if summarize_for_llm:
+            return media_helpers.summarize_media_items_for_llm(results)
+        return results
 
     @server.tool("actor-movies")
     async def actor_movies(
@@ -724,7 +809,17 @@ def register_media_library_tools(server: "PlexServer") -> None:
             int | None,
             Field(description="Maximum release year", examples=[1999]),
         ] = None,
-    ) -> list[AggregatedMediaItem]:
+        summarize_for_llm: Annotated[
+            bool,
+            Field(
+                description=(
+                    "Return a compact summary optimized for LLM consumption. "
+                    "Set to false to receive the full JSON payload."
+                ),
+                examples=[True],
+            ),
+        ] = True,
+    ) -> MediaSummaryResponse | list[AggregatedMediaItem]:
         """Return movies featuring the given actor, optionally filtered by release year."""
 
         must = [
@@ -749,12 +844,15 @@ def register_media_library_tools(server: "PlexServer") -> None:
             limit=limit,
             with_payload=True,
         )
-        return [
+        results = [
             media_helpers._flatten_payload(
                 cast(Mapping[str, JSONValue] | None, p.payload)
             )
             for p in res.points
         ]
+        if summarize_for_llm:
+            return media_helpers.summarize_media_items_for_llm(results)
+        return results
 
     @server.resource("resource://media-item/{identifier}")
     async def media_item(

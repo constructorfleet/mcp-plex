@@ -73,6 +73,39 @@ class AggregatedMediaItem(TypedDict, total=False):
     plex: NotRequired[PlexMediaMetadata]
 
 
+class MediaSummaryIdentifiers(TypedDict, total=False):
+    """Identifiers that help reference a summarized media item."""
+
+    rating_key: NotRequired[str]
+    imdb: NotRequired[str]
+    tmdb: NotRequired[str]
+
+
+class SummarizedMediaItem(TypedDict, total=False):
+    """Concise description of a media item for LLM consumption."""
+
+    title: NotRequired[str]
+    type: NotRequired[str]
+    year: NotRequired[int]
+    description: NotRequired[str]
+    genres: NotRequired[list[str]]
+    collections: NotRequired[list[str]]
+    actors: NotRequired[list[str]]
+    directors: NotRequired[list[str]]
+    writers: NotRequired[list[str]]
+    show: NotRequired[str]
+    season: NotRequired[int]
+    episode: NotRequired[int]
+    identifiers: NotRequired[MediaSummaryIdentifiers]
+
+
+class MediaSummaryResponse(TypedDict):
+    """Container for summarized media items."""
+
+    total_results: int
+    results: list[SummarizedMediaItem]
+
+
 class QdrantMediaPayload(TypedDict, total=False):
     """Raw payload stored within Qdrant records."""
 
@@ -121,6 +154,9 @@ __all__ = [
     "ExternalIds",
     "PlexMediaMetadata",
     "AggregatedMediaItem",
+    "MediaSummaryIdentifiers",
+    "SummarizedMediaItem",
+    "MediaSummaryResponse",
     "QdrantMediaPayload",
     "PlexPlayerMetadata",
 ]
