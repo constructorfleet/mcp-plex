@@ -344,7 +344,7 @@ def test_play_media_requires_player_capability(monkeypatch):
 
 
 def test_match_player_fuzzy_alias_resolution():
-    players = [
+    players: list[server_module.PlexPlayerMetadata] = [
         {
             "display_name": "Movie Room TV",
             "name": "Plex for Apple TV",
@@ -352,6 +352,8 @@ def test_match_player_fuzzy_alias_resolution():
             "machine_identifier": "machine-1",
             "client_identifier": "client-1",
             "friendly_names": ["Movie Room", "Movie Room TV"],
+            "provides": {"player"},
+            "client": None,
         },
         {
             "display_name": "Bedroom TV",
@@ -360,6 +362,8 @@ def test_match_player_fuzzy_alias_resolution():
             "machine_identifier": "machine-2",
             "client_identifier": "client-2",
             "friendly_names": ["Bedroom"],
+            "provides": {"player"},
+            "client": None,
         },
     ]
 
@@ -368,7 +372,7 @@ def test_match_player_fuzzy_alias_resolution():
 
 
 def test_match_player_unknown_raises():
-    players = [
+    players: list[server_module.PlexPlayerMetadata] = [
         {
             "display_name": "Bedroom TV",
             "name": "Plex for Roku",
@@ -376,6 +380,8 @@ def test_match_player_unknown_raises():
             "machine_identifier": "machine-2",
             "client_identifier": "client-2",
             "friendly_names": ["Bedroom"],
+            "provides": {"player"},
+            "client": None,
         }
     ]
 
