@@ -18,6 +18,7 @@ import inspect
 from typing import Any, Optional
 
 import httpx
+from pydantic import ValidationError
 
 from .channels import (
     EpisodeBatch,
@@ -191,6 +192,47 @@ async def _fetch_tmdb_episode(
     if resp.is_success:
         return TMDBEpisode.model_validate(resp.json())
     return None
+
+
+async def _fetch_tmdb_episode_chunk(
+    client: httpx.AsyncClient,
+    show_id: int,
+    append_paths: Sequence[str],
+    api_key: str,
+) -> dict[str, TMDBEpisode | None]:
+    """Fetch multiple TMDb episodes for *show_id* in a single request."""
+
+    if not append_paths:
+        return {}
+    url = f"https://api.themoviedb.org/3/tv/{show_id}"
+    params = {"append_to_response": ",".join(append_paths)}
+    try:
+        resp = await client.get(
+            url, params=params, headers={"Authorization": f"Bearer {api_key}"}
+        )
+    except httpx.HTTPError:
+        LOGGER.exception(
+            "HTTP error fetching TMDb episode chunk for show %s", show_id
+        )
+        return {}
+    if not resp.is_success:
+        return {}
+
+    data = resp.json()
+    results: dict[str, TMDBEpisode | None] = {}
+    for path in append_paths:
+        payload = data.get(path)
+        if isinstance(payload, dict):
+            try:
+                results[path] = TMDBEpisode.model_validate(payload)
+            except ValidationError:
+                LOGGER.exception(
+                    "Validation error parsing TMDb episode payload for %s", path
+                )
+                results[path] = None
+        else:
+            results[path] = None
+    return results
 
 
 def resolve_tmdb_season_number(
@@ -566,19 +608,16 @@ class EnrichmentStage:
             )
             retry_snapshot = set(self._imdb_retry_queue.snapshot())
 
-        tmdb_results: list[TMDBEpisode | None] = []
+        tmdb_results: list[TMDBEpisode | None] = [None] * len(episodes)
         if show_tmdb:
-            episode_tasks = [
-                self._lookup_tmdb_episode(client, show_tmdb, ep)
-                for ep in episodes
-            ]
-            if episode_tasks:
-                tmdb_results = await asyncio.gather(*episode_tasks)
+            tmdb_results = await self._bulk_lookup_tmdb_episodes(
+                client, show_tmdb, episodes
+            )
         tmdb_iter = iter(tmdb_results)
 
         aggregated: list[AggregatedItem] = []
         for ep, ids in zip(episodes, episode_ids):
-            tmdb_episode = next(tmdb_iter, None) if show_tmdb else None
+            tmdb_episode = next(tmdb_iter, None)
             imdb = imdb_map.get(ids.imdb) if ids.imdb else None
             tmdb_item: TMDBItem | None = tmdb_episode or show_tmdb
             aggregated_item = AggregatedItem(
@@ -607,26 +646,56 @@ class EnrichmentStage:
         self._show_tmdb_cache[tmdb_id_str] = show
         return show
 
-    async def _lookup_tmdb_episode(
-        self, client: Any, show_tmdb: TMDBShow | None, episode: Any
-    ) -> TMDBEpisode | None:
-        """Lookup the TMDb metadata for *episode* within *show_tmdb*."""
+    async def _bulk_lookup_tmdb_episodes(
+        self, client: Any, show_tmdb: TMDBShow, episodes: Sequence[Any]
+    ) -> list[TMDBEpisode | None]:
+        """Fetch TMDb metadata for *episodes* in batches."""
 
-        if not show_tmdb or not self._tmdb_api_key:
-            return None
-        season = resolve_tmdb_season_number(show_tmdb, episode)
-        ep_num = getattr(episode, "index", None)
-        if isinstance(ep_num, str) and ep_num.isdigit():
-            ep_num = int(ep_num)
-        if season is None or ep_num is None:
-            return None
-        return await _fetch_tmdb_episode(
-            client,
-            show_tmdb.id,
-            season,
-            ep_num,
-            self._tmdb_api_key,
-        )
+        results: list[TMDBEpisode | None] = [None] * len(episodes)
+        if not self._tmdb_api_key:
+            return results
+
+        lookups: list[tuple[int, int, int]] = []
+        for idx, episode in enumerate(episodes):
+            season = resolve_tmdb_season_number(show_tmdb, episode)
+            ep_num = getattr(episode, "index", None)
+            if isinstance(ep_num, str) and ep_num.isdigit():
+                ep_num = int(ep_num)
+            if season is None or ep_num is None:
+                continue
+            lookups.append((idx, int(season), int(ep_num)))
+
+        if not lookups:
+            return results
+
+        for chunk in chunk_sequence(lookups, 20):
+            chunk_map: dict[str, list[int]] = {}
+            for idx, season, ep_num in chunk:
+                path = f"season/{season}/episode/{ep_num}"
+                chunk_map.setdefault(path, []).append(idx)
+            chunk_paths = list(chunk_map.keys())
+            chunk_results = await _fetch_tmdb_episode_chunk(
+                client, show_tmdb.id, chunk_paths, self._tmdb_api_key
+            )
+            for path, indexes in chunk_map.items():
+                episode_result = chunk_results.get(path)
+                if episode_result is None:
+                    continue
+                for idx in indexes:
+                    results[idx] = episode_result
+
+        for idx, season, ep_num in lookups:
+            if results[idx] is not None:
+                continue
+            results[idx] = await _fetch_tmdb_episode(
+                client,
+                show_tmdb.id,
+                season,
+                ep_num,
+                self._tmdb_api_key,
+            )
+
+        return results
 
     async def _retry_imdb_batches(self) -> bool:
         """Process IMDb IDs from the retry queue when idle."""
