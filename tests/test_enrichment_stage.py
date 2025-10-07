@@ -2,6 +2,8 @@ import asyncio
 import logging
 from typing import Any
 
+import pytest
+
 from mcp_plex.common.types import (
     AggregatedItem,
     IMDbTitle,
@@ -81,6 +83,65 @@ def test_enrichment_stage_creates_retry_queue_when_missing() -> None:
 
     retry_queue = asyncio.run(scenario())
     assert isinstance(retry_queue, IMDbRetryQueue)
+
+
+def test_enrich_movies_runs_tmdb_and_imdb_requests_in_parallel(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    events: dict[str, asyncio.Event] = {}
+
+    async def fake_fetch_imdb_batch(client, imdb_ids, **kwargs):
+        events["imdb_started"].set()
+        await asyncio.wait_for(events["tmdb_started"].wait(), timeout=1)
+        return {
+            imdb_id: IMDbTitle(
+                id=imdb_id,
+                type="movie",
+                primaryTitle=f"IMDb {imdb_id}",
+            )
+            for imdb_id in imdb_ids
+        }
+
+    async def fake_fetch_tmdb_movie(client, tmdb_id, api_key):
+        events["tmdb_started"].set()
+        await asyncio.wait_for(events["imdb_started"].wait(), timeout=1)
+        return TMDBMovie.model_validate({
+            "id": int(tmdb_id),
+            "title": f"TMDb {tmdb_id}",
+        })
+
+    monkeypatch.setattr(
+        "mcp_plex.loader.pipeline.enrichment._fetch_imdb_batch",
+        fake_fetch_imdb_batch,
+    )
+    monkeypatch.setattr(
+        "mcp_plex.loader.pipeline.enrichment._fetch_tmdb_movie",
+        fake_fetch_tmdb_movie,
+    )
+
+    async def scenario() -> list[AggregatedItem]:
+        events["imdb_started"] = asyncio.Event()
+        events["tmdb_started"] = asyncio.Event()
+        ingest_queue: asyncio.Queue = asyncio.Queue()
+        persistence_queue: asyncio.Queue = asyncio.Queue()
+        stage = EnrichmentStage(
+            http_client_factory=lambda: object(),
+            tmdb_api_key="token",
+            ingest_queue=ingest_queue,
+            persistence_queue=persistence_queue,
+            imdb_retry_queue=IMDbRetryQueue(),
+            movie_batch_size=5,
+            episode_batch_size=5,
+        )
+        movie = _FakeMovie("1", imdb_id="tt0001", tmdb_id="101")
+        return await asyncio.wait_for(
+            stage._enrich_movies(object(), [movie]), timeout=1
+        )
+
+    result = asyncio.run(scenario())
+
+    assert result[0].imdb is not None
+    assert result[0].tmdb is not None
 
 
 class _FakeGuid:
