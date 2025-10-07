@@ -9,6 +9,7 @@ import json
 import logging
 import os
 import uuid
+from dataclasses import dataclass
 from typing import Annotated, Any, Callable, Mapping, Sequence, cast
 from typing import NotRequired, TypedDict
 
@@ -248,25 +249,33 @@ class PlexServer(FastMCP):
 server = PlexServer(settings=settings)
 
 
-def _request_model(name: str, fn: Callable[..., Any]) -> type[BaseModel] | None:
+def _request_model(name: str, fn: Callable[..., object]) -> type[BaseModel] | None:
     """Generate a Pydantic model representing the callable's parameters."""
 
     signature = inspect.signature(fn)
     if not signature.parameters:
         return None
 
-    fields: dict[str, tuple[Any, Any]] = {}
+    fields: dict[str, tuple[object, object]] = {}
     for param_name, parameter in signature.parameters.items():
-        annotation = (
-            parameter.annotation
-            if parameter.annotation is not inspect._empty
-            else Any
-        )
-        default = (
-            parameter.default
-            if parameter.default is not inspect._empty
-            else ...
-        )
+        if parameter.kind in {
+            inspect.Parameter.VAR_POSITIONAL,
+            inspect.Parameter.VAR_KEYWORD,
+        }:
+            continue
+
+        annotation: object
+        if parameter.annotation is inspect.Signature.empty:
+            annotation = object
+        else:
+            annotation = parameter.annotation
+
+        default: object
+        if parameter.default is inspect.Signature.empty:
+            default = ...
+        else:
+            default = parameter.default
+
         fields[param_name] = (annotation, default)
 
     if not fields:
@@ -332,7 +341,7 @@ def _flatten_payload(payload: Mapping[str, JSONValue] | None) -> AggregatedMedia
     return cast(AggregatedMediaItem, data)
 
 
-def _normalize_identifier(value: JSONValue) -> str | None:
+def _normalize_identifier(value: str | int | float | None) -> str | None:
     """Convert mixed identifier formats into a normalized string."""
 
     if value is None:
@@ -376,19 +385,17 @@ async def _get_media_data(identifier: str) -> AggregatedMediaItem:
         cache_keys.add(lookup_key)
 
     plex_data = _extract_plex_metadata(data)
-    rating_key = _normalize_identifier(cast(JSONValue, plex_data.get("rating_key")))
+    rating_key = _normalize_identifier(plex_data.get("rating_key"))
     if rating_key:
         cache_keys.add(rating_key)
-    guid = _normalize_identifier(cast(JSONValue, plex_data.get("guid")))
+    guid = _normalize_identifier(plex_data.get("guid"))
     if guid:
         cache_keys.add(guid)
 
     for source_key in ("imdb", "tmdb", "tvdb"):
         source_value = data.get(source_key)
         if isinstance(source_value, dict):
-            source_id = _normalize_identifier(
-                cast(JSONValue, source_value.get("id"))
-            )
+            source_id = _normalize_identifier(source_value.get("id"))
             if source_id:
                 cache_keys.add(source_id)
 
@@ -654,7 +661,7 @@ async def play_media(
     media = await _get_media_data(identifier)
     plex_info = _extract_plex_metadata(media)
     rating_key_value = plex_info.get("rating_key")
-    rating_key_normalized = _normalize_identifier(cast(JSONValue, rating_key_value))
+    rating_key_normalized = _normalize_identifier(rating_key_value)
     if not rating_key_normalized:
         raise ValueError("Media item is missing a Plex rating key")
 
@@ -736,9 +743,7 @@ async def search_media(
     async def _prefetch(hit: models.ScoredPoint) -> None:
         data = _flatten_payload(cast(Mapping[str, JSONValue] | None, hit.payload))
         plex_info = _extract_plex_metadata(data)
-        rating_key = _normalize_identifier(
-            cast(JSONValue, plex_info.get("rating_key"))
-        )
+        rating_key = _normalize_identifier(plex_info.get("rating_key"))
         if rating_key:
             server.cache.set_payload(rating_key, cast(dict[str, JSONValue], data))
             thumb = plex_info.get("thumb")
@@ -1361,7 +1366,7 @@ async def media_poster(
     if not thumb:
         raise ValueError("Poster not available")
     thumb_str = str(thumb)
-    rating_key = _normalize_identifier(cast(JSONValue, plex_info.get("rating_key")))
+    rating_key = _normalize_identifier(plex_info.get("rating_key"))
     if rating_key:
         server.cache.set_poster(rating_key, thumb_str)
     return thumb_str
@@ -1387,7 +1392,7 @@ async def media_background(
     if not art:
         raise ValueError("Background not available")
     art_str = str(art)
-    rating_key = _normalize_identifier(cast(JSONValue, plex_info.get("rating_key")))
+    rating_key = _normalize_identifier(plex_info.get("rating_key"))
     if rating_key:
         server.cache.set_background(rating_key, art_str)
     return art_str
@@ -1417,7 +1422,7 @@ async def rest_docs(request: Request) -> Response:
     return get_swagger_ui_html(openapi_url="/openapi.json", title="MCP REST API")
 
 
-def _build_openapi_schema() -> dict[str, Any]:
+def _build_openapi_schema() -> dict[str, object]:
     app = FastAPI()
     for name, tool in server._tool_manager._tools.items():
         request_model = _request_model(name, tool.fn)
@@ -1439,7 +1444,7 @@ def _build_openapi_schema() -> dict[str, Any]:
                     annotation=request_model,
                 )
             ],
-            return_annotation=Any,
+            return_annotation=inspect.Signature.empty,
         )
 
         app.post(f"/rest/{name}")(_tool_stub)
@@ -1449,9 +1454,10 @@ def _build_openapi_schema() -> dict[str, Any]:
         _p_stub.__name__ = f"prompt_{name.replace('-', '_')}"
         _p_stub.__doc__ = prompt.fn.__doc__
         request_model = _request_model(name, prompt.fn)
+        prompt_signature = inspect.signature(prompt.fn)
         if request_model is None:
-            _p_stub.__signature__ = inspect.signature(prompt.fn).replace(
-                return_annotation=Any
+            _p_stub.__signature__ = prompt_signature.replace(
+                return_annotation=inspect.Signature.empty
             )
         else:
             _p_stub.__signature__ = inspect.Signature(
@@ -1462,7 +1468,7 @@ def _build_openapi_schema() -> dict[str, Any]:
                         annotation=request_model,
                     )
                 ],
-                return_annotation=Any,
+                return_annotation=inspect.Signature.empty,
             )
         app.post(f"/rest/prompt/{name}")(_p_stub)
     for uri, resource in server._resource_manager._templates.items():
@@ -1472,7 +1478,7 @@ def _build_openapi_schema() -> dict[str, Any]:
         _r_stub.__name__ = f"resource_{path.replace('/', '_').replace('{', '').replace('}', '')}"
         _r_stub.__doc__ = resource.fn.__doc__
         _r_stub.__signature__ = inspect.signature(resource.fn).replace(
-            return_annotation=Any
+            return_annotation=inspect.Signature.empty
         )
         app.get(f"/rest/resource/{path}")(_r_stub)
     return get_openapi(title="MCP REST API", version="1.0.0", routes=app.routes)
@@ -1492,7 +1498,9 @@ def _register_rest_endpoints() -> None:
     def _register(path: str, method: str, handler: Callable, fn: Callable, name: str) -> None:
         handler.__name__ = name
         handler.__doc__ = fn.__doc__
-        handler.__signature__ = inspect.signature(fn).replace(return_annotation=Any)
+        handler.__signature__ = inspect.signature(fn).replace(
+            return_annotation=inspect.Signature.empty
+        )
         server.custom_route(path, methods=[method])(handler)
 
     for name, tool in server._tool_manager._tools.items():
@@ -1560,6 +1568,27 @@ def _register_rest_endpoints() -> None:
 _register_rest_endpoints()
 
 
+@dataclass
+class RunConfig:
+    """Runtime configuration for FastMCP transport servers."""
+
+    host: str | None = None
+    port: int | None = None
+    path: str | None = None
+
+    def to_kwargs(self) -> dict[str, object]:
+        """Return keyword arguments compatible with ``FastMCP.run``."""
+
+        kwargs: dict[str, object] = {}
+        if self.host is not None:
+            kwargs["host"] = self.host
+        if self.port is not None:
+            kwargs["port"] = self.port
+        if self.path:
+            kwargs["path"] = self.path
+        return kwargs
+
+
 def main(argv: list[str] | None = None) -> None:
     """CLI entrypoint for running the MCP server."""
     parser = argparse.ArgumentParser(description="Run the MCP server")
@@ -1616,16 +1645,19 @@ def main(argv: list[str] | None = None) -> None:
     if transport == "stdio" and mount:
         parser.error("--mount or MCP_MOUNT is not allowed when transport is stdio")
 
-    run_kwargs: dict[str, Any] = {}
+    run_config = RunConfig()
     if transport != "stdio":
-        run_kwargs.update({"host": host, "port": port})
+        if host is not None:
+            run_config.host = host
+        if port is not None:
+            run_config.port = port
         if mount:
-            run_kwargs["path"] = mount
+            run_config.path = mount
 
     server.settings.dense_model = args.dense_model
     server.settings.sparse_model = args.sparse_model
 
-    server.run(transport=transport, **run_kwargs)
+    server.run(transport=transport, **run_config.to_kwargs())
 
 
 if __name__ == "__main__":

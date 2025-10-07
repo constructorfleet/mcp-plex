@@ -18,6 +18,7 @@ from starlette.testclient import TestClient
 
 from mcp_plex import loader
 from mcp_plex import server as server_module
+from pydantic import ValidationError
 
 
 @contextmanager
@@ -515,6 +516,47 @@ def test_request_model_no_parameters():
         return None
 
     assert module._request_model("noop", _noop) is None
+
+
+def test_request_model_missing_annotation_uses_object():
+    module = importlib.import_module("mcp_plex.server")
+
+    async def _unannotated(foo):  # type: ignore[no-untyped-def]
+        return foo
+
+    request_model = module._request_model("unannotated", _unannotated)
+    assert request_model is not None
+    field = request_model.model_fields["foo"]
+    assert field.annotation is object
+    with pytest.raises(ValidationError):
+        request_model()
+    instance = request_model(foo="value")
+    assert instance.foo == "value"
+
+
+def test_normalize_identifier_scalar_inputs():
+    module = importlib.import_module("mcp_plex.server")
+
+    assert module._normalize_identifier("  value  ") == "value"
+    assert module._normalize_identifier(123) == "123"
+    assert module._normalize_identifier(0.0) == "0.0"
+    assert module._normalize_identifier("") is None
+    assert module._normalize_identifier(None) is None
+
+
+def test_run_config_to_kwargs():
+    module = importlib.import_module("mcp_plex.server")
+
+    config = module.RunConfig()
+    assert config.to_kwargs() == {}
+
+    config.host = "127.0.0.1"
+    config.port = 8080
+    assert config.to_kwargs() == {"host": "127.0.0.1", "port": 8080}
+
+    config.path = "/plex"
+    kwargs = config.to_kwargs()
+    assert kwargs["path"] == "/plex"
 
 
 def test_find_records_handles_retrieve_error(monkeypatch):
