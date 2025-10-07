@@ -364,86 +364,89 @@ async def run(
         https=qdrant_https,
         prefer_grpc=qdrant_prefer_grpc,
     )
-    collection_name = "media-items"
-    await _ensure_collection(
-        client,
-        collection_name,
-        dense_size=dense_size,
-        dense_distance=dense_distance,
-    )
-
-    items: list[AggregatedItem]
-    if sample_dir is not None:
-        logger.info("Loading sample data from %s", sample_dir)
-        sample_items = samples._load_from_sample(sample_dir)
-        orchestrator, items, qdrant_retry_queue = _build_loader_orchestrator(
-            client=client,
-            collection_name=collection_name,
-            dense_model_name=dense_model_name,
-            sparse_model_name=sparse_model_name,
-            tmdb_api_key=None,
-            sample_items=sample_items,
-            plex_server=None,
-            plex_chunk_size=plex_chunk_size,
-            enrichment_batch_size=enrichment_batch_size,
-            enrichment_workers=enrichment_workers,
-            upsert_buffer_size=upsert_buffer_size,
-            max_concurrent_upserts=max_concurrent_upserts,
-            imdb_config=IMDbRuntimeConfig(
-                cache=imdb_config.cache,
-                max_retries=imdb_config.max_retries,
-                backoff=imdb_config.backoff,
-                retry_queue=IMDbRetryQueue(),
-                requests_per_window=imdb_config.requests_per_window,
-                window_seconds=imdb_config.window_seconds,
-            ),
-            qdrant_config=qdrant_config,
+    try:
+        collection_name = "media-items"
+        await _ensure_collection(
+            client,
+            collection_name,
+            dense_size=dense_size,
+            dense_distance=dense_distance,
         )
-        logger.info("Starting staged loader (sample mode)")
-        await orchestrator.run()
-    else:
-        if PlexServer is None:
-            raise RuntimeError("plexapi is required for live loading")
-        if not plex_url or not plex_token:
-            raise RuntimeError("PLEX_URL and PLEX_TOKEN must be provided")
-        if not tmdb_api_key:
-            raise RuntimeError("TMDB_API_KEY must be provided")
-        logger.info("Loading data from Plex server %s", plex_url)
-        server = PlexServer(plex_url, plex_token)
-        orchestrator, items, qdrant_retry_queue = _build_loader_orchestrator(
-            client=client,
-            collection_name=collection_name,
-            dense_model_name=dense_model_name,
-            sparse_model_name=sparse_model_name,
-            tmdb_api_key=tmdb_api_key,
-            sample_items=None,
-            plex_server=server,
-            plex_chunk_size=plex_chunk_size,
-            enrichment_batch_size=enrichment_batch_size,
-            enrichment_workers=enrichment_workers,
-            upsert_buffer_size=upsert_buffer_size,
-            max_concurrent_upserts=max_concurrent_upserts,
-            imdb_config=imdb_config,
-            qdrant_config=qdrant_config,
+
+        items: list[AggregatedItem]
+        if sample_dir is not None:
+            logger.info("Loading sample data from %s", sample_dir)
+            sample_items = samples._load_from_sample(sample_dir)
+            orchestrator, items, qdrant_retry_queue = _build_loader_orchestrator(
+                client=client,
+                collection_name=collection_name,
+                dense_model_name=dense_model_name,
+                sparse_model_name=sparse_model_name,
+                tmdb_api_key=None,
+                sample_items=sample_items,
+                plex_server=None,
+                plex_chunk_size=plex_chunk_size,
+                enrichment_batch_size=enrichment_batch_size,
+                enrichment_workers=enrichment_workers,
+                upsert_buffer_size=upsert_buffer_size,
+                max_concurrent_upserts=max_concurrent_upserts,
+                imdb_config=IMDbRuntimeConfig(
+                    cache=imdb_config.cache,
+                    max_retries=imdb_config.max_retries,
+                    backoff=imdb_config.backoff,
+                    retry_queue=IMDbRetryQueue(),
+                    requests_per_window=imdb_config.requests_per_window,
+                    window_seconds=imdb_config.window_seconds,
+                ),
+                qdrant_config=qdrant_config,
+            )
+            logger.info("Starting staged loader (sample mode)")
+            await orchestrator.run()
+        else:
+            if PlexServer is None:
+                raise RuntimeError("plexapi is required for live loading")
+            if not plex_url or not plex_token:
+                raise RuntimeError("PLEX_URL and PLEX_TOKEN must be provided")
+            if not tmdb_api_key:
+                raise RuntimeError("TMDB_API_KEY must be provided")
+            logger.info("Loading data from Plex server %s", plex_url)
+            server = PlexServer(plex_url, plex_token)
+            orchestrator, items, qdrant_retry_queue = _build_loader_orchestrator(
+                client=client,
+                collection_name=collection_name,
+                dense_model_name=dense_model_name,
+                sparse_model_name=sparse_model_name,
+                tmdb_api_key=tmdb_api_key,
+                sample_items=None,
+                plex_server=server,
+                plex_chunk_size=plex_chunk_size,
+                enrichment_batch_size=enrichment_batch_size,
+                enrichment_workers=enrichment_workers,
+                upsert_buffer_size=upsert_buffer_size,
+                max_concurrent_upserts=max_concurrent_upserts,
+                imdb_config=imdb_config,
+                qdrant_config=qdrant_config,
+            )
+            logger.info("Starting staged loader (Plex mode)")
+            await orchestrator.run()
+        logger.info("Loaded %d items", len(items))
+        if not items:
+            logger.info("No points to upsert")
+
+        await _process_qdrant_retry_queue(
+            client,
+            collection_name,
+            qdrant_retry_queue,
+            config=qdrant_config,
         )
-        logger.info("Starting staged loader (Plex mode)")
-        await orchestrator.run()
-    logger.info("Loaded %d items", len(items))
-    if not items:
-        logger.info("No points to upsert")
 
-    await _process_qdrant_retry_queue(
-        client,
-        collection_name,
-        qdrant_retry_queue,
-        config=qdrant_config,
-    )
+        if imdb_queue_path:
+            _persist_imdb_retry_queue(imdb_queue_path, imdb_config.retry_queue)
 
-    if imdb_queue_path:
-        _persist_imdb_retry_queue(imdb_queue_path, imdb_config.retry_queue)
-
-    json.dump([item.model_dump(mode="json") for item in items], fp=sys.stdout, indent=2)
-    sys.stdout.write("\n")
+        json.dump([item.model_dump(mode="json") for item in items], fp=sys.stdout, indent=2)
+        sys.stdout.write("\n")
+    finally:
+        await client.close()
 
 
 async def load_media(
