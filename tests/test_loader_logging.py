@@ -6,6 +6,7 @@ import pytest
 from click.testing import CliRunner
 
 from mcp_plex import loader
+from mcp_plex.loader import samples as loader_samples
 from mcp_plex.loader import cli as loader_cli
 from qdrant_client import models
 
@@ -47,7 +48,8 @@ def test_run_logs_upsert(monkeypatch, caplog):
 
 def test_run_logs_no_points(monkeypatch, caplog):
     monkeypatch.setattr(loader, "AsyncQdrantClient", DummyClient)
-    monkeypatch.setattr(loader, "_load_from_sample", lambda _: [])
+    monkeypatch.setattr(loader_samples, "_load_from_sample", lambda _: [])
+    monkeypatch.setattr(loader, "_load_from_sample", loader_samples._load_from_sample)
     sample_dir = Path(__file__).resolve().parents[1] / "sample-data"
     with caplog.at_level(logging.INFO):
         asyncio.run(loader.run(None, None, None, sample_dir, None, None))
@@ -83,13 +85,14 @@ def test_run_limits_concurrent_upserts(monkeypatch):
     started = asyncio.Queue()
     release_queue = asyncio.Queue()
     third_requested = asyncio.Event()
-    base_items = list(loader._load_from_sample(sample_dir))
+    base_items = list(loader_samples._load_from_sample(sample_dir))
 
     monkeypatch.setattr(
-        loader,
+        loader_samples,
         "_load_from_sample",
         lambda _: base_items + base_items[:1],
     )
+    monkeypatch.setattr(loader, "_load_from_sample", loader_samples._load_from_sample)
 
     upsert_calls = {"count": 0}
 
