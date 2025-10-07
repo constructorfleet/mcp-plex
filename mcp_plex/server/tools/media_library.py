@@ -317,6 +317,13 @@ def register_media_library_tools(server: "PlexServer") -> None:
             int | None,
             Field(description="Match a TMDb identifier", examples=[568467]),
         ] = None,
+        similar_to: Annotated[
+            str | Sequence[str] | None,
+            Field(
+                description="Recommend candidates similar to these identifiers",
+                examples=[["49915"], "tt8367814"],
+            ),
+        ] = None,
         limit: Annotated[
             int,
             Field(
@@ -337,24 +344,37 @@ def register_media_library_tools(server: "PlexServer") -> None:
             return [v for v in value if isinstance(v, str) and v]
 
         vector_queries: list[tuple[str, models.Document]] = []
-        if dense_query:
-            vector_queries.append(
-                (
-                    "dense",
-                    models.Document(
-                        text=dense_query, model=server.settings.dense_model
-                    ),
+        positive_point_ids: list[Any] = []
+        similar_identifiers = _listify(similar_to)
+        if similar_identifiers:
+            for identifier in similar_identifiers:
+                records = await media_helpers._find_records(
+                    server, identifier, limit=1
                 )
-            )
-        if sparse_query:
-            vector_queries.append(
-                (
-                    "sparse",
-                    models.Document(
-                        text=sparse_query, model=server.settings.sparse_model
-                    ),
+                for record in records:
+                    if record.id is not None:
+                        positive_point_ids.append(record.id)
+            if not positive_point_ids:
+                return []
+        if not positive_point_ids:
+            if dense_query:
+                vector_queries.append(
+                    (
+                        "dense",
+                        models.Document(
+                            text=dense_query, model=server.settings.dense_model
+                        ),
+                    )
                 )
-            )
+            if sparse_query:
+                vector_queries.append(
+                    (
+                        "sparse",
+                        models.Document(
+                            text=sparse_query, model=server.settings.sparse_model
+                        ),
+                    )
+                )
 
         must: list[models.FieldCondition] = []
         keyword_prefetch_conditions: list[models.FieldCondition] = []
@@ -503,7 +523,20 @@ def register_media_library_tools(server: "PlexServer") -> None:
         query_obj: models.Query | None = None
         using_param: str | None = None
         prefetch_param: Sequence[models.Prefetch] | None = None
-        if vector_queries:
+        prefetch_entries: list[models.Prefetch] = []
+        if positive_point_ids:
+            recommend_query = models.RecommendQuery(
+                recommend=models.RecommendInput(positive=positive_point_ids)
+            )
+            prefetch_entries.append(
+                models.Prefetch(
+                    query=recommend_query,
+                    using="dense",
+                    limit=limit,
+                    filter=prefetch_filter,
+                )
+            )
+        if not positive_point_ids and vector_queries:
             candidate_limit = limit * 3 if len(vector_queries) > 1 else limit
             prefetch_entries = [
                 models.Prefetch(
@@ -514,6 +547,8 @@ def register_media_library_tools(server: "PlexServer") -> None:
                 )
                 for name, doc in vector_queries
             ]
+
+        if prefetch_entries:
             if len(prefetch_entries) > 1:
                 query_obj = models.FusionQuery(fusion=models.Fusion.RRF)
                 using_param = None

@@ -150,6 +150,29 @@ def test_server_tools(monkeypatch):
         )
         assert episode_structured[0]["show_title"] == "Alien: Earth"
 
+        similar_structured = asyncio.run(
+            server.query_media.fn(
+                similar_to=["49915"],
+                type="episode",
+                limit=3,
+            )
+        )
+        assert similar_structured
+        assert {
+            item["plex"]["rating_key"]
+            for item in similar_structured
+            if isinstance(item.get("plex"), dict)
+        } >= {"61960"}
+
+        assert (
+            asyncio.run(
+                server.query_media.fn(
+                    similar_to="does-not-exist", type="movie", limit=1
+                )
+            )
+            == []
+        )
+
         rec = asyncio.run(server.recommend_media.fn(identifier=movie_id, limit=1))
         assert rec and rec[0]["plex"]["rating_key"] == "61960"
 
