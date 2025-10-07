@@ -320,6 +320,125 @@ def test_enrichment_stage_handles_missing_external_ids(monkeypatch):
     assert aggregated[1].imdb is None and aggregated[1].tmdb is None
 
 
+def test_enrichment_stage_skips_tmdb_fetch_without_api_key(monkeypatch):
+    movie_calls: list[str] = []
+    show_calls: list[str] = []
+    episode_calls: list[tuple[int, int, int]] = []
+
+    async def fake_fetch_imdb_batch(client, imdb_ids, **kwargs):
+        return {
+            imdb_id: IMDbTitle(
+                id=imdb_id,
+                type="movie" if imdb_id.startswith("ttm") else "tvEpisode",
+                primaryTitle=f"IMDb {imdb_id}",
+            )
+            for imdb_id in imdb_ids
+        }
+
+    async def fake_fetch_tmdb_movie(client, tmdb_id, api_key):
+        movie_calls.append(tmdb_id)
+        return TMDBMovie.model_validate({"id": int(tmdb_id), "title": tmdb_id})
+
+    async def fake_fetch_tmdb_show(client, tmdb_id, api_key):
+        show_calls.append(tmdb_id)
+        return TMDBShow.model_validate({"id": int(tmdb_id), "name": tmdb_id, "seasons": []})
+
+    async def fake_fetch_tmdb_episode(client, show_id, season_number, episode_number, api_key):
+        episode_calls.append((show_id, season_number, episode_number))
+        return TMDBEpisode.model_validate(
+            {
+                "id": show_id * 1000 + season_number * 100 + episode_number,
+                "name": f"Episode {episode_number}",
+                "season_number": season_number,
+                "episode_number": episode_number,
+            }
+        )
+
+    monkeypatch.setattr(
+        "mcp_plex.loader.pipeline.enrichment._fetch_imdb_batch",
+        fake_fetch_imdb_batch,
+    )
+    monkeypatch.setattr(
+        "mcp_plex.loader.pipeline.enrichment._fetch_tmdb_movie",
+        fake_fetch_tmdb_movie,
+    )
+    monkeypatch.setattr(
+        "mcp_plex.loader.pipeline.enrichment._fetch_tmdb_show",
+        fake_fetch_tmdb_show,
+    )
+    monkeypatch.setattr(
+        "mcp_plex.loader.pipeline.enrichment._fetch_tmdb_episode",
+        fake_fetch_tmdb_episode,
+    )
+
+    async def scenario() -> list[list[AggregatedItem] | None]:
+        ingest_queue: asyncio.Queue = asyncio.Queue()
+        persistence_queue: asyncio.Queue = asyncio.Queue()
+
+        stage = EnrichmentStage(
+            http_client_factory=lambda: _FakeClient([]),
+            tmdb_api_key=None,
+            ingest_queue=ingest_queue,
+            persistence_queue=persistence_queue,
+            imdb_retry_queue=IMDbRetryQueue(),
+            movie_batch_size=3,
+            episode_batch_size=3,
+        )
+
+        movies = [
+            _FakeMovie("m1", imdb_id="ttm1", tmdb_id="401"),
+            _FakeMovie("m2", imdb_id="ttm2", tmdb_id="402"),
+        ]
+        show = _FakeShow("show", tmdb_id="501")
+        episodes = [
+            _FakeEpisode(
+                "e1",
+                show=show,
+                season_index=1,
+                episode_index=1,
+                imdb_id="tte1",
+            ),
+            _FakeEpisode(
+                "e2",
+                show=show,
+                season_index=1,
+                episode_index=2,
+                imdb_id="tte2",
+            ),
+        ]
+
+        await ingest_queue.put(MovieBatch(movies=movies))
+        await ingest_queue.put(EpisodeBatch(show=show, episodes=episodes))
+        await ingest_queue.put(INGEST_DONE)
+
+        await stage.run()
+
+        payloads: list[list[AggregatedItem] | None] = []
+        while True:
+            payload = await persistence_queue.get()
+            payloads.append(payload)
+            if payload is PERSIST_DONE:
+                break
+        return payloads
+
+    payloads = asyncio.run(scenario())
+
+    assert movie_calls == []
+    assert show_calls == []
+    assert episode_calls == []
+
+    assert len(payloads) == 3
+    movie_payload, episode_payload, sentinel = payloads
+    assert isinstance(movie_payload, list)
+    assert isinstance(episode_payload, list)
+    assert sentinel is PERSIST_DONE
+
+    assert all(item.tmdb is None for item in movie_payload)
+    assert all(item.tmdb is None for item in episode_payload)
+    assert {item.imdb.id for item in movie_payload if item.imdb} == {"ttm1", "ttm2"}
+    assert {item.imdb.id for item in episode_payload if item.imdb} == {"tte1", "tte2"}
+
+
 class _ListHandler(logging.Handler):
     def __init__(self) -> None:
         super().__init__()
