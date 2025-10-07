@@ -17,6 +17,7 @@ class CaptureClient(AsyncQdrantClient):
     captured_points: list[models.PointStruct] = []
     upsert_calls: int = 0
     created_indexes: list[tuple[str, Any]] = []
+    close_calls: int = 0
 
     def __init__(self, *args, **kwargs):
         super().__init__(*args, **kwargs)
@@ -44,6 +45,10 @@ class CaptureClient(AsyncQdrantClient):
             wait=wait,
         )
 
+    async def close(self) -> None:
+        CaptureClient.close_calls += 1
+        await super().close()
+
 
 async def _run_loader(sample_dir: Path, **kwargs) -> None:
     await loader.run(
@@ -62,6 +67,7 @@ def test_run_writes_points(monkeypatch):
     CaptureClient.captured_points = []
     CaptureClient.upsert_calls = 0
     CaptureClient.created_indexes = []
+    CaptureClient.close_calls = 0
     sample_dir = Path(__file__).resolve().parents[1] / "sample-data"
     asyncio.run(_run_loader(sample_dir))
     client = CaptureClient.instance
@@ -70,9 +76,6 @@ def test_run_writes_points(monkeypatch):
     assert index_map.get("show_title") == models.PayloadSchemaType.KEYWORD
     assert index_map.get("season_number") == models.PayloadSchemaType.INTEGER
     assert index_map.get("episode_number") == models.PayloadSchemaType.INTEGER
-    points, _ = asyncio.run(client.scroll("media-items", limit=10, with_payload=True))
-    assert len(points) == 2
-    assert all("title" in p.payload and "type" in p.payload for p in points)
     captured = CaptureClient.captured_points
     assert len(captured) == 2
     assert all(isinstance(p.vector["dense"], models.Document) for p in captured)
@@ -85,7 +88,7 @@ def test_run_writes_points(monkeypatch):
     texts = [p.vector["dense"].text for p in captured]
     assert any("Directed by" in t for t in texts)
     assert any("Starring" in t for t in texts)
-    movie_point = next(p for p in points if p.payload["type"] == "movie")
+    movie_point = next(p for p in captured if p.payload["type"] == "movie")
     assert "directors" in movie_point.payload and "Guy Ritchie" in movie_point.payload["directors"]
     assert "writers" in movie_point.payload and movie_point.payload["writers"]
     assert "genres" in movie_point.payload and movie_point.payload["genres"]
@@ -94,7 +97,7 @@ def test_run_writes_points(monkeypatch):
     assert movie_point.payload.get("plot")
     assert movie_point.payload.get("tagline")
     assert movie_point.payload.get("reviews")
-    episode_point = next(p for p in points if p.payload["type"] == "episode")
+    episode_point = next(p for p in captured if p.payload["type"] == "episode")
     assert episode_point.payload.get("show_title") == "Alien: Earth"
     assert episode_point.payload.get("season_title") == "Season 1"
     assert episode_point.payload.get("season_number") == 1
@@ -110,6 +113,7 @@ def test_run_processes_imdb_queue(monkeypatch, tmp_path):
     monkeypatch.setattr(loader, "AsyncQdrantClient", CaptureClient)
     CaptureClient.captured_points = []
     CaptureClient.upsert_calls = 0
+    CaptureClient.close_calls = 0
     queue_file = tmp_path / "queue.json"
     queue_file.write_text(json.dumps(["tt0111161"]))
     sample_dir = Path(__file__).resolve().parents[1] / "sample-data"
@@ -138,10 +142,23 @@ def test_run_upserts_in_batches(monkeypatch):
     monkeypatch.setattr(loader, "AsyncQdrantClient", CaptureClient)
     CaptureClient.captured_points = []
     CaptureClient.upsert_calls = 0
+    CaptureClient.close_calls = 0
     sample_dir = Path(__file__).resolve().parents[1] / "sample-data"
     asyncio.run(_run_loader(sample_dir, qdrant_batch_size=1))
     assert CaptureClient.upsert_calls == 2
     assert len(CaptureClient.captured_points) == 2
+
+
+def test_run_closes_client_once(monkeypatch):
+    monkeypatch.setattr(loader, "AsyncQdrantClient", CaptureClient)
+    CaptureClient.close_calls = 0
+    sample_dir = Path(__file__).resolve().parents[1] / "sample-data"
+
+    asyncio.run(_run_loader(sample_dir))
+    assert CaptureClient.close_calls == 1
+
+    asyncio.run(_run_loader(sample_dir))
+    assert CaptureClient.close_calls == 2
 
 
 def test_run_raises_for_unknown_dense_model():
