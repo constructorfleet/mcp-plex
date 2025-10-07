@@ -30,7 +30,7 @@ from .channels import (
     SampleBatch,
     chunk_sequence,
 )
-from ...common.validation import require_positive
+from ...common.validation import coerce_plex_tag_id, require_positive
 
 from ...common.types import (
     AggregatedItem,
@@ -66,32 +66,13 @@ def _extract_external_ids(item: PlexPartialObject) -> ExternalIDs:
     return ExternalIDs(imdb=imdb_id, tmdb=tmdb_id)
 
 
-def _coerce_person_id(raw_id: Any) -> int:
-    """Coerce a Plex person identifier into an integer."""
-
-    if isinstance(raw_id, int):
-        return raw_id
-    if isinstance(raw_id, str):
-        raw_id = raw_id.strip()
-        if not raw_id:
-            return 0
-        try:
-            return int(raw_id)
-        except ValueError:
-            return 0
-    try:
-        return int(raw_id)
-    except (TypeError, ValueError):
-        return 0
-
-
 def _build_plex_item(item: PlexPartialObject) -> PlexItem:
     """Convert a Plex object into the internal :class:`PlexItem`."""
 
     guids = [PlexGuid(id=g.id) for g in getattr(item, "guids", [])]
     directors = [
         PlexPerson(
-            id=_coerce_person_id(getattr(d, "id", 0)),
+            id=coerce_plex_tag_id(getattr(d, "id", 0)),
             tag=str(getattr(d, "tag", "")),
             thumb=getattr(d, "thumb", None),
         )
@@ -99,7 +80,7 @@ def _build_plex_item(item: PlexPartialObject) -> PlexItem:
     ]
     writers = [
         PlexPerson(
-            id=_coerce_person_id(getattr(w, "id", 0)),
+            id=coerce_plex_tag_id(getattr(w, "id", 0)),
             tag=str(getattr(w, "tag", "")),
             thumb=getattr(w, "thumb", None),
         )
@@ -107,7 +88,7 @@ def _build_plex_item(item: PlexPartialObject) -> PlexItem:
     ]
     actors = [
         PlexPerson(
-            id=_coerce_person_id(getattr(a, "id", 0)),
+            id=coerce_plex_tag_id(getattr(a, "id", 0)),
             tag=str(getattr(a, "tag", "")),
             thumb=getattr(a, "thumb", None),
             role=getattr(a, "role", None),
