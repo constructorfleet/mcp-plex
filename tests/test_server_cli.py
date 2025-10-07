@@ -106,3 +106,9 @@ def test_env_invalid_port(monkeypatch):
     monkeypatch.setenv("MCP_PORT", "not-a-port")
     with pytest.raises(SystemExit):
         server.main([])
+
+
+def test_run_config_reexport():
+    from mcp_plex.server import RunConfig as ExportedRunConfig
+
+    assert ExportedRunConfig is server.RunConfig

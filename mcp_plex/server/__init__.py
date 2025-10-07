@@ -7,7 +7,7 @@ import inspect
 import json
 import logging
 import uuid
-from typing import Annotated, Any, Callable, Mapping, Sequence, cast
+from typing import Annotated, Any, Callable, Mapping, Sequence, TYPE_CHECKING, cast
 from typing import NotRequired, TypedDict
 
 from fastapi import FastAPI
@@ -1577,3 +1577,24 @@ def main(argv: list[str] | None = None) -> None:
 
 if __name__ == "__main__":
     main()
+
+
+if TYPE_CHECKING:
+    from .cli import RunConfig as RunConfig
+
+
+def __getattr__(name: str) -> Any:
+    if name == "RunConfig":
+        from .cli import RunConfig as _RunConfig
+
+        return _RunConfig
+    raise AttributeError(f"module {__name__!r} has no attribute {name!r}")
+
+
+__all__ = [
+    "PlexServer",
+    "server",
+    "settings",
+    "main",
+    "RunConfig",
+]
