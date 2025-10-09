@@ -71,15 +71,21 @@ class PlexServer(FastMCP):
         host = self.settings.qdrant_host
         if location is None and host is None:
             location = ":memory:"
-        self.qdrant_client = qdrant_client or AsyncQdrantClient(
-            location=location,
-            api_key=self.settings.qdrant_api_key,
-            host=host,
-            port=self.settings.qdrant_port,
-            grpc_port=self.settings.qdrant_grpc_port,
-            prefer_grpc=self.settings.qdrant_prefer_grpc,
-            https=self.settings.qdrant_https,
-        )
+        self._qdrant_config = {
+            "location": location,
+            "api_key": self.settings.qdrant_api_key,
+            "host": host,
+            "port": self.settings.qdrant_port,
+            "grpc_port": self.settings.qdrant_grpc_port,
+            "prefer_grpc": self.settings.qdrant_prefer_grpc,
+            "https": self.settings.qdrant_https,
+        }
+        self._qdrant_client_factory = None
+        if qdrant_client is None:
+            self._qdrant_client_factory = self._build_default_qdrant_client
+            self._qdrant_client = self._build_default_qdrant_client()
+        else:
+            self._qdrant_client = qdrant_client
 
         class _ServerLifespan:
             def __init__(self, plex_server: "PlexServer") -> None:
@@ -103,8 +109,31 @@ class PlexServer(FastMCP):
         self._plex_client: PlexServerClient | None = None
         self._plex_client_lock = asyncio.Lock()
 
+    def _build_default_qdrant_client(self) -> AsyncQdrantClient:
+        """Construct a new Qdrant client using the server settings."""
+
+        return AsyncQdrantClient(**self._qdrant_config)
+
+    @property
+    def qdrant_client(self) -> AsyncQdrantClient:
+        if self._qdrant_client is None:
+            if self._qdrant_client_factory is None:
+                raise RuntimeError("Qdrant client is not configured")
+            self._qdrant_client = self._qdrant_client_factory()
+        return self._qdrant_client
+
+    @qdrant_client.setter
+    def qdrant_client(self, client: AsyncQdrantClient | None) -> None:
+        self._qdrant_client = client
+        if client is None:
+            return
+        self._qdrant_client_factory = None
+
     async def close(self) -> None:
-        await self.qdrant_client.close()
+        if self._qdrant_client is not None:
+            await self._qdrant_client.close()
+        if self._qdrant_client_factory is not None:
+            self._qdrant_client = None
         self._plex_client = None
         self._plex_identity = None
 

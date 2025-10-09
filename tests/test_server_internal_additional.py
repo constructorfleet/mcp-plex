@@ -42,6 +42,31 @@ def test_clear_plex_identity_cache_resets_state():
     assert plex_server._plex_client is None
 
 
+def test_qdrant_client_reinitializes_after_close(monkeypatch):
+    from qdrant_client import async_qdrant_client
+
+    instances: list[object] = []
+
+    class StubClient:
+        def __init__(self, *args, **kwargs):
+            instances.append(self)
+
+        async def close(self) -> None:
+            return None
+
+    monkeypatch.setattr(async_qdrant_client, "AsyncQdrantClient", StubClient)
+    reloaded = importlib.reload(server_module)
+    try:
+        first = reloaded.server.qdrant_client
+        asyncio.run(reloaded.server.close())
+        second = reloaded.server.qdrant_client
+        assert first is not second
+        assert len(instances) >= 2
+    finally:
+        asyncio.run(reloaded.server.close())
+        importlib.reload(reloaded)
+
+
 def test_request_model_skips_variadic_params():
     def _callable(arg, *args, **kwargs):
         return arg
