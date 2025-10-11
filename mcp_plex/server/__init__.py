@@ -103,6 +103,8 @@ class PlexServer(FastMCP):
         super().__init__(lifespan=_lifespan)
         self._reranker: CrossEncoder | None = None
         self._reranker_loaded = False
+        self._reranker_lock = asyncio.Lock()
+        self._ensure_reranker_task: asyncio.Task[CrossEncoder | None] | None = None
         self.cache = MediaCache(self.settings.cache_size)
         self.client_identifier = uuid.uuid4().hex
         self._plex_identity: dict[str, Any] | None = None
@@ -145,16 +147,39 @@ class PlexServer(FastMCP):
     def reranker(self) -> CrossEncoder | None:
         if not self.settings.use_reranker or CrossEncoder is None:
             return None
-        if not self._reranker_loaded:
+        if self._reranker_loaded:
+            return self._reranker
+        try:
+            loop = asyncio.get_running_loop()
+        except RuntimeError:
+            return asyncio.run(self.ensure_reranker())
+        else:
+            if self._ensure_reranker_task is None or self._ensure_reranker_task.done():
+                self._ensure_reranker_task = loop.create_task(self.ensure_reranker())
+            return self._reranker
+
+    async def ensure_reranker(self) -> CrossEncoder | None:
+        if not self.settings.use_reranker or CrossEncoder is None:
+            self._reranker_loaded = True
+            self._reranker = None
+            return None
+        if self._reranker_loaded:
+            return self._reranker
+        async with self._reranker_lock:
+            if self._reranker_loaded:
+                return self._reranker
             try:
-                self._reranker = CrossEncoder("cross-encoder/ms-marco-MiniLM-L-6-v2")
+                reranker = await asyncio.to_thread(
+                    CrossEncoder, "cross-encoder/ms-marco-MiniLM-L-6-v2"
+                )
             except Exception as exc:
                 logger.warning(
                     "Failed to initialize CrossEncoder reranker: %s",
                     exc,
                     exc_info=exc,
                 )
-                self._reranker = None
+                reranker = None
+            self._reranker = reranker
             self._reranker_loaded = True
         return self._reranker
 

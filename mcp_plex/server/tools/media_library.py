@@ -87,7 +87,7 @@ def register_media_library_tools(server: "PlexServer") -> None:
 
         dense_doc = models.Document(text=query, model=server.settings.dense_model)
         sparse_doc = models.Document(text=query, model=server.settings.sparse_model)
-        reranker = server.reranker
+        reranker = await server.ensure_reranker()
         candidate_limit = limit * 3 if reranker is not None else limit
         prefetch = [
             models.Prefetch(

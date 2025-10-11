@@ -23,6 +23,20 @@ from mcp_plex.server.tools import media_library as media_library_tools
 from pydantic import ValidationError
 
 
+def _reload_server_with_dummy_reranker(monkeypatch):
+    monkeypatch.setenv("USE_RERANKER", "1")
+    st_module = types.ModuleType("sentence_transformers")
+
+    class Dummy:
+        def __init__(self, model_id: str) -> None:
+            self.model_id = model_id
+
+    st_module.CrossEncoder = Dummy
+    monkeypatch.setitem(sys.modules, "sentence_transformers", st_module)
+    module = importlib.reload(importlib.import_module("mcp_plex.server"))
+    return module, Dummy
+
+
 @contextmanager
 def _load_server(monkeypatch):
     from qdrant_client import async_qdrant_client
@@ -523,6 +537,53 @@ def test_reranker_init_failure(monkeypatch, caplog):
         "Failed to initialize CrossEncoder reranker" in message
         for message in caplog.messages
     )
+    asyncio.run(module.server.close())
+
+
+def test_ensure_reranker_uses_thread_executor(monkeypatch):
+    module, Dummy = _reload_server_with_dummy_reranker(monkeypatch)
+    calls: list[tuple[object, tuple[object, ...], dict[str, object]]] = []
+
+    async def fake_to_thread(fn, *args, **kwargs):  # type: ignore[no-untyped-def]
+        calls.append((fn, args, kwargs))
+        return fn(*args, **kwargs)
+
+    monkeypatch.setattr(asyncio, "to_thread", fake_to_thread)
+
+    async def exercise():
+        reranker = await module.server.ensure_reranker()
+        assert isinstance(reranker, Dummy)
+        assert reranker is await module.server.ensure_reranker()
+
+    asyncio.run(exercise())
+
+    assert len(calls) == 1
+    fn, args, _ = calls[0]
+    assert fn is Dummy
+    assert args == ("cross-encoder/ms-marco-MiniLM-L-6-v2",)
+    asyncio.run(module.server.close())
+
+
+def test_ensure_reranker_concurrent_calls_share_single_instance(monkeypatch):
+    module, Dummy = _reload_server_with_dummy_reranker(monkeypatch)
+    call_count = 0
+
+    async def fake_to_thread(fn, *args, **kwargs):  # type: ignore[no-untyped-def]
+        nonlocal call_count
+        call_count += 1
+        await asyncio.sleep(0)
+        return fn(*args, **kwargs)
+
+    monkeypatch.setattr(asyncio, "to_thread", fake_to_thread)
+
+    async def exercise():
+        results = await asyncio.gather(
+            *(module.server.ensure_reranker() for _ in range(5))
+        )
+        assert call_count == 1
+        assert all(reranker is results[0] for reranker in results)
+
+    asyncio.run(exercise())
     asyncio.run(module.server.close())
 
 
