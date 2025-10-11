@@ -170,7 +170,7 @@ class PlexServer(FastMCP):
                 return self._reranker
             try:
                 reranker = await asyncio.to_thread(
-                    CrossEncoder, "cross-encoder/ms-marco-MiniLM-L-6-v2"
+                    CrossEncoder, self.settings.reranker_model
                 )
             except Exception as exc:
                 logger.warning(

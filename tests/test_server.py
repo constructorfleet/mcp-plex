@@ -541,6 +541,10 @@ def test_reranker_init_failure(monkeypatch, caplog):
 
 
 def test_ensure_reranker_uses_thread_executor(monkeypatch):
+    monkeypatch.setenv(
+        "RERANKER_MODEL",
+        "sentence-transformers/test-cross-encoder",
+    )
     module, Dummy = _reload_server_with_dummy_reranker(monkeypatch)
     calls: list[tuple[object, tuple[object, ...], dict[str, object]]] = []
 
@@ -560,7 +564,7 @@ def test_ensure_reranker_uses_thread_executor(monkeypatch):
     assert len(calls) == 1
     fn, args, _ = calls[0]
     assert fn is Dummy
-    assert args == ("cross-encoder/ms-marco-MiniLM-L-6-v2",)
+    assert args == ("sentence-transformers/test-cross-encoder",)
     asyncio.run(module.server.close())
 
 

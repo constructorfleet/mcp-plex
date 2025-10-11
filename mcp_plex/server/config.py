@@ -35,6 +35,10 @@ class Settings(BaseSettings):
     )
     cache_size: int = Field(default=128, validation_alias="CACHE_SIZE")
     use_reranker: bool = Field(default=True, validation_alias="USE_RERANKER")
+    reranker_model: str = Field(
+        default="cross-encoder/ms-marco-MiniLM-L-6-v2",
+        validation_alias="RERANKER_MODEL",
+    )
     plex_url: AnyHttpUrl | None = Field(default=None, validation_alias="PLEX_URL")
     plex_token: str | None = Field(default=None, validation_alias="PLEX_TOKEN")
     plex_player_aliases: PlexPlayerAliasMap = Field(

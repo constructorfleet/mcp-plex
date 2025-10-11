@@ -5,6 +5,17 @@ import pytest
 from mcp_plex.server.config import Settings
 
 
+def test_settings_defaults_reranker_model():
+    settings = Settings()
+    assert settings.reranker_model == "cross-encoder/ms-marco-MiniLM-L-6-v2"
+
+
+def test_settings_env_alias_for_reranker_model(monkeypatch):
+    monkeypatch.setenv("RERANKER_MODEL", "sentence-transformers/custom")
+    settings = Settings()
+    assert settings.reranker_model == "sentence-transformers/custom"
+
+
 def test_parse_aliases_rejects_invalid_json():
     with pytest.raises(ValueError):
         Settings._parse_aliases("not json")
