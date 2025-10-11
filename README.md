@@ -66,6 +66,13 @@ uv run load-data --dense-model my-dense --sparse-model my-sparse
 uv run mcp-server --dense-model my-dense --sparse-model my-sparse
 ```
 
+Cross-encoder reranking defaults to `cross-encoder/ms-marco-MiniLM-L-6-v2`.
+Set `RERANKER_MODEL` or pass `--reranker-model` to point at a different model:
+
+```bash
+uv run mcp-server --reranker-model sentence-transformers/ms-marco-mini
+```
+
 ## Docker
 A Dockerfile builds a GPU-enabled image based on
 `nvidia/cuda:12.4.1-cudnn-devel-ubuntu22.04` using `uv` for dependency

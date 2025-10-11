@@ -56,6 +56,11 @@ def main(argv: list[str] | None = None) -> None:
         default=settings.sparse_model,
         help="Sparse embedding model name (env: SPARSE_MODEL)",
     )
+    parser.add_argument(
+        "--reranker-model",
+        default=settings.reranker_model,
+        help="Cross-encoder reranker model name (env: RERANKER_MODEL)",
+    )
     args = parser.parse_args(argv)
 
     env_transport = os.getenv("MCP_TRANSPORT")
@@ -105,6 +110,7 @@ def main(argv: list[str] | None = None) -> None:
 
     settings.dense_model = args.dense_model
     settings.sparse_model = args.sparse_model
+    settings.reranker_model = args.reranker_model
 
     plex_server.run(transport=transport, **run_config.to_kwargs())
 
