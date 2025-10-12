@@ -5,6 +5,7 @@ from __future__ import annotations
 import asyncio
 import logging
 import warnings
+from dataclasses import dataclass
 from typing import TYPE_CHECKING, Sequence, TypedDict
 
 from qdrant_client import models
@@ -303,17 +304,28 @@ async def _upsert_in_batches(
             logger.info("Upserted %d/%d points", min(i + len(batch), total), total)
 
 
+@dataclass(frozen=True, slots=True)
+class QdrantRetrySummary:
+    """Outcome metrics for processing the Qdrant retry queue."""
+
+    succeeded_points: int
+    failed_points: int
+
+
 async def _process_qdrant_retry_queue(
     client: AsyncQdrantClient,
     collection_name: str,
     retry_queue: asyncio.Queue[list[models.PointStruct]],
     *,
     config: "QdrantRuntimeConfig",
-) -> None:
+) -> QdrantRetrySummary:
     """Retry failed Qdrant batches with exponential backoff."""
 
+    succeeded = 0
+    failed = 0
+
     if retry_queue.empty():
-        return
+        return QdrantRetrySummary(succeeded_points=0, failed_points=0)
 
     pending = retry_queue.qsize()
     logger.info("Retrying %d failed Qdrant batches", pending)
@@ -340,6 +352,7 @@ async def _process_qdrant_retry_queue(
                         config.retry_attempts,
                         len(batch),
                     )
+                    failed += len(batch)
                     break
                 await asyncio.sleep(config.retry_backoff * attempt)
                 continue
@@ -349,7 +362,13 @@ async def _process_qdrant_retry_queue(
                     len(batch),
                     attempt,
                 )
+                succeeded += len(batch)
                 break
+
+    return QdrantRetrySummary(
+        succeeded_points=succeeded,
+        failed_points=failed,
+    )
 
 
 __all__ = [
@@ -362,5 +381,6 @@ __all__ = [
     "QdrantPayload",
     "build_point",
     "_upsert_in_batches",
+    "QdrantRetrySummary",
     "_process_qdrant_retry_queue",
 ]

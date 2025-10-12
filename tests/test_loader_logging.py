@@ -8,6 +8,7 @@ from click.testing import CliRunner
 from mcp_plex import loader
 from mcp_plex.loader import samples as loader_samples
 from mcp_plex.loader import cli as loader_cli
+from mcp_plex.loader.qdrant import QdrantRetrySummary
 from qdrant_client import models
 
 
@@ -60,6 +61,28 @@ def test_run_logs_no_points(monkeypatch, caplog):
     assert "Loaded 0 items" in caplog.text
     assert "No points to upsert" in caplog.text
     assert "Ingestion stage finished" in caplog.text
+
+
+def test_run_logs_qdrant_retry_summary(monkeypatch, caplog):
+    monkeypatch.setattr(loader, "AsyncQdrantClient", DummyClient)
+    sample_dir = Path(__file__).resolve().parents[1] / "sample-data"
+
+    async def fake_process(client, collection_name, retry_queue, *, config):
+        assert collection_name == "media-items"
+        return QdrantRetrySummary(succeeded_points=3, failed_points=2)
+
+    monkeypatch.setattr(loader, "_process_qdrant_retry_queue", fake_process)
+
+    with caplog.at_level(logging.INFO):
+        asyncio.run(loader.run(None, None, None, sample_dir, None, None))
+
+    summary_records = [
+        record for record in caplog.records if record.message == "Qdrant retry summary"
+    ]
+    assert summary_records, "Qdrant retry summary log was not emitted"
+    summary = summary_records[-1]
+    assert getattr(summary, "qdrant_retry_succeeded", None) == 3
+    assert getattr(summary, "qdrant_retry_failed", None) == 2
 
 
 def test_run_rejects_invalid_upsert_buffer_size(monkeypatch):
