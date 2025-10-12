@@ -103,6 +103,37 @@ def _extract_plex_metadata(media: AggregatedMediaItem) -> PlexMediaMetadata:
     return cast(PlexMediaMetadata, {})
 
 
+def _collect_cache_keys(
+    data: AggregatedMediaItem,
+    plex_info: PlexMediaMetadata,
+    *extra_identifiers: str | int | float | None,
+) -> set[str]:
+    """Gather normalized cache keys from an aggregated media payload."""
+
+    cache_keys: set[str] = set()
+    for candidate in extra_identifiers:
+        normalized = _normalize_identifier(candidate)
+        if normalized:
+            cache_keys.add(normalized)
+
+    rating_key = _normalize_identifier(plex_info.get("rating_key"))
+    if rating_key:
+        cache_keys.add(rating_key)
+
+    guid = _normalize_identifier(plex_info.get("guid"))
+    if guid:
+        cache_keys.add(guid)
+
+    for source_key in ("imdb", "tmdb", "tvdb"):
+        source_value = data.get(source_key)
+        if isinstance(source_value, Mapping):
+            source_id = _normalize_identifier(source_value.get("id"))
+            if source_id:
+                cache_keys.add(source_id)
+
+    return cache_keys
+
+
 async def _get_media_data(server: "PlexServer", identifier: str) -> AggregatedMediaItem:
     """Return the first matching media record's payload."""
 
@@ -115,27 +146,9 @@ async def _get_media_data(server: "PlexServer", identifier: str) -> AggregatedMe
     payload = _flatten_payload(cast(Mapping[str, JSONValue] | None, records[0].payload))
     data = payload
 
-    cache_keys: set[str] = set()
-
-    lookup_key = _normalize_identifier(identifier)
-    if lookup_key:
-        cache_keys.add(lookup_key)
-
     plex_data = _extract_plex_metadata(data)
+    cache_keys = _collect_cache_keys(data, plex_data, identifier)
     rating_key = _normalize_identifier(plex_data.get("rating_key"))
-    if rating_key:
-        cache_keys.add(rating_key)
-    guid = _normalize_identifier(plex_data.get("guid"))
-    if guid:
-        cache_keys.add(guid)
-
-    for source_key in ("imdb", "tmdb", "tvdb"):
-        source_value = data.get(source_key)
-        if isinstance(source_value, dict):
-            source_id = _normalize_identifier(source_value.get("id"))
-            if source_id:
-                cache_keys.add(source_id)
-
     for cache_key in cache_keys:
         server.cache.set_payload(cache_key, cast(dict[str, JSONValue], payload))
 

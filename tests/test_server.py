@@ -279,6 +279,36 @@ def test_get_media_data_caches_external_ids(monkeypatch):
         assert call_count == 1
 
 
+def test_search_media_prefetches_external_ids(monkeypatch):
+    with _load_server(monkeypatch) as server:
+        imdb_id = "tt8367814"
+        tmdb_id = "522627"
+
+        results = asyncio.run(
+            server.search_media.fn(
+                query="Matthew McConaughey crime movie",
+                limit=1,
+                summarize_for_llm=False,
+            )
+        )
+        assert results
+
+        imdb_payload = server.server.cache.get_payload(imdb_id)
+        assert imdb_payload is not None
+
+        tmdb_payload = server.server.cache.get_payload(tmdb_id)
+        assert tmdb_payload is not None
+
+        async def _fail_find_records(*args, **kwargs):
+            raise AssertionError("_find_records should not be used for cached IDs")
+
+        monkeypatch.setattr(media_helpers, "_find_records", _fail_find_records)
+
+        cached = asyncio.run(
+            server.get_media.fn(identifier=imdb_id, summarize_for_llm=False)
+        )
+        assert cached and cached[0]["plex"]["rating_key"] == "49915"
+
 def test_new_media_tools(monkeypatch):
     with _load_server(monkeypatch) as server:
         movies = asyncio.run(
