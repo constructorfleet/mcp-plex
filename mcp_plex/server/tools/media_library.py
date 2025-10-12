@@ -43,12 +43,7 @@ def register_media_library_tools(server: "PlexServer") -> None:
     ) -> MediaSummaryResponse | list[AggregatedMediaItem]:
         """Retrieve media items by rating key, IMDb/TMDb ID or title."""
 
-        normalized_identifier = media_helpers._normalize_identifier(identifier)
-        cached_payload: AggregatedMediaItem | None = None
-        if normalized_identifier:
-            cached_value = server.cache.get_payload(normalized_identifier)
-            if cached_value is not None:
-                cached_payload = cast(AggregatedMediaItem, cached_value)
+        cached_payload = media_helpers._get_cached_payload(server.cache, identifier)
 
         if cached_payload is not None:
             results = [cached_payload]

@@ -279,6 +279,34 @@ def test_get_media_data_caches_external_ids(monkeypatch):
         assert call_count == 1
 
 
+def test_get_media_data_ignores_mismatched_cached_identifier(monkeypatch):
+    with _load_server(monkeypatch) as server:
+        plex_server = server.server
+
+        call_count = 0
+
+        original_find_records = media_helpers._find_records
+
+        async def _counting_find_records(plex_server, identifier: str, limit: int = 1):
+            nonlocal call_count
+            call_count += 1
+            return await original_find_records(plex_server, identifier, limit=limit)
+
+        monkeypatch.setattr(media_helpers, "_find_records", _counting_find_records)
+
+        server.server.cache.set_payload(
+            "522627",
+            {
+                "plex": {"rating_key": "12345", "title": "Fake Movie"},
+            },
+        )
+
+        data = asyncio.run(media_helpers._get_media_data(plex_server, "522627"))
+
+        assert data["plex"]["rating_key"] == "49915"
+        assert call_count == 1
+
+
 def test_search_media_prefetches_external_ids(monkeypatch):
     with _load_server(monkeypatch) as server:
         imdb_id = "tt8367814"

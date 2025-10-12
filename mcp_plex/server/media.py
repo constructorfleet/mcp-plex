@@ -17,6 +17,7 @@ from .models import (
 )
 
 if TYPE_CHECKING:  # pragma: no cover - imported for type checking only
+    from ..common.cache import MediaCache
     from . import PlexServer
 
 
@@ -134,12 +135,46 @@ def _collect_cache_keys(
     return cache_keys
 
 
+def _identifier_matches_payload(
+    identifier: str | int | float | None, payload: AggregatedMediaItem
+) -> bool:
+    """Return True when an identifier corresponds to cached payload fields."""
+
+    normalized_identifier = _normalize_identifier(identifier)
+    if not normalized_identifier:
+        return False
+    plex_info = _extract_plex_metadata(payload)
+    cache_keys = _collect_cache_keys(payload, plex_info)
+    return normalized_identifier in cache_keys
+
+
+def _get_cached_payload(
+    cache: "MediaCache", identifier: str | int | float | None
+) -> AggregatedMediaItem | None:
+    """Return a cached payload when the identifier matches stored keys."""
+
+    normalized_identifier = _normalize_identifier(identifier)
+    cache_keys_to_try: list[str] = []
+    if normalized_identifier:
+        cache_keys_to_try.append(normalized_identifier)
+    if isinstance(identifier, str) and normalized_identifier != identifier:
+        cache_keys_to_try.append(identifier)
+    for cache_key in cache_keys_to_try:
+        cached = cache.get_payload(cache_key)
+        if cached is None:
+            continue
+        candidate = cast(AggregatedMediaItem, cached)
+        if _identifier_matches_payload(identifier, candidate):
+            return candidate
+    return None
+
+
 async def _get_media_data(server: "PlexServer", identifier: str) -> AggregatedMediaItem:
     """Return the first matching media record's payload."""
 
-    cached = server.cache.get_payload(identifier)
-    if cached is not None:
-        return cast(AggregatedMediaItem, cached)
+    cached_payload = _get_cached_payload(server.cache, identifier)
+    if cached_payload is not None:
+        return cached_payload
     records = await _find_records(server, identifier, limit=1)
     if not records:
         raise ValueError("Media item not found")
