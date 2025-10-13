@@ -1,5 +1,6 @@
 from unittest.mock import patch
 
+import logging
 import asyncio
 import importlib
 import pytest
@@ -125,3 +126,18 @@ def test_run_config_reexport():
     from mcp_plex.server import RunConfig as ExportedRunConfig
 
     assert ExportedRunConfig is server.RunConfig
+
+
+def test_main_configures_log_level(monkeypatch):
+    configured: dict[str, object] = {}
+
+    def fake_basic_config(**kwargs):
+        configured["level"] = kwargs.get("level")
+
+    monkeypatch.setattr("logging.basicConfig", fake_basic_config)
+
+    with patch.object(server.server, "run") as mock_run:
+        server.main(["--log-level", "debug"])
+
+    assert configured["level"] == logging.DEBUG
+    mock_run.assert_called_once_with(transport="stdio")
