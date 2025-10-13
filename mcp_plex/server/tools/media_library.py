@@ -43,13 +43,18 @@ def register_media_library_tools(server: "PlexServer") -> None:
     ) -> MediaSummaryResponse | list[AggregatedMediaItem]:
         """Retrieve media items by rating key, IMDb/TMDb ID or title."""
 
-        records = await media_helpers._find_records(server, identifier, limit=10)
-        results = [
-            media_helpers._flatten_payload(
-                cast(Mapping[str, JSONValue] | None, r.payload)
-            )
-            for r in records
-        ]
+        cached_payload = media_helpers._get_cached_payload(server.cache, identifier)
+
+        if cached_payload is not None:
+            results = [cached_payload]
+        else:
+            records = await media_helpers._find_records(server, identifier, limit=10)
+            results = [
+                media_helpers._flatten_payload(
+                    cast(Mapping[str, JSONValue] | None, r.payload)
+                )
+                for r in records
+            ]
         if summarize_for_llm:
             return media_helpers.summarize_media_items_for_llm(results)
         return results
@@ -115,17 +120,15 @@ def register_media_library_tools(server: "PlexServer") -> None:
                 cast(Mapping[str, JSONValue] | None, hit.payload)
             )
             plex_info = media_helpers._extract_plex_metadata(data)
-            rating_key = media_helpers._normalize_identifier(
-                plex_info.get("rating_key")
-            )
-            if rating_key:
-                server.cache.set_payload(rating_key, cast(dict[str, JSONValue], data))
-                thumb = plex_info.get("thumb")
+            cache_keys = media_helpers._collect_cache_keys(data, plex_info)
+            thumb = plex_info.get("thumb")
+            art = plex_info.get("art")
+            for cache_key in cache_keys:
+                server.cache.set_payload(cache_key, cast(dict[str, JSONValue], data))
                 if isinstance(thumb, str) and thumb:
-                    server.cache.set_poster(rating_key, thumb)
-                art = plex_info.get("art")
+                    server.cache.set_poster(cache_key, thumb)
                 if isinstance(art, str) and art:
-                    server.cache.set_background(rating_key, art)
+                    server.cache.set_background(cache_key, art)
 
         prefetch_task = asyncio.gather(*[_prefetch(h) for h in hits[:limit]])
 
