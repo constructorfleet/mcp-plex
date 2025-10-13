@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import argparse
+import logging
 import os
 from dataclasses import dataclass
 
@@ -33,6 +34,17 @@ class RunConfig:
         return kwargs
 
 
+def _resolve_log_level(cli_value: str | None) -> str:
+    """Return the desired log level name based on CLI or environment input."""
+
+    env_value = os.getenv("LOG_LEVEL")
+    if cli_value:
+        return cli_value
+    if env_value:
+        return env_value.lower()
+    return "info"
+
+
 def main(argv: list[str] | None = None) -> None:
     """CLI entrypoint for running the MCP server."""
 
@@ -60,6 +72,12 @@ def main(argv: list[str] | None = None) -> None:
         "--reranker-model",
         default=settings.reranker_model,
         help="Cross-encoder reranker model name (env: RERANKER_MODEL)",
+    )
+    parser.add_argument(
+        "--log-level",
+        type=str.lower,
+        choices=["critical", "error", "warning", "info", "debug", "notset"],
+        help="Logging verbosity (env: LOG_LEVEL)",
     )
     args = parser.parse_args(argv)
 
@@ -111,6 +129,9 @@ def main(argv: list[str] | None = None) -> None:
     settings.dense_model = args.dense_model
     settings.sparse_model = args.sparse_model
     settings.reranker_model = args.reranker_model
+
+    log_level_name = _resolve_log_level(args.log_level)
+    logging.basicConfig(level=getattr(logging, log_level_name.upper(), logging.INFO))
 
     plex_server.run(transport=transport, **run_config.to_kwargs())
 
