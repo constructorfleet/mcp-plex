@@ -309,18 +309,24 @@ async def _process_qdrant_retry_queue(
     retry_queue: asyncio.Queue[list[models.PointStruct]],
     *,
     config: "QdrantRuntimeConfig",
-) -> None:
-    """Retry failed Qdrant batches with exponential backoff."""
+) -> tuple[int, int]:
+    """Retry failed Qdrant batches with exponential backoff.
+
+    Returns a tuple containing the number of points that were retried successfully
+    and the number that still failed after exhausting ``config.retry_attempts``.
+    """
 
     if retry_queue.empty():
-        return
+        return 0, 0
 
     pending = retry_queue.qsize()
     logger.info("Retrying %d failed Qdrant batches", pending)
+    succeeded_points = 0
+    failed_points = 0
     while not retry_queue.empty():
         batch = await retry_queue.get()
-        attempt = 1
-        while attempt <= config.retry_attempts:
+        batch_size = len(batch)
+        for attempt in range(1, config.retry_attempts + 1):
             try:
                 await client.upsert(
                     collection_name=collection_name,
@@ -331,26 +337,29 @@ async def _process_qdrant_retry_queue(
                     "Retry %d/%d failed for Qdrant batch of %d points",
                     attempt,
                     config.retry_attempts,
-                    len(batch),
+                    batch_size,
                 )
-                attempt += 1
-                if attempt > config.retry_attempts:
+                if attempt == config.retry_attempts:
                     logger.error(
                         "Giving up on Qdrant batch after %d attempts; %d points were not indexed",
                         config.retry_attempts,
-                        len(batch),
+                        batch_size,
                     )
+                    failed_points += batch_size
                     break
-                await asyncio.sleep(config.retry_backoff * attempt)
-                continue
+
+                next_attempt = attempt + 1
+                await asyncio.sleep(config.retry_backoff * next_attempt)
             else:
                 logger.info(
                     "Successfully retried Qdrant batch of %d points on attempt %d",
-                    len(batch),
+                    batch_size,
                     attempt,
                 )
+                succeeded_points += batch_size
                 break
 
+    return succeeded_points, failed_points
 
 __all__ = [
     "_DENSE_MODEL_PARAMS",

@@ -437,11 +437,19 @@ async def run(
         if not items:
             logger.info("No points to upsert")
 
-        await _process_qdrant_retry_queue(
+        succeeded_points, failed_points = await _process_qdrant_retry_queue(
             client,
             collection_name,
             qdrant_retry_queue,
             config=qdrant_config,
+        )
+        logger.info(
+            "Qdrant retry summary",
+            extra={
+                "event": "qdrant_retry_summary",
+                "succeeded_points": succeeded_points,
+                "failed_points": failed_points,
+            },
         )
 
         if imdb_queue_path:

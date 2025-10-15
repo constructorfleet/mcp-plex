@@ -62,6 +62,30 @@ def test_run_logs_no_points(monkeypatch, caplog):
     assert "Ingestion stage finished" in caplog.text
 
 
+def test_run_logs_qdrant_retry_summary(monkeypatch, caplog):
+    monkeypatch.setattr(loader, "AsyncQdrantClient", DummyClient)
+    sample_dir = Path(__file__).resolve().parents[1] / "sample-data"
+
+    async def fake_process_retry_queue(*args, **kwargs):
+        return 7, 3
+
+    monkeypatch.setattr(loader, "_process_qdrant_retry_queue", fake_process_retry_queue)
+
+    with caplog.at_level(logging.INFO):
+        asyncio.run(loader.run(None, None, None, sample_dir, None, None))
+
+    summary_records = [
+        record
+        for record in caplog.records
+        if record.levelno == logging.INFO
+        and getattr(record, "event", None) == "qdrant_retry_summary"
+    ]
+    assert summary_records, "Expected a qdrant retry summary log record"
+    record = summary_records[-1]
+    assert getattr(record, "succeeded_points", None) == 7
+    assert getattr(record, "failed_points", None) == 3
+
+
 def test_run_rejects_invalid_upsert_buffer_size(monkeypatch):
     monkeypatch.setattr(loader, "AsyncQdrantClient", DummyClient)
     sample_dir = Path(__file__).resolve().parents[1] / "sample-data"
