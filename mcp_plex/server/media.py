@@ -135,6 +135,36 @@ def _collect_cache_keys(
     return cache_keys
 
 
+def _cache_media_artwork(
+    cache: "MediaCache", cache_keys: set[str], plex_info: PlexMediaMetadata
+) -> None:
+    """Persist poster and background URLs for each cache key."""
+
+    if not cache_keys:
+        return
+
+    thumb = plex_info.get("thumb")
+    if isinstance(thumb, str) and thumb:
+        for cache_key in cache_keys:
+            cache.set_poster(cache_key, thumb)
+
+    art = plex_info.get("art")
+    if isinstance(art, str) and art:
+        for cache_key in cache_keys:
+            cache.set_background(cache_key, art)
+
+
+def _ensure_rating_key_cached(
+    cache_keys: set[str], plex_info: PlexMediaMetadata
+) -> set[str]:
+    """Guarantee the Plex rating key is part of the cache key set."""
+
+    rating_key = _normalize_identifier(plex_info.get("rating_key"))
+    if rating_key:
+        cache_keys.add(rating_key)
+    return cache_keys
+
+
 def _identifier_matches_payload(
     identifier: str | int | float | None, payload: AggregatedMediaItem
 ) -> bool:
@@ -183,17 +213,12 @@ async def _get_media_data(server: "PlexServer", identifier: str) -> AggregatedMe
 
     plex_data = _extract_plex_metadata(data)
     cache_keys = _collect_cache_keys(data, plex_data, identifier)
-    rating_key = _normalize_identifier(plex_data.get("rating_key"))
+    cache_keys = _ensure_rating_key_cached(cache_keys, plex_data)
+
     for cache_key in cache_keys:
         server.cache.set_payload(cache_key, cast(dict[str, JSONValue], payload))
 
-    if rating_key:
-        thumb = plex_data.get("thumb")
-        if isinstance(thumb, str) and thumb:
-            server.cache.set_poster(rating_key, thumb)
-        art = plex_data.get("art")
-        if isinstance(art, str) and art:
-            server.cache.set_background(rating_key, art)
+    _cache_media_artwork(server.cache, cache_keys, plex_data)
     return payload
 
 

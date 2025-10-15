@@ -931,9 +931,9 @@ def register_media_library_tools(server: "PlexServer") -> None:
         if not thumb:
             raise ValueError("Poster not available")
         thumb_str = str(thumb)
-        rating_key = media_helpers._normalize_identifier(plex_info.get("rating_key"))
-        if rating_key:
-            server.cache.set_poster(rating_key, thumb_str)
+        cache_keys = media_helpers._collect_cache_keys(data, plex_info, identifier)
+        cache_keys = media_helpers._ensure_rating_key_cached(cache_keys, plex_info)
+        media_helpers._cache_media_artwork(server.cache, cache_keys, plex_info)
         return thumb_str
 
     @server.resource("resource://media-background/{identifier}")
@@ -957,9 +957,9 @@ def register_media_library_tools(server: "PlexServer") -> None:
         if not art:
             raise ValueError("Background not available")
         art_str = str(art)
-        rating_key = media_helpers._normalize_identifier(plex_info.get("rating_key"))
-        if rating_key:
-            server.cache.set_background(rating_key, art_str)
+        cache_keys = media_helpers._collect_cache_keys(data, plex_info, identifier)
+        cache_keys = media_helpers._ensure_rating_key_cached(cache_keys, plex_info)
+        media_helpers._cache_media_artwork(server.cache, cache_keys, plex_info)
         return art_str
 
     @server.prompt("media-info")
