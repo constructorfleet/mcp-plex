@@ -71,6 +71,12 @@ def _load_server(monkeypatch):
         asyncio.run(module.server.close())
 
 
+def test_server_name_is_plex_media():
+    module = importlib.reload(importlib.import_module("mcp_plex.server"))
+
+    assert module.server.name == "Plex Media"
+
+
 def test_qdrant_env_config(monkeypatch):
     from qdrant_client import async_qdrant_client
 

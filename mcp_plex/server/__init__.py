@@ -49,6 +49,7 @@ except Exception as exc:
 
 
 settings = Settings()
+SERVER_NAME = "Plex Media"
 
 
 try:
@@ -100,7 +101,7 @@ class PlexServer(FastMCP):
         def _lifespan(app: FastMCP) -> _ServerLifespan:  # noqa: ARG001
             return _ServerLifespan(self)
 
-        super().__init__(lifespan=_lifespan)
+        super().__init__(name=SERVER_NAME, lifespan=_lifespan)
         self._reranker: CrossEncoder | None = None
         self._reranker_loaded = False
         self._reranker_lock = asyncio.Lock()
