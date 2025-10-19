@@ -2,7 +2,8 @@
 
 from __future__ import annotations
 
-from typing import Any, Mapping, Sequence, TYPE_CHECKING, cast
+from datetime import datetime, timezone
+from typing import Any, Mapping, MutableMapping, Sequence, TYPE_CHECKING, cast
 
 from qdrant_client import models
 
@@ -77,7 +78,68 @@ def _flatten_payload(payload: Mapping[str, JSONValue] | None) -> AggregatedMedia
         if key == "data":
             continue
         data[key] = value
+    _ensure_epoch_added_at(data)
     return cast(AggregatedMediaItem, data)
+
+
+def _ensure_epoch_added_at(data: MutableMapping[str, JSONValue]) -> None:
+    """Coerce any ``added_at`` timestamps to Linux epoch seconds."""
+
+    _update_epoch_field(data, "added_at")
+
+    plex_value = data.get("plex")
+    if isinstance(plex_value, MutableMapping):
+        _update_epoch_field(plex_value, "added_at")
+    elif isinstance(plex_value, Mapping):
+        normalized = _normalize_epoch_timestamp(plex_value.get("added_at"))
+        if normalized is not None:
+            updated = dict(plex_value)
+            updated["added_at"] = normalized
+            data["plex"] = cast(JSONValue, updated)
+
+
+def _update_epoch_field(
+    container: MutableMapping[str, JSONValue], key: str
+) -> bool:
+    """Normalize a timestamp field in-place when possible."""
+
+    normalized = _normalize_epoch_timestamp(container.get(key))
+    if normalized is None:
+        return False
+    container[key] = normalized
+    return True
+
+
+def _normalize_epoch_timestamp(value: Any) -> int | None:
+    """Convert mixed timestamp representations into epoch seconds."""
+
+    if value is None:
+        return None
+    if isinstance(value, bool):
+        return None
+    if isinstance(value, int):
+        return value
+    if isinstance(value, float):
+        return int(value)
+    if isinstance(value, datetime):
+        dt = value
+    elif isinstance(value, str):
+        text = value.strip()
+        if not text:
+            return None
+        if text.isdigit():
+            return int(text)
+        if text.endswith("Z"):
+            text = text[:-1] + "+00:00"
+        try:
+            dt = datetime.fromisoformat(text)
+        except ValueError:
+            return None
+    else:
+        return None
+    if dt.tzinfo is None:
+        dt = dt.replace(tzinfo=timezone.utc)
+    return int(dt.timestamp())
 
 
 def _normalize_identifier(value: str | int | float | None) -> str | None:

@@ -118,6 +118,8 @@ def test_server_tools(monkeypatch):
             server.get_media.fn(identifier=movie_id, summarize_for_llm=False)
         )
         assert res and res[0]["plex"]["title"] == "The Gentlemen"
+        assert isinstance(res[0]["plex"]["added_at"], int)
+        assert isinstance(res[0]["added_at"], int)
 
         res = asyncio.run(
             server.get_media.fn(identifier="tt8367814", summarize_for_llm=False)
@@ -350,12 +352,16 @@ def test_new_media_tools(monkeypatch):
         )
         assert movies and movies[0]["plex"]["type"] == "movie"
         assert movies[0]["plex"]["added_at"] is not None
+        assert isinstance(movies[0]["plex"]["added_at"], int)
+        assert isinstance(movies[0]["added_at"], int)
 
         shows = asyncio.run(
             server.new_shows.fn(limit=1, summarize_for_llm=False)
         )
         assert shows and shows[0]["plex"]["type"] == "episode"
         assert shows[0]["plex"]["added_at"] is not None
+        assert isinstance(shows[0]["plex"]["added_at"], int)
+        assert isinstance(shows[0]["added_at"], int)
         assert shows[0]["show_title"] == "Alien: Earth"
         assert shows[0]["season_number"] == 1
         assert shows[0]["episode_number"] == 4
