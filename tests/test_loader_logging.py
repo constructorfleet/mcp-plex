@@ -84,6 +84,8 @@ def test_run_logs_qdrant_retry_summary(monkeypatch, caplog):
     record = summary_records[-1]
     assert getattr(record, "succeeded_points", None) == 7
     assert getattr(record, "failed_points", None) == 3
+    assert "7 succeeded" in record.message
+    assert "3 failed" in record.message
 
 
 def test_run_rejects_invalid_upsert_buffer_size(monkeypatch):

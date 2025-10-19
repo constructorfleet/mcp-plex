@@ -443,13 +443,16 @@ async def run(
             qdrant_retry_queue,
             config=qdrant_config,
         )
+        retry_summary = {
+            "event": "qdrant_retry_summary",
+            "succeeded_points": succeeded_points,
+            "failed_points": failed_points,
+        }
         logger.info(
-            "Qdrant retry summary",
-            extra={
-                "event": "qdrant_retry_summary",
-                "succeeded_points": succeeded_points,
-                "failed_points": failed_points,
-            },
+            "Qdrant retry summary: %d succeeded, %d failed",
+            succeeded_points,
+            failed_points,
+            extra=retry_summary,
         )
 
         if imdb_queue_path:
