@@ -68,6 +68,7 @@ DEFAULT_QDRANT_UPSERT_BUFFER_SIZE: int = 200
 DEFAULT_QDRANT_MAX_CONCURRENT_UPSERTS: int = 4
 DEFAULT_QDRANT_RETRY_ATTEMPTS: int = 3
 DEFAULT_QDRANT_RETRY_BACKOFF: float = 1.0
+MIN_CONTINUOUS_SLEEP: float = 0.1
 
 
 @dataclass(slots=True)
@@ -535,4 +536,11 @@ async def load_media(
         if not continuous:
             break
 
-        await asyncio.sleep(delay)
+        sleep_interval = delay if delay > 0 else MIN_CONTINUOUS_SLEEP
+        if delay <= 0:
+            logger.warning(
+                "Continuous mode requested non-positive delay %s; using %s seconds instead",
+                delay,
+                sleep_interval,
+            )
+        await asyncio.sleep(sleep_interval)

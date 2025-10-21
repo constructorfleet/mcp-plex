@@ -260,6 +260,61 @@ def test_load_media_rejects_negative_delay(monkeypatch, tmp_path):
         )
 
 
+def test_load_media_continuous_zero_delay_waits_minimum(monkeypatch, tmp_path):
+    call_count = 0
+    sleep_calls: list[float] = []
+
+    async def fake_run(**kwargs):
+        nonlocal call_count
+        call_count += 1
+        if call_count >= 2:
+            raise RuntimeError("stop")
+
+    async def fake_sleep(delay):
+        sleep_calls.append(delay)
+
+    monkeypatch.setattr(loader, "run", fake_run)
+    monkeypatch.setattr(loader.asyncio, "sleep", fake_sleep)
+
+    with pytest.raises(RuntimeError, match="stop"):
+        asyncio.run(
+            loader.load_media(
+                plex_url="http://localhost",
+                plex_token="token",
+                tmdb_api_key="key",
+                sample_dir=None,
+                qdrant_url=":memory:",
+                qdrant_api_key=None,
+                qdrant_host=None,
+                qdrant_port=6333,
+                qdrant_grpc_port=6334,
+                qdrant_https=False,
+                qdrant_prefer_grpc=False,
+                dense_model_name="dense",
+                sparse_model_name="sparse",
+                continuous=True,
+                delay=0.0,
+                imdb_cache=tmp_path / "cache.json",
+                imdb_max_retries=3,
+                imdb_backoff=1.0,
+                imdb_requests_per_window=None,
+                imdb_window_seconds=1.0,
+                imdb_queue=tmp_path / "queue.json",
+                upsert_buffer_size=1,
+                plex_chunk_size=1,
+                enrichment_batch_size=1,
+                enrichment_workers=1,
+                qdrant_batch_size=1,
+                max_concurrent_upserts=1,
+                qdrant_retry_attempts=1,
+                qdrant_retry_backoff=1.0,
+            )
+        )
+
+    assert sleep_calls, "continuous mode should await between runs"
+    assert sleep_calls[0] > 0.0
+
+
 def test_loader_script_entrypoint(monkeypatch):
     monkeypatch.setattr(sys, "argv", ["loader", "--help"])
     module = sys.modules.pop("mcp_plex.loader.cli", None)
