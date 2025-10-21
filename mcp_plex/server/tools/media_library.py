@@ -21,7 +21,14 @@ if TYPE_CHECKING:  # pragma: no cover - imported for type checking only
 def register_media_library_tools(server: "PlexServer") -> None:
     """Register media discovery tools and resources on the provided server."""
 
-    @server.tool("get-media")
+    def _media_tool(name: str, *, title: str, operation: str):
+        return server.tool(
+            name,
+            title=title,
+            meta={"category": "media-library", "operation": operation},
+        )
+
+    @_media_tool("get-media", title="Get media details", operation="lookup")
     async def get_media(
         identifier: Annotated[
             str,
@@ -59,7 +66,7 @@ def register_media_library_tools(server: "PlexServer") -> None:
             return media_helpers.summarize_media_items_for_llm(results)
         return results
 
-    @server.tool("search-media")
+    @_media_tool("search-media", title="Search media library", operation="search")
     async def search_media(
         query: Annotated[
             str,
@@ -206,7 +213,7 @@ def register_media_library_tools(server: "PlexServer") -> None:
             return media_helpers.summarize_media_items_for_llm(results)
         return results
 
-    @server.tool("query-media")
+    @_media_tool("query-media", title="Query media library", operation="query")
     async def query_media(
         dense_query: Annotated[
             str | None,
@@ -637,7 +644,11 @@ def register_media_library_tools(server: "PlexServer") -> None:
         ]
         return _finalize(results)
 
-    @server.tool("recommend-media")
+    @_media_tool(
+        "recommend-media",
+        title="Recommend similar media",
+        operation="recommend",
+    )
     async def recommend_media(
         identifier: Annotated[
             str,
@@ -696,7 +707,7 @@ def register_media_library_tools(server: "PlexServer") -> None:
             return media_helpers.summarize_media_items_for_llm(results)
         return results
 
-    @server.tool("new-movies")
+    @_media_tool("new-movies", title="Newest movies", operation="recent-movies")
     async def new_movies(
         limit: Annotated[
             int,
@@ -747,7 +758,7 @@ def register_media_library_tools(server: "PlexServer") -> None:
             return media_helpers.summarize_media_items_for_llm(results)
         return results
 
-    @server.tool("new-shows")
+    @_media_tool("new-shows", title="Newest episodes", operation="recent-episodes")
     async def new_shows(
         limit: Annotated[
             int,
@@ -798,7 +809,11 @@ def register_media_library_tools(server: "PlexServer") -> None:
             return media_helpers.summarize_media_items_for_llm(results)
         return results
 
-    @server.tool("actor-movies")
+    @_media_tool(
+        "actor-movies",
+        title="Movies by actor",
+        operation="actor-filmography",
+    )
     async def actor_movies(
         actor: Annotated[
             str,
