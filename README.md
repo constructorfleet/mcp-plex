@@ -92,6 +92,22 @@ Expose the server over SSE on port 8000:
 uv run mcp-server --transport sse --bind 0.0.0.0 --port 8000 --mount /mcp
 ```
 
+Expose the server over streamable HTTP when your MCP client expects a plain
+streamed response body instead of SSE events. This mode always requires explicit
+bind, port, and mount values provided on the command line or through
+environment variables. **Example command:**
+
+```bash
+uv run mcp-server --transport streamable-http --bind 0.0.0.0 --port 8800 --mount /mcp
+```
+
+Set `MCP_TRANSPORT=streamable-http` along with `MCP_BIND`, `MCP_PORT`, and
+`MCP_MOUNT` to configure the same behavior via environment variables. Use SSE
+for browser-based connectors or any client that natively supports
+Server-Sent Events and wants automatic reconnection. Choose streamable HTTP
+for clients that expect a single streaming HTTP response (for example, CLI
+tools or proxies that terminate SSE).
+
 The runtime also reads `MCP_TRANSPORT`, `MCP_HOST`, `MCP_PORT`, and `MCP_MOUNT`
 environment variables. When set, those values override any conflicting CLI
 flags so Docker Compose or other orchestrators can control the exposed MCP
