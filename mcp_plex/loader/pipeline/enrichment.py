@@ -822,7 +822,8 @@ class EnrichmentStage:
             len(updated),
             self._imdb_retry_queue.qsize(),
         )
-        return True
+        progress_made = bool(updated) or len(stalled_ids) < len(imdb_ids)
+        return progress_made
 
     def _register_pending_imdb(self, imdb_id: str, item: AggregatedItem) -> None:
         """Track *item* for re-emission once IMDb metadata becomes available."""
