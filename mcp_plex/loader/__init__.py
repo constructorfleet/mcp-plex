@@ -215,9 +215,7 @@ def _build_loader_orchestrator(
     imdb_queue = imdb_config.retry_queue
 
     upsert_capacity = asyncio.Semaphore(max_concurrent_upserts)
-    qdrant_retry_queue: asyncio.Queue[list[models.PointStruct]] = asyncio.Queue(
-        maxsize=persistence_queue_capacity
-    )
+    qdrant_retry_queue: asyncio.Queue[list[models.PointStruct]] = asyncio.Queue()
     items: list[AggregatedItem] = []
     upserted = 0
     upsert_start = time.perf_counter()

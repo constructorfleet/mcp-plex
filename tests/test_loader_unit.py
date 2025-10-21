@@ -513,4 +513,6 @@ def test_build_loader_orchestrator_limits_queue_sizes():
 
     assert orchestrator._ingest_queue.maxsize == 6
     assert orchestrator._persistence_queue.maxsize == 4
-    assert retry_queue.maxsize == 4
+    assert (
+        retry_queue.maxsize == 0
+    ), "Qdrant retry queue should remain unbounded to avoid deadlocks"
