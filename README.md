@@ -33,11 +33,54 @@ Run continuously with a delay between runs:
 uv run load-data --continuous --delay 600
 ```
 
-### IMDb Retry Queue
-When IMDb lookups continue to return HTTP 429 after the configured retries,
-their IDs are added to a small queue (`imdb_queue.json` by default). The queue
-is persisted after each run and reloaded on the next run so pending IDs are
-retried before normal processing.
+### IMDb Retry Configuration
+The loader exposes CLI flags (and mirrored environment variables) that control
+how it retries IMDb lookups and how aggressively it backs off when hitting
+`HTTP 429` responses. Use the CLI options during ad-hoc runs or set the
+environment variables when deploying via Docker Compose or other orchestrators.
+
+| CLI flag | Environment variable | Default | How it influences retries |
+| --- | --- | --- | --- |
+| `--imdb-cache` | `IMDB_CACHE` | `imdb_cache.json` | Stores successful IMDb responses on disk so repeated runs can skip network requests. Cached hits never enter the retry pipeline. |
+| `--imdb-max-retries` | `IMDB_MAX_RETRIES` | `3` | Number of retry attempts when IMDb returns rate-limit responses. The loader makes `max_retries + 1` total attempts before deferring an ID to the retry queue. |
+| `--imdb-backoff` | `IMDB_BACKOFF` | `1.0` | Initial delay in seconds before the next retry. The loader doubles the delay after each failed attempt (1s → 2s → 4s …), slowing down repeated bursts. |
+| `--imdb-requests-per-window` | `IMDB_REQUESTS_PER_WINDOW` | disabled | Enables a throttle that only allows the configured number of IMDb requests within the window defined below. Leave unset (`None`) to run without throttling. |
+| `--imdb-window-seconds` | `IMDB_WINDOW_SECONDS` | `1.0` | Duration of the sliding window used by the throttle. Combined with the option above it smooths out request spikes when you need to stay under strict quotas. |
+| `--imdb-queue` | `IMDB_QUEUE` | `imdb_queue.json` | Path where the retry queue is persisted between runs. IDs that continue to fail after all retries are appended here and reloaded first on the next execution. |
+
+The defaults balance steady throughput with respect for IMDb's limits. For most
+home libraries the standard settings work without modification. Persist the
+retry queue to a custom path whenever you run multiple loader containers or
+want the queue to live on shared storage (for example, mounting `/data/imdb` in
+Docker) so unfinished retries survive container rebuilds or host migrations.
+
+#### Aggressive retry policy
+```bash
+uv run load-data \
+  --imdb-max-retries 5 \
+  --imdb-backoff 0.5 \
+  --imdb-queue /data/imdb/aggressive_queue.json
+```
+Setting `IMDB_MAX_RETRIES=5` and `IMDB_BACKOFF=0.5` halves the initial delay
+and allows two additional retry attempts before falling back to the queue. With
+`IMDB_REQUESTS_PER_WINDOW` left unset, the loader does not throttle outbound
+requests, so it will recover faster from short spikes at the cost of being more
+likely to trigger hard IMDb rate limits.
+
+#### Conservative retry policy
+```bash
+export IMDB_MAX_RETRIES=2
+export IMDB_BACKOFF=2.0
+export IMDB_REQUESTS_PER_WINDOW=10
+export IMDB_WINDOW_SECONDS=60
+export IMDB_QUEUE=/data/imdb/conservative_queue.json
+uv run load-data
+```
+These settings reduce the retry count, double the initial delay, and apply a
+token-bucket throttle that only allows 10 requests per minute. They are useful
+when sharing an API key across several workers. Persisting the queue to a
+shared path makes sure pending IDs continue to retry gradually even if the
+container stops.
 
 ### Run the MCP Server
 Start the FastMCP server over stdio (default):
