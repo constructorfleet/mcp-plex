@@ -488,3 +488,29 @@ def test_loader_pipeline_processes_sample_batches(monkeypatch):
     reviews = payload.get("reviews")
     if reviews is not None:
         assert isinstance(reviews, list)
+
+
+def test_build_loader_orchestrator_limits_queue_sizes():
+    imdb_config = make_imdb_config()
+    qdrant_config = QdrantRuntimeConfig(batch_size=1)
+
+    orchestrator, _, retry_queue = _build_loader_orchestrator(
+        client=object(),
+        collection_name="media-items",
+        dense_model_name="BAAI/bge-small-en-v1.5",
+        sparse_model_name="Qdrant/bm42-all-minilm-l6-v2-attentions",
+        tmdb_api_key=None,
+        sample_items=None,
+        plex_server=None,
+        plex_chunk_size=10,
+        enrichment_batch_size=1,
+        enrichment_workers=3,
+        upsert_buffer_size=1,
+        max_concurrent_upserts=2,
+        imdb_config=imdb_config,
+        qdrant_config=qdrant_config,
+    )
+
+    assert orchestrator._ingest_queue.maxsize == 6
+    assert orchestrator._persistence_queue.maxsize == 4
+    assert retry_queue.maxsize == 4

@@ -69,6 +69,14 @@ DEFAULT_QDRANT_MAX_CONCURRENT_UPSERTS: int = 4
 DEFAULT_QDRANT_RETRY_ATTEMPTS: int = 3
 DEFAULT_QDRANT_RETRY_BACKOFF: float = 1.0
 MIN_CONTINUOUS_SLEEP: float = 0.1
+INGEST_QUEUE_MULTIPLIER: int = 2
+PERSISTENCE_QUEUE_MULTIPLIER: int = 2
+
+
+def _queue_capacity(worker_count: int, multiplier: int) -> int:
+    """Derive a positive queue capacity based on worker parallelism."""
+
+    return max(1, int(worker_count) * multiplier)
 
 
 @dataclass(slots=True)
@@ -193,12 +201,23 @@ def _build_loader_orchestrator(
     from .pipeline.ingestion import IngestionStage
     from .pipeline.enrichment import EnrichmentStage
 
-    ingest_queue: IngestQueue = IngestQueue()
-    persistence_queue: PersistenceQueue = PersistenceQueue()
+    ingest_queue_capacity = _queue_capacity(
+        enrichment_workers, INGEST_QUEUE_MULTIPLIER
+    )
+    persistence_queue_capacity = _queue_capacity(
+        max_concurrent_upserts, PERSISTENCE_QUEUE_MULTIPLIER
+    )
+
+    ingest_queue: IngestQueue = IngestQueue(maxsize=ingest_queue_capacity)
+    persistence_queue: PersistenceQueue = PersistenceQueue(
+        maxsize=persistence_queue_capacity
+    )
     imdb_queue = imdb_config.retry_queue
 
     upsert_capacity = asyncio.Semaphore(max_concurrent_upserts)
-    qdrant_retry_queue: asyncio.Queue[list[models.PointStruct]] = asyncio.Queue()
+    qdrant_retry_queue: asyncio.Queue[list[models.PointStruct]] = asyncio.Queue(
+        maxsize=persistence_queue_capacity
+    )
     items: list[AggregatedItem] = []
     upserted = 0
     upsert_start = time.perf_counter()
