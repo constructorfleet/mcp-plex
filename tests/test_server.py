@@ -256,6 +256,71 @@ def test_server_tools(monkeypatch):
             asyncio.run(server.media_background.fn(identifier="0"))
 
 
+def test_media_library_tools_have_metadata(monkeypatch):
+    module, _ = _reload_server_with_dummy_reranker(monkeypatch)
+    try:
+        expected = {
+            "get_media": {
+                "title": "Get media details",
+                "description": (
+                    "Retrieve media items by rating key, IMDb/TMDb ID or title."
+                ),
+                "operation": "lookup",
+            },
+            "search_media": {
+                "title": "Search media library",
+                "description": (
+                    "Hybrid similarity search across media items using dense and sparse"
+                    " vectors."
+                ),
+                "operation": "search",
+            },
+            "query_media": {
+                "title": "Query media library",
+                "description": (
+                    "Run a structured query against indexed payload fields and optional"
+                    " vector searches."
+                ),
+                "operation": "query",
+            },
+            "recommend_media": {
+                "title": "Recommend similar media",
+                "description": (
+                    "Recommend similar media items based on a reference identifier."
+                ),
+                "operation": "recommend",
+            },
+            "new_movies": {
+                "title": "Newest movies",
+                "description": "Return the most recently added movies.",
+                "operation": "recent-movies",
+            },
+            "new_shows": {
+                "title": "Newest episodes",
+                "description": "Return the most recently added TV episodes.",
+                "operation": "recent-episodes",
+            },
+            "actor_movies": {
+                "title": "Movies by actor",
+                "description": (
+                    "Return movies featuring the given actor, optionally filtered by"
+                    " release year."
+                ),
+                "operation": "actor-filmography",
+            },
+        }
+
+        for attr, details in expected.items():
+            tool = getattr(module, attr)
+            assert tool.title == details["title"]
+            assert tool.description == details["description"]
+            assert tool.meta is not None
+            assert tool.meta.get("category") == "media-library"
+            assert tool.meta.get("operation") == details["operation"]
+    finally:
+        asyncio.run(module.server.close())
+
+
 def test_get_media_data_caches_external_ids(monkeypatch):
     with _load_server(monkeypatch) as server:
         call_count = 0
