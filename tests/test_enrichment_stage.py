@@ -983,6 +983,55 @@ def test_enrichment_stage_idle_retry_emits_updated_items(monkeypatch):
     assert second_batch[0].imdb.primaryTitle == "IMDb tt1"
 
 
+def test_retry_imdb_batches_returns_false_when_no_progress(monkeypatch):
+    calls: list[list[str]] = []
+
+    async def fake_fetch_imdb_batch(client, imdb_ids, **kwargs):
+        calls.append(list(imdb_ids))
+        return {imdb_id: None for imdb_id in imdb_ids}
+
+    monkeypatch.setattr(
+        "mcp_plex.loader.pipeline.enrichment._fetch_imdb_batch",
+        fake_fetch_imdb_batch,
+    )
+
+    async def scenario() -> tuple[bool, int, list[list[str]], list[AggregatedItem]]:
+        ingest_queue: asyncio.Queue = asyncio.Queue()
+        persistence_queue: asyncio.Queue = asyncio.Queue()
+        retry_queue = IMDbRetryQueue(["tt-stalled"])
+
+        stage = EnrichmentStage(
+            http_client_factory=lambda: _StubHTTPClient(),
+            tmdb_api_key="",
+            ingest_queue=ingest_queue,
+            persistence_queue=persistence_queue,
+            imdb_retry_queue=retry_queue,
+            movie_batch_size=2,
+            episode_batch_size=2,
+        )
+
+        pending_item = AggregatedItem(
+            plex=PlexItem(
+                rating_key="1",
+                guid="plex://1",
+                type="movie",
+                title="Movie 1",
+            )
+        )
+        stage._register_pending_imdb("tt-stalled", pending_item)
+
+        result = await stage._retry_imdb_batches()
+        pending = stage._pending_imdb_items.get("tt-stalled", [])
+        return result, retry_queue.qsize(), calls, pending
+
+    result, queue_size, captured_calls, pending = asyncio.run(scenario())
+
+    assert result is False
+    assert queue_size == 1
+    assert captured_calls == [["tt-stalled"]]
+    assert pending and pending[0].plex.rating_key == "1"
+
+
 class _FakeResponse:
     def __init__(self, status_code: int, payload: dict[str, Any]):
         self.status_code = status_code
