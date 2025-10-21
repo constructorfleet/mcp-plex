@@ -54,6 +54,36 @@ environment variables. When set, those values override any conflicting CLI
 flags so Docker Compose or other orchestrators can control the exposed MCP
 endpoint without editing the container command.
 
+#### Server Configuration
+
+Additional environment variables tune how the server searches and serves
+results:
+
+- `CACHE_SIZE` sets the maximum number of distinct query responses cached in
+  memory. Increase it when the deployment handles many simultaneous users or
+  long-running sessions that repeat complex queries.
+- `USE_RERANKER` toggles cross-encoder reranking. Set it to `0` to disable the
+  reranker entirely when you want lower latency or do not have GPU capacity.
+- `PLEX_PLAYER_ALIASES` provides alternate player names so commands stay
+  consistent with custom Plex clients. Supply the value as JSON or as Python
+  tuple syntax to align with the server CLI parser.
+
+Examples:
+
+```bash
+# Disable cross-encoder reranking to prioritize latency.
+USE_RERANKER=0 uv run mcp-server
+
+# Expand the in-memory cache to store up to 2,000 results.
+CACHE_SIZE=2000 uv run mcp-server
+
+# Map model-friendly player names to Plex devices.
+PLEX_PLAYER_ALIASES='{"living_room":"Plex for Roku"}' uv run mcp-server
+
+# Tuple syntax is also accepted for aliases.
+PLEX_PLAYER_ALIASES="[(\"living_room\", \"Plex for Roku\")]" uv run mcp-server
+```
+
 ### Embedding Models
 
 Both the loader and server default to `BAAI/bge-small-en-v1.5` for dense
