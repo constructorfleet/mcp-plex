@@ -1,5 +1,4 @@
 from pathlib import Path
-
 import pytest
 
 
@@ -19,6 +18,14 @@ IMDB_RETRY_DOC_TOKENS = (
     "Aggressive retry policy",
     "Conservative retry policy",
 )
+
+
+def test_readme_documents_server_cache_and_reranker_settings():
+    readme = Path(__file__).resolve().parent.parent / "README.md"
+    content = readme.read_text(encoding="utf-8")
+
+    for key in ("CACHE_SIZE", "USE_RERANKER", "PLEX_PLAYER_ALIASES"):
+        assert key in content
 
 
 @pytest.mark.parametrize("token", IMDB_RETRY_DOC_TOKENS)
