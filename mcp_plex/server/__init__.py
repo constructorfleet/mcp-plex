@@ -19,6 +19,12 @@ from fastmcp.server.context import Context as FastMCPContext
 from plexapi.exceptions import PlexApiException
 from plexapi.server import PlexServer as PlexServerClient
 from plexapi.client import PlexClient
+from plexapi.media import (
+    AudioStream,
+    MediaPartStream,
+    Session as PlexSession,
+    SubtitleStream,
+)
 from pydantic import BaseModel, Field, create_model
 from qdrant_client.async_qdrant_client import AsyncQdrantClient
 from starlette.requests import Request
@@ -797,7 +803,7 @@ def _normalize_session_identifier(value: Any) -> str:
     return normalized.strip().lower()
 
 
-def _collect_session_players(session: Any) -> list[Any]:
+def _collect_session_players(session: PlexSession | Any) -> list[Any]:
     players = getattr(session, "players", None)
     if isinstance(players, (list, tuple, set)):
         return [player for player in players if player is not None]
@@ -812,8 +818,8 @@ def _collect_session_players(session: Any) -> list[Any]:
     return [player]
 
 
-def _collect_audio_streams(session: Any) -> list[Any]:
-    streams: list[Any] = []
+def _collect_audio_streams(session: PlexSession | Any) -> list[AudioStream]:
+    streams: list[AudioStream] = []
     getter = getattr(session, "audioStreams", None)
     if callable(getter):
         try:
@@ -822,14 +828,14 @@ def _collect_audio_streams(session: Any) -> list[Any]:
             logger.debug("Failed to fetch audio streams: %s", exc, exc_info=exc)
         else:
             if isinstance(result, (list, tuple, set)):
-                streams.extend(result)
+                streams.extend(cast(Sequence[AudioStream], result))
             elif result is not None:
-                streams.append(result)
+                streams.append(cast(AudioStream, result))
     return streams
 
 
-def _collect_subtitle_streams(session: Any) -> list[Any]:
-    streams: list[Any] = []
+def _collect_subtitle_streams(session: PlexSession | Any) -> list[SubtitleStream]:
+    streams: list[SubtitleStream] = []
     getter = getattr(session, "subtitleStreams", None)
     if callable(getter):
         try:
@@ -838,9 +844,9 @@ def _collect_subtitle_streams(session: Any) -> list[Any]:
             logger.debug("Failed to fetch subtitle streams: %s", exc, exc_info=exc)
         else:
             if isinstance(result, (list, tuple, set)):
-                streams.extend(result)
+                streams.extend(cast(Sequence[SubtitleStream], result))
             elif result is not None:
-                streams.append(result)
+                streams.append(cast(SubtitleStream, result))
     if not streams:
         media_items = getattr(session, "media", None)
         if isinstance(media_items, (list, tuple, set)):
@@ -855,11 +861,11 @@ def _collect_subtitle_streams(session: Any) -> list[Any]:
                     for stream in part_streams:
                         stream_type = _coerce_int(getattr(stream, "streamType", None))
                         if stream_type == 3:
-                            streams.append(stream)
+                            streams.append(cast(SubtitleStream, stream))
     return streams
 
 
-async def _find_player_session(player: PlexPlayerMetadata) -> Any | None:
+async def _find_player_session(player: PlexPlayerMetadata) -> PlexSession | None:
     machine_identifier = _normalize_session_identifier(
         player.get("machine_identifier")
     )
@@ -870,14 +876,14 @@ async def _find_player_session(player: PlexPlayerMetadata) -> Any | None:
         return None
     plex_client = await _get_plex_client()
 
-    def _load_sessions() -> list[Any]:
+    def _load_sessions() -> list[PlexSession]:
         sessions = plex_client.sessions()
         if isinstance(sessions, list):
-            return sessions
+            return cast(list[PlexSession], sessions)
         try:
-            return list(sessions)
+            return list(cast(Sequence[PlexSession], sessions))
         except TypeError:
-            return [sessions]
+            return [cast(PlexSession, sessions)]
 
     try:
         sessions = await asyncio.to_thread(_load_sessions)
@@ -902,7 +908,7 @@ async def _find_player_session(player: PlexPlayerMetadata) -> Any | None:
     return None
 
 
-def _normalize_stream_language(stream: Any) -> str | None:
+def _normalize_stream_language(stream: MediaPartStream | Any) -> str | None:
     for attribute in ("languageTag", "languageCode", "language", "locale"):
         value = getattr(stream, attribute, None)
         if value is None:
@@ -931,28 +937,32 @@ def _coerce_int(value: Any) -> int:
         return 0
 
 
-def _extract_audio_channel_count(stream: Any) -> int:
+def _extract_audio_channel_count(stream: AudioStream | MediaPartStream | Any) -> int:
     channels = _coerce_int(getattr(stream, "channels", None))
     if channels:
         return channels
     return _coerce_int(getattr(stream, "audioChannelCount", None))
 
 
-def _audio_stream_rank(stream: Any) -> tuple[int, int, int]:
+def _audio_stream_rank(
+    stream: AudioStream | MediaPartStream | Any,
+) -> tuple[int, int, int]:
     channels = _extract_audio_channel_count(stream)
     bitrate = _coerce_int(getattr(stream, "bitrate", None))
     stream_id = _coerce_int(getattr(stream, "id", None))
     return (channels, bitrate, stream_id)
 
 
-def _select_best_audio_stream(session: Any, audio_language: str) -> Any | None:
+def _select_best_audio_stream(
+    session: PlexSession | Any, audio_language: str
+) -> AudioStream | None:
     normalized_language = audio_language.strip().lower()
     if not normalized_language:
         return None
     streams = _collect_audio_streams(session)
     if not streams:
         return None
-    best_stream: Any | None = None
+    best_stream: AudioStream | None = None
     best_rank: tuple[int, int, int] | None = None
     for stream in streams:
         stream_language = _normalize_stream_language(stream)
@@ -965,7 +975,9 @@ def _select_best_audio_stream(session: Any, audio_language: str) -> Any | None:
     return best_stream
 
 
-def _select_subtitle_stream(session: Any, subtitle_language: str) -> Any | None:
+def _select_subtitle_stream(
+    session: PlexSession | Any, subtitle_language: str
+) -> SubtitleStream | None:
     normalized_language = subtitle_language.strip().lower()
     if not normalized_language:
         return None
@@ -981,7 +993,7 @@ def _select_subtitle_stream(session: Any, subtitle_language: str) -> Any | None:
 
 async def _resolve_audio_stream(
     player: PlexPlayerMetadata, audio_language: str
-) -> Any | None:
+) -> AudioStream | None:
     session = await _find_player_session(player)
     if session is None:
         return None
@@ -990,7 +1002,7 @@ async def _resolve_audio_stream(
 
 async def _resolve_subtitle_stream(
     player: PlexPlayerMetadata, subtitle_language: str
-) -> Any | None:
+) -> SubtitleStream | None:
     session = await _find_player_session(player)
     if session is None:
         return None
