@@ -325,6 +325,14 @@ async def _get_plex_players() -> list[PlexPlayerMetadata]:
 
     raw_clients = await asyncio.to_thread(_load_clients)
     aliases: PlexPlayerAliasMap = server.settings.plex_player_aliases
+    reverse_aliases: dict[str, list[str]] = {}
+    for alias_key, alias_values in aliases.items():
+        for alias_value in alias_values:
+            if not alias_value:
+                continue
+            alias_list = reverse_aliases.setdefault(alias_value, [])
+            if alias_key not in alias_list:
+                alias_list.append(alias_key)
     players: list[PlexPlayerMetadata] = []
 
     for client in raw_clients:
@@ -357,12 +365,17 @@ async def _get_plex_players() -> list[PlexPlayerMetadata]:
 
         friendly_names: list[str] = []
 
+        def _add_alias(value: str | None) -> None:
+            if value and value not in friendly_names:
+                friendly_names.append(value)
+
         def _collect_alias(identifier: str | None) -> None:
             if not identifier:
                 return
             for alias in aliases.get(identifier, []):
-                if alias and alias not in friendly_names:
-                    friendly_names.append(alias)
+                _add_alias(alias)
+            for alias in reverse_aliases.get(identifier, []):
+                _add_alias(alias)
 
         _collect_alias(machine_id)
         _collect_alias(client_id)
