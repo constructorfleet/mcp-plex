@@ -755,14 +755,35 @@ async def set_subtitle(
 
     if not subtitle_language:
         raise ValueError("subtitle language is required")
-    player_entry = await _invoke_player_method(
-        player,
-        "setSubtitleStream",
-        args=(subtitle_language,),
-        media_type=media_type,
-    )
+    player_entry = await _resolve_player_entry(player)
+    stream = await _resolve_subtitle_stream(player_entry, subtitle_language)
+    plex_client = _ensure_player_client(player_entry)
+    method = getattr(plex_client, "setSubtitleStream", None)
+    if method is None:
+        display_name = (
+            player_entry.get("display_name")
+            or player_entry.get("name")
+            or "player"
+        )
+        raise RuntimeError(f"Player '{display_name}' does not support setSubtitleStream")
+    kwargs: dict[str, Any] = {}
+    if media_type is not None:
+        kwargs["mtype"] = media_type
+
+    def _call() -> None:
+        target = stream if stream is not None else subtitle_language
+        method(target, **kwargs)
+
+    try:
+        await asyncio.to_thread(_call)
+    except PlexApiException as exc:
+        raise RuntimeError("Failed to execute setSubtitleStream via plexapi") from exc
     response = _player_response(player_entry, command="set-subtitle", media_type=media_type)
     response["subtitle_language"] = subtitle_language
+    if stream is not None:
+        stream_id = getattr(stream, "id", None)
+        if stream_id is not None:
+            response["subtitle_stream_id"] = stream_id
     return response
 
 
@@ -804,6 +825,37 @@ def _collect_audio_streams(session: Any) -> list[Any]:
                 streams.extend(result)
             elif result is not None:
                 streams.append(result)
+    return streams
+
+
+def _collect_subtitle_streams(session: Any) -> list[Any]:
+    streams: list[Any] = []
+    getter = getattr(session, "subtitleStreams", None)
+    if callable(getter):
+        try:
+            result = getter()
+        except Exception as exc:  # pragma: no cover - defensive guard
+            logger.debug("Failed to fetch subtitle streams: %s", exc, exc_info=exc)
+        else:
+            if isinstance(result, (list, tuple, set)):
+                streams.extend(result)
+            elif result is not None:
+                streams.append(result)
+    if not streams:
+        media_items = getattr(session, "media", None)
+        if isinstance(media_items, (list, tuple, set)):
+            for media in media_items:
+                parts = getattr(media, "parts", None)
+                if not isinstance(parts, (list, tuple, set)):
+                    continue
+                for part in parts:
+                    part_streams = getattr(part, "streams", None)
+                    if not isinstance(part_streams, (list, tuple, set)):
+                        continue
+                    for stream in part_streams:
+                        stream_type = _coerce_int(getattr(stream, "streamType", None))
+                        if stream_type == 3:
+                            streams.append(stream)
     return streams
 
 
@@ -913,6 +965,20 @@ def _select_best_audio_stream(session: Any, audio_language: str) -> Any | None:
     return best_stream
 
 
+def _select_subtitle_stream(session: Any, subtitle_language: str) -> Any | None:
+    normalized_language = subtitle_language.strip().lower()
+    if not normalized_language:
+        return None
+    streams = _collect_subtitle_streams(session)
+    if not streams:
+        return None
+    for stream in streams:
+        stream_language = _normalize_stream_language(stream)
+        if stream_language == normalized_language:
+            return stream
+    return None
+
+
 async def _resolve_audio_stream(
     player: PlexPlayerMetadata, audio_language: str
 ) -> Any | None:
@@ -920,6 +986,15 @@ async def _resolve_audio_stream(
     if session is None:
         return None
     return _select_best_audio_stream(session, audio_language)
+
+
+async def _resolve_subtitle_stream(
+    player: PlexPlayerMetadata, subtitle_language: str
+) -> Any | None:
+    session = await _find_player_session(player)
+    if session is None:
+        return None
+    return _select_subtitle_stream(session, subtitle_language)
 
 
 @server.tool("set-audio")

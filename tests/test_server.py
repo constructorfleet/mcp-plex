@@ -605,11 +605,26 @@ def test_playback_control_tools_send_commands(monkeypatch):
     monkeypatch.setenv("PLEX_URL", "http://plex.test:32400")
     monkeypatch.setenv("PLEX_TOKEN", "token")
 
-    class FakeStream:
+    class FakeAudioStream:
         def __init__(self, stream_id: int, language: str, channels: int) -> None:
             self.id = stream_id
             self.language = language
             self.channels = channels
+
+    class FakeSubtitleStream:
+        def __init__(
+            self,
+            stream_id: int,
+            language: str,
+            *,
+            forced: bool = False,
+            default: bool = False,
+        ) -> None:
+            self.id = stream_id
+            self.language = language
+            self.forced = forced
+            self.default = default
+            self.streamType = 3
 
     class FakeSessionPlayer:
         def __init__(self, machine_identifier: str, client_identifier: str) -> None:
@@ -617,12 +632,21 @@ def test_playback_control_tools_send_commands(monkeypatch):
             self.clientIdentifier = client_identifier
 
     class FakeSession:
-        def __init__(self, players: list[FakeSessionPlayer], streams: list[FakeStream]) -> None:
+        def __init__(
+            self,
+            players: list[FakeSessionPlayer],
+            audio_streams: list[FakeAudioStream],
+            subtitle_streams: list[FakeSubtitleStream],
+        ) -> None:
             self.players = players
-            self._streams = streams
+            self._audio_streams = audio_streams
+            self._subtitle_streams = subtitle_streams
 
-        def audioStreams(self) -> list[FakeStream]:
-            return list(self._streams)
+        def audioStreams(self) -> list[FakeAudioStream]:
+            return list(self._audio_streams)
+
+        def subtitleStreams(self) -> list[FakeSubtitleStream]:
+            return list(self._subtitle_streams)
 
     class FakeClient:
         def __init__(self) -> None:
@@ -639,7 +663,7 @@ def test_playback_control_tools_send_commands(monkeypatch):
             self.previous_calls: list[str] = []
             self.forward_calls: list[str] = []
             self.back_calls: list[str] = []
-            self.subtitle_calls: list[tuple[str, str]] = []
+            self.subtitle_calls: list[dict[str, Any]] = []
             self.audio_calls: list[dict[str, Any]] = []
 
         def pause(self, mtype: str = "video") -> None:
@@ -660,10 +684,10 @@ def test_playback_control_tools_send_commands(monkeypatch):
         def stepBack(self, mtype: str = "video") -> None:
             self.back_calls.append(mtype)
 
-        def setSubtitleStream(self, language: str, mtype: str = "video") -> None:
-            self.subtitle_calls.append((language, mtype))
+        def setSubtitleStream(self, stream: Any, mtype: str = "video") -> None:
+            self.subtitle_calls.append({"stream": stream, "media_type": mtype})
 
-        def setAudioStream(self, stream: FakeStream, mtype: str = "video") -> None:
+        def setAudioStream(self, stream: FakeAudioStream, mtype: str = "video") -> None:
             self.audio_calls.append({"stream": stream, "media_type": mtype})
 
     class FakePlex:
@@ -681,9 +705,13 @@ def test_playback_control_tools_send_commands(monkeypatch):
                         )
                     ],
                     [
-                        FakeStream(101, "eng", 2),
-                        FakeStream(202, "eng", 6),
-                        FakeStream(303, "spa", 6),
+                        FakeAudioStream(101, "eng", 2),
+                        FakeAudioStream(202, "eng", 6),
+                        FakeAudioStream(303, "spa", 6),
+                    ],
+                    [
+                        FakeSubtitleStream(401, "eng"),
+                        FakeSubtitleStream(505, "spa"),
                     ],
                 )
             ]
@@ -754,9 +782,16 @@ def test_playback_control_tools_send_commands(monkeypatch):
             "command": "set-subtitle",
             "media_type": "video",
             "subtitle_language": "spa",
+            "subtitle_stream_id": 505,
             "player_capabilities": ["controller", "player"],
         }
-        assert fake_plex._client.subtitle_calls == [("spa", "video")]
+        assert len(fake_plex._client.subtitle_calls) == 1
+        subtitle_call = fake_plex._client.subtitle_calls[0]
+        subtitle_stream = subtitle_call["stream"]
+        assert isinstance(subtitle_stream, FakeSubtitleStream)
+        assert subtitle_stream.id == 505
+        assert subtitle_stream.language == "spa"
+        assert subtitle_call["media_type"] == "video"
 
         audio_result = asyncio.run(
             server.set_audio.fn(
@@ -775,7 +810,7 @@ def test_playback_control_tools_send_commands(monkeypatch):
         assert len(fake_plex._client.audio_calls) == 1
         audio_call = fake_plex._client.audio_calls[0]
         stream = audio_call["stream"]
-        assert isinstance(stream, FakeStream)
+        assert isinstance(stream, FakeAudioStream)
         assert stream.id == 202
         assert stream.language == "eng"
         assert stream.channels == 6
