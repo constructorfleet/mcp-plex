@@ -545,7 +545,7 @@ def test_play_media_with_alias(monkeypatch):
         assert offset_call["kwargs"]["offset"] == offset_seconds * 1000
 
 
-def test_play_media_requires_player_capability(monkeypatch):
+def test_play_media_allows_controller_only_client(monkeypatch):
     monkeypatch.setenv("PLEX_URL", "http://plex.test:32400")
     monkeypatch.setenv("PLEX_TOKEN", "token")
 
@@ -558,9 +558,10 @@ def test_play_media_requires_player_capability(monkeypatch):
             self.port = 32500
             self.product = "Controller Only"
             self.title = "Controller Only"
+            self.play_requests: list[dict[str, Any]] = []
 
         def playMedia(self, *args: Any, **kwargs: Any) -> None:
-            raise AssertionError("Playback should not be attempted")
+            self.play_requests.append({"args": args, "kwargs": kwargs})
 
     class FakePlex:
         def __init__(self, baseurl: str, token: str) -> None:
@@ -568,17 +569,36 @@ def test_play_media_requires_player_capability(monkeypatch):
             assert token == "token"
             self.machineIdentifier = "server-001"
             self._client = FakeClient()
+            self.fetch_requests: list[str] = []
 
         def clients(self) -> list[FakeClient]:
             return [self._client]
 
         def fetchItem(self, key: str) -> Any:
-            raise AssertionError("fetchItem should not be called")
+            self.fetch_requests.append(key)
+            return types.SimpleNamespace(key=key)
 
     with _load_server(monkeypatch) as server:
-        monkeypatch.setattr(server, "PlexServerClient", FakePlex)
-        with pytest.raises(ValueError, match="cannot be controlled for playback"):
-            asyncio.run(server.play_media.fn(identifier="49915", player="machine-999"))
+        fake_plex = FakePlex("http://plex.test:32400", "token")
+        monkeypatch.setattr(
+            server,
+            "PlexServerClient",
+            lambda baseurl, token: fake_plex,
+        )
+        server._plex_client = None
+        server._plex_identity = None
+        result = asyncio.run(
+            server.play_media.fn(identifier="49915", player="machine-999")
+        )
+
+        assert result["player"] == "Controller Only"
+        assert result["rating_key"] == "49915"
+        assert result["player_capabilities"] == ["controller"]
+        assert fake_plex.fetch_requests == ["/library/metadata/49915"]
+        assert len(fake_plex._client.play_requests) == 1
+        play_call = fake_plex._client.play_requests[0]
+        assert play_call["kwargs"]["machineIdentifier"] == "server-001"
+        assert play_call["kwargs"]["offset"] == 0
 
 
 def test_match_player_fuzzy_alias_resolution():
