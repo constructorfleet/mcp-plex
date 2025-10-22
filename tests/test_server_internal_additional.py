@@ -127,6 +127,39 @@ def test_get_plex_players_handles_non_iterable_provides(monkeypatch):
     assert players[0]["display_name"] == "Living Room"
 
 
+def test_get_plex_players_supports_alias_key_lookup(monkeypatch):
+    class StubClient:
+        provides = "player"
+        machineIdentifier = "machine-1"
+        clientIdentifier = "client-1"
+        address = "192.0.2.10"
+        port = 32400
+        title = "Movie Room Player"
+        product = "Plex"
+
+    async def _fake_get_client():
+        return SimpleNamespace(clients=lambda: [StubClient()])
+
+    original_settings = server_module.server.settings
+    updated_settings = original_settings.model_copy(
+        update={"plex_player_aliases": {"Movie Room": ("machine-1",)}}
+    )
+
+    monkeypatch.setattr(server_module, "_get_plex_client", _fake_get_client)
+    monkeypatch.setattr(server_module.server, "_settings", updated_settings)
+    server_module.server._plex_client = None
+
+    try:
+        players = asyncio.run(server_module._get_plex_players())
+    finally:
+        monkeypatch.setattr(server_module.server, "_settings", original_settings)
+
+    assert players[0]["friendly_names"] == ["Movie Room"]
+    assert players[0]["display_name"] == "Movie Room"
+    matched = server_module._match_player("movie room", players)
+    assert matched is players[0]
+
+
 def test_match_player_skips_blank_candidates():
     player = {
         "display_name": "Living Room",
