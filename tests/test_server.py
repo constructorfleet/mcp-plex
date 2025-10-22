@@ -601,6 +601,181 @@ def test_play_media_allows_controller_only_client(monkeypatch):
         assert play_call["kwargs"]["offset"] == 0
 
 
+def test_playback_control_tools_send_commands(monkeypatch):
+    monkeypatch.setenv("PLEX_URL", "http://plex.test:32400")
+    monkeypatch.setenv("PLEX_TOKEN", "token")
+
+    class FakeClient:
+        def __init__(self) -> None:
+            self.machineIdentifier = "machine-123"
+            self.clientIdentifier = "client-abc"
+            self.provides = "player,controller"
+            self.address = "10.0.0.5"
+            self.port = 32500
+            self.product = "Plex for Apple TV"
+            self.title = "Plex for Apple TV"
+            self.pause_calls: list[str] = []
+            self.play_calls: list[str] = []
+            self.next_calls: list[str] = []
+            self.previous_calls: list[str] = []
+            self.forward_calls: list[str] = []
+            self.back_calls: list[str] = []
+            self.subtitle_calls: list[tuple[str, str]] = []
+            self.audio_calls: list[tuple[str, str]] = []
+
+        def pause(self, mtype: str = "video") -> None:
+            self.pause_calls.append(mtype)
+
+        def play(self, mtype: str = "video") -> None:
+            self.play_calls.append(mtype)
+
+        def skipNext(self, mtype: str = "video") -> None:
+            self.next_calls.append(mtype)
+
+        def skipPrevious(self, mtype: str = "video") -> None:
+            self.previous_calls.append(mtype)
+
+        def stepForward(self, mtype: str = "video") -> None:
+            self.forward_calls.append(mtype)
+
+        def stepBack(self, mtype: str = "video") -> None:
+            self.back_calls.append(mtype)
+
+        def setSubtitleStream(self, stream_id: str, mtype: str = "video") -> None:
+            self.subtitle_calls.append((stream_id, mtype))
+
+        def setAudioStream(self, stream_id: str, mtype: str = "video") -> None:
+            self.audio_calls.append((stream_id, mtype))
+
+    class FakePlex:
+        def __init__(self, baseurl: str, token: str) -> None:
+            assert baseurl.rstrip("/") == "http://plex.test:32400"
+            assert token == "token"
+            self.machineIdentifier = "server-001"
+            self._client = FakeClient()
+
+        def clients(self) -> list[FakeClient]:
+            return [self._client]
+
+        def fetchItem(self, key: str) -> Any:
+            return types.SimpleNamespace(key=key)
+
+    with _load_server(monkeypatch) as server:
+        fake_plex = FakePlex("http://plex.test:32400", "token")
+        monkeypatch.setattr(
+            server,
+            "PlexServerClient",
+            lambda baseurl, token: fake_plex,
+        )
+        server._plex_client = None
+        server._plex_identity = None
+
+        pause_result = asyncio.run(server.pause_media.fn(player="Plex for Apple TV"))
+        assert pause_result == {
+            "player": "Plex for Apple TV",
+            "command": "pause",
+            "media_type": "video",
+            "player_capabilities": ["controller", "player"],
+        }
+        assert fake_plex._client.pause_calls == ["video"]
+
+        resume_result = asyncio.run(server.resume_media.fn(player="Plex for Apple TV"))
+        assert resume_result["command"] == "resume"
+        assert resume_result["player"] == "Plex for Apple TV"
+        assert fake_plex._client.play_calls == ["video"]
+
+        next_result = asyncio.run(server.next_media.fn(player="Plex for Apple TV"))
+        assert next_result["command"] == "next"
+        assert fake_plex._client.next_calls == ["video"]
+
+        previous_result = asyncio.run(
+            server.previous_media.fn(player="Plex for Apple TV")
+        )
+        assert previous_result["command"] == "previous"
+        assert fake_plex._client.previous_calls == ["video"]
+
+        fastforward_result = asyncio.run(
+            server.fastforward_media.fn(player="Plex for Apple TV", media_type="music")
+        )
+        assert fastforward_result["command"] == "fastforward"
+        assert fastforward_result["media_type"] == "music"
+        assert fake_plex._client.forward_calls == ["music"]
+
+        rewind_result = asyncio.run(server.rewind_media.fn(player="Plex for Apple TV"))
+        assert rewind_result["command"] == "rewind"
+        assert fake_plex._client.back_calls == ["video"]
+
+        subtitle_result = asyncio.run(
+            server.set_subtitle.fn(
+                player="Plex for Apple TV",
+                subtitle_stream_id="sub-1",
+                media_type="video",
+            )
+        )
+        assert subtitle_result == {
+            "player": "Plex for Apple TV",
+            "command": "set-subtitle",
+            "media_type": "video",
+            "subtitle_stream_id": "sub-1",
+            "player_capabilities": ["controller", "player"],
+        }
+        assert fake_plex._client.subtitle_calls == [("sub-1", "video")]
+
+        audio_result = asyncio.run(
+            server.set_audio.fn(
+                player="Plex for Apple TV",
+                audio_stream_id="aud-7",
+                media_type="video",
+            )
+        )
+        assert audio_result == {
+            "player": "Plex for Apple TV",
+            "command": "set-audio",
+            "media_type": "video",
+            "audio_stream_id": "aud-7",
+            "player_capabilities": ["controller", "player"],
+        }
+        assert fake_plex._client.audio_calls == [("aud-7", "video")]
+
+
+def test_set_subtitle_requires_stream_id(monkeypatch):
+    monkeypatch.setenv("PLEX_URL", "http://plex.test:32400")
+    monkeypatch.setenv("PLEX_TOKEN", "token")
+
+    class FakeClient:
+        def __init__(self) -> None:
+            self.machineIdentifier = "machine-123"
+            self.clientIdentifier = "client-abc"
+            self.provides = "player"
+            self.title = "Living Room"
+
+        def setSubtitleStream(self, stream_id: str, mtype: str = "video") -> None:  # noqa: ARG002
+            raise AssertionError("Should not be called")
+
+    class FakePlex:
+        def __init__(self, baseurl: str, token: str) -> None:
+            assert baseurl.rstrip("/") == "http://plex.test:32400"
+            assert token == "token"
+            self.machineIdentifier = "server-001"
+            self._client = FakeClient()
+
+        def clients(self) -> list[FakeClient]:
+            return [self._client]
+
+    with _load_server(monkeypatch) as server:
+        fake_plex = FakePlex("http://plex.test:32400", "token")
+        monkeypatch.setattr(
+            server,
+            "PlexServerClient",
+            lambda baseurl, token: fake_plex,
+        )
+        server._plex_client = None
+        server._plex_identity = None
+
+        with pytest.raises(ValueError, match="subtitle stream id"):
+            asyncio.run(
+                server.set_subtitle.fn(player="Living Room", subtitle_stream_id="")
+            )
 def test_match_player_fuzzy_alias_resolution():
     players: list[server_module.PlexPlayerMetadata] = [
         {
