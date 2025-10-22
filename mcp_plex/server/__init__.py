@@ -398,6 +398,56 @@ def _match_player(
     if not normalized_query:
         raise ValueError(f"Player '{query}' not found")
 
+    def _build_alias_graph() -> tuple[dict[str, set[str]], dict[str, set[str]]]:
+        graph: dict[str, set[str]] = {}
+        labels: dict[str, set[str]] = {}
+        aliases = server.settings.plex_player_aliases
+        if not aliases:
+            return graph, labels
+
+        def _register(label: str) -> str | None:
+            trimmed = label.strip()
+            if not trimmed:
+                return None
+            normalized_label = trimmed.lower()
+            labels.setdefault(normalized_label, set()).add(trimmed)
+            graph.setdefault(normalized_label, set())
+            return normalized_label
+
+        for key, values in aliases.items():
+            normalized_key = _register(key)
+            if normalized_key is None:
+                continue
+            for value in values:
+                normalized_value = _register(value)
+                if normalized_value is None:
+                    continue
+                graph[normalized_key].add(normalized_value)
+                graph[normalized_value].add(normalized_key)
+
+        return graph, labels
+
+    alias_graph, alias_labels = _build_alias_graph()
+
+    def _expand_aliases(value: str) -> set[str]:
+        if not alias_graph:
+            return set()
+        normalized_value = value.strip().lower()
+        if not normalized_value or normalized_value not in alias_graph:
+            return set()
+        seen = {normalized_value}
+        stack = [normalized_value]
+        related: set[str] = set()
+        while stack:
+            current = stack.pop()
+            for neighbor in alias_graph.get(current, set()):
+                if neighbor in seen:
+                    continue
+                seen.add(neighbor)
+                stack.append(neighbor)
+                related.update(alias_labels.get(neighbor, set()))
+        return related
+
     candidate_entries: list[tuple[str, str, PlexPlayerMetadata]] = []
     for player in players:
         candidate_strings = {
@@ -412,9 +462,16 @@ def _match_player(
         client_id = player.get("client_identifier")
         if machine_id and client_id:
             candidate_strings.add(f"{machine_id}:{client_id}")
+        expanded_candidates: set[str] = set()
         for candidate in candidate_strings:
             if not candidate:
                 continue
+            candidate_str = str(candidate).strip()
+            if not candidate_str:
+                continue
+            expanded_candidates.add(candidate_str)
+            expanded_candidates.update(_expand_aliases(candidate_str))
+        for candidate in expanded_candidates:
             candidate_str = str(candidate).strip()
             if not candidate_str:
                 continue

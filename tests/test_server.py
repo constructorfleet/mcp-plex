@@ -636,6 +636,33 @@ def test_match_player_whitespace_query_preserves_original_input():
     assert str(exc.value) == "Player '   ' not found"
 
 
+def test_match_player_alias_name_maps_to_identifier(monkeypatch):
+    monkeypatch.setattr(
+        server_module.server,
+        "_settings",
+        server_module.Settings.model_validate(
+            {"PLEX_PLAYER_ALIASES": {"Movie Room": "6B4C9A5E-E333-4DB3-A8E7-49C8F5933EB1"}}
+        ),
+    )
+
+    players: list[server_module.PlexPlayerMetadata] = [
+        {
+            "display_name": "Plex for Apple TV",
+            "name": "Plex for Apple TV",
+            "product": "Apple TV",
+            "machine_identifier": "6B4C9A5E-E333-4DB3-A8E7-49C8F5933EB1",
+            "client_identifier": "client-1",
+            "friendly_names": [],
+            "provides": {"player"},
+            "client": None,
+        }
+    ]
+
+    matched = server_module._match_player("Movie Room", players)
+
+    assert matched is players[0]
+
+
 def test_reranker_import_failure(monkeypatch, caplog):
     monkeypatch.setenv("USE_RERANKER", "1")
     orig_import = builtins.__import__
