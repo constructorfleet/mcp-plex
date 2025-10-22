@@ -58,6 +58,23 @@ except importlib.metadata.PackageNotFoundError:
     __version__ = "0.0.0"
 
 
+PlayerIdentifier = Annotated[
+    str,
+    Field(
+        description="Friendly name, machine identifier, or client identifier of the Plex player",
+        examples=["Living Room", "machine-123"],
+    ),
+]
+
+MediaType = Annotated[
+    str | None,
+    Field(
+        description="Plex media type being controlled (video/music/photo)",
+        examples=["video"],
+    ),
+]
+
+
 class PlexServer(FastMCP):
     """FastMCP server with an attached Qdrant client."""
 
@@ -499,6 +516,58 @@ def _match_player(
     raise ValueError(f"Player '{query}' not found")
 
 
+async def _resolve_player_entry(query: str) -> PlexPlayerMetadata:
+    """Return the Plex player metadata for the provided query string."""
+
+    players = await _get_plex_players()
+    return _match_player(query, players)
+
+
+def _ensure_player_client(player: PlexPlayerMetadata) -> PlexClient:
+    """Return the Plex client object for the resolved player."""
+
+    plex_client = player.get("client")
+    if plex_client is None:
+        display_name = player.get("display_name") or player.get("name") or "player"
+        raise ValueError(
+            f"Player '{display_name}' is missing a Plex client instance"
+        )
+    return plex_client
+
+
+async def _invoke_player_method(
+    player_query: str,
+    method_name: str,
+    *,
+    args: Sequence[Any] = (),
+    media_type: str | None = "video",
+) -> PlexPlayerMetadata:
+    """Execute a Plex client method and return the resolved player metadata."""
+
+    player = await _resolve_player_entry(player_query)
+    plex_client = _ensure_player_client(player)
+    method = getattr(plex_client, method_name, None)
+    if method is None:
+        display_name = player.get("display_name") or player.get("name") or "player"
+        raise RuntimeError(
+            f"Player '{display_name}' does not support {method_name}"
+        )
+    kwargs: dict[str, Any] = {}
+    if media_type is not None:
+        kwargs["mtype"] = media_type
+
+    def _call() -> None:
+        method(*args, **kwargs)
+
+    try:
+        await asyncio.to_thread(_call)
+    except PlexApiException as exc:
+        raise RuntimeError(
+            f"Failed to execute {method_name} via plexapi"
+        ) from exc
+    return player
+
+
 async def _start_playback(
     rating_key: str, player: PlexPlayerMetadata, offset_seconds: int
 ) -> None:
@@ -539,16 +608,7 @@ async def play_media(
             examples=["49915", "tt8367814", "The Gentlemen"],
         ),
     ],
-    player: Annotated[
-        str,
-        Field(
-            description=(
-                "Friendly name, machine identifier, or client identifier of the"
-                " Plex player"
-            ),
-            examples=["Living Room", "machine-123"],
-        ),
-    ],
+    player: PlayerIdentifier,
     offset_seconds: Annotated[
         int | None,
         Field(
@@ -580,6 +640,156 @@ async def play_media(
         "offset_seconds": offset_seconds or 0,
         "player_capabilities": capabilities,
     }
+
+
+def _player_response(
+    player: PlexPlayerMetadata, *, command: str, media_type: str | None
+) -> dict[str, Any]:
+    capabilities = sorted(player.get("provides", set()))
+    return {
+        "player": player.get("display_name"),
+        "command": command,
+        "media_type": media_type,
+        "player_capabilities": capabilities,
+    }
+
+
+@server.tool("pause-media")
+async def pause_media(
+    player: PlayerIdentifier,
+    media_type: MediaType = "video",
+) -> dict[str, Any]:
+    """Pause playback on the selected Plex player."""
+
+    player_entry = await _invoke_player_method(player, "pause", media_type=media_type)
+    return _player_response(player_entry, command="pause", media_type=media_type)
+
+
+@server.tool("resume-media")
+async def resume_media(
+    player: PlayerIdentifier,
+    media_type: MediaType = "video",
+) -> dict[str, Any]:
+    """Resume playback on the selected Plex player."""
+
+    player_entry = await _invoke_player_method(player, "play", media_type=media_type)
+    return _player_response(player_entry, command="resume", media_type=media_type)
+
+
+@server.tool("next-media")
+async def next_media(
+    player: PlayerIdentifier,
+    media_type: MediaType = "video",
+) -> dict[str, Any]:
+    """Skip to the next item on the selected Plex player."""
+
+    player_entry = await _invoke_player_method(player, "skipNext", media_type=media_type)
+    return _player_response(player_entry, command="next", media_type=media_type)
+
+
+@server.tool("previous-media")
+async def previous_media(
+    player: PlayerIdentifier,
+    media_type: MediaType = "video",
+) -> dict[str, Any]:
+    """Skip to the previous item on the selected Plex player."""
+
+    player_entry = await _invoke_player_method(
+        player, "skipPrevious", media_type=media_type
+    )
+    return _player_response(player_entry, command="previous", media_type=media_type)
+
+
+@server.tool("fastforward-media")
+async def fastforward_media(
+    player: PlayerIdentifier,
+    media_type: MediaType = "video",
+) -> dict[str, Any]:
+    """Step forward in the current item on the selected Plex player."""
+
+    player_entry = await _invoke_player_method(
+        player, "stepForward", media_type=media_type
+    )
+    return _player_response(
+        player_entry, command="fastforward", media_type=media_type
+    )
+
+
+@server.tool("rewind-media")
+async def rewind_media(
+    player: PlayerIdentifier,
+    media_type: MediaType = "video",
+) -> dict[str, Any]:
+    """Step backward in the current item on the selected Plex player."""
+
+    player_entry = await _invoke_player_method(player, "stepBack", media_type=media_type)
+    return _player_response(player_entry, command="rewind", media_type=media_type)
+
+
+@server.tool("set-subtitle")
+async def set_subtitle(
+    player: PlayerIdentifier,
+    subtitle_stream_id: Annotated[
+        str,
+        Field(
+            description="Subtitle stream identifier from the media metadata",
+            examples=["1234"],
+        ),
+    ],
+    media_type: MediaType = "video",
+) -> dict[str, Any]:
+    """Select the subtitle stream for the current playback session."""
+
+    if not subtitle_stream_id:
+        raise ValueError("subtitle stream id is required")
+    player_entry = await _invoke_player_method(
+        player,
+        "setSubtitleStream",
+        args=(subtitle_stream_id,),
+        media_type=media_type,
+    )
+    response = _player_response(player_entry, command="set-subtitle", media_type=media_type)
+    response["subtitle_stream_id"] = subtitle_stream_id
+    return response
+
+
+@server.tool("set-audio")
+async def set_audio(
+    player: Annotated[
+        str,
+        Field(
+            description="Friendly name, machine identifier, or client identifier",
+            examples=["Living Room"],
+        ),
+    ],
+    audio_stream_id: Annotated[
+        str,
+        Field(
+            description="Audio stream identifier from the media metadata",
+            examples=["2345"],
+        ),
+    ],
+    media_type: Annotated[
+        str | None,
+        Field(
+            description="Plex media type being controlled (video/music/photo)",
+            examples=["video"],
+        ),
+    ] = "video",
+) -> dict[str, Any]:
+    """Select the audio stream for the current playback session."""
+
+    if not audio_stream_id:
+        raise ValueError("audio stream id is required")
+    player_entry = await _invoke_player_method(
+        player,
+        "setAudioStream",
+        args=(audio_stream_id,),
+        media_type=media_type,
+    )
+    response = _player_response(player_entry, command="set-audio", media_type=media_type)
+    response["audio_stream_id"] = audio_stream_id
+    return response
 
 
 @server.custom_route("/rest", methods=["GET"])
