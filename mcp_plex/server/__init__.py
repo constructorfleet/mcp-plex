@@ -504,24 +504,21 @@ async def _start_playback(
 ) -> None:
     """Send a playback command to the selected player."""
 
-    provides = player.get("provides", set())
-    if "player" not in provides:
-        raise ValueError(
-            f"Player '{player.get('display_name')}' cannot be controlled for playback"
-        )
+    display_name = player.get("display_name")
     plex_client = player.get("client")
     if plex_client is None:
         raise ValueError(
-            f"Player '{player.get('display_name')}' is missing a Plex client instance"
+            f"Player '{display_name}' is missing a Plex client instance"
         )
 
     plex_server = await _get_plex_client()
     identity = await _fetch_plex_identity()
     offset_ms = max(offset_seconds, 0) * 1000
+    plex_client_any = cast(Any, plex_client)
 
     def _play() -> None:
         media = plex_server.fetchItem(f"/library/metadata/{rating_key}")
-        cast(Any, plex_client).playMedia(
+        plex_client_any.playMedia(
             media,
             offset=offset_ms,
             machineIdentifier=identity["machineIdentifier"],
@@ -574,11 +571,14 @@ async def play_media(
     target = _match_player(player, players)
     await _start_playback(rating_key_normalized, target, offset_seconds or 0)
 
+    capabilities = sorted(target.get("provides", set()))
+
     return {
         "player": target.get("display_name"),
         "rating_key": rating_key_normalized,
         "title": plex_info.get("title") or media.get("title"),
         "offset_seconds": offset_seconds or 0,
+        "player_capabilities": capabilities,
     }
 
 

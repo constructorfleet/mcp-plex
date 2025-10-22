@@ -149,6 +149,40 @@ def test_start_playback_requires_client():
         )
 
 
+def test_start_playback_allows_players_without_player_capability(monkeypatch):
+    class PlexClientStub:
+        def __init__(self):
+            self.calls: list[tuple[object, int, str]] = []
+
+        def playMedia(self, media, *, offset, machineIdentifier):
+            self.calls.append((media, offset, machineIdentifier))
+
+    class PlexServerStub:
+        def fetchItem(self, path):
+            return {"path": path}
+
+    plex_client = PlexClientStub()
+
+    async def _fake_get_client():
+        return PlexServerStub()
+
+    async def _fake_fetch_identity():
+        return {"machineIdentifier": "abc"}
+
+    monkeypatch.setattr(server_module, "_get_plex_client", _fake_get_client)
+    monkeypatch.setattr(server_module, "_fetch_plex_identity", _fake_fetch_identity)
+
+    asyncio.run(
+        server_module._start_playback(
+            "42",
+            {"display_name": "Living Room", "client": plex_client, "provides": set()},
+            5,
+        )
+    )
+
+    assert plex_client.calls == [({"path": "/library/metadata/42"}, 5000, "abc")]
+
+
 def test_start_playback_wraps_plex_errors(monkeypatch):
     class PlexClientStub:
         def playMedia(self, *args, **kwargs):
