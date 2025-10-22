@@ -125,7 +125,9 @@ results:
   reranker entirely when you want lower latency or do not have GPU capacity.
 - `PLEX_PLAYER_ALIASES` provides alternate player names so commands stay
   consistent with custom Plex clients. Supply the value as JSON or as Python
-  tuple syntax to align with the server CLI parser.
+  tuple syntax to align with the server CLI parser. Alias values may reference
+  Plex display names as well as machine or client identifiers, and the server
+  will resolve the appropriate player in either direction.
 
 Examples:
 
@@ -136,8 +138,12 @@ USE_RERANKER=0 uv run mcp-server
 # Expand the in-memory cache to store up to 2,000 results.
 CACHE_SIZE=2000 uv run mcp-server
 
-# Map model-friendly player names to Plex devices.
+# Map model-friendly player names to Plex devices by display name.
 PLEX_PLAYER_ALIASES='{"living_room":"Plex for Roku"}' uv run mcp-server
+
+# Alias keys can also point at Plex machine or client identifiers.
+PLEX_PLAYER_ALIASES='{"movie_room":"6B4C9A5E-E333-4DB3-A8E7-49C8F5933EB1"}' \
+  uv run mcp-server
 
 # Tuple syntax is also accepted for aliases.
 PLEX_PLAYER_ALIASES="[(\"living_room\", \"Plex for Roku\")]" uv run mcp-server
