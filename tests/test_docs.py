@@ -20,9 +20,13 @@ IMDB_RETRY_DOC_TOKENS = (
 )
 
 
+
+def _read_readme_text() -> str:
+    return Path("README.md").read_text(encoding="utf-8")
+
+
 def test_readme_documents_server_cache_and_reranker_settings():
-    readme = Path(__file__).resolve().parent.parent / "README.md"
-    content = readme.read_text(encoding="utf-8")
+    content = _read_readme_text()
 
     for key in ("CACHE_SIZE", "USE_RERANKER", "PLEX_PLAYER_ALIASES"):
         assert key in content
@@ -30,5 +34,10 @@ def test_readme_documents_server_cache_and_reranker_settings():
 
 @pytest.mark.parametrize("token", IMDB_RETRY_DOC_TOKENS)
 def test_readme_documents_imdb_retry_controls(token: str) -> None:
-    readme = Path("README.md").read_text(encoding="utf-8")
-    assert token in readme
+    content = _read_readme_text()
+    assert token in content
+
+
+def test_readme_documents_ruff_check_command() -> None:
+    content = _read_readme_text()
+    assert "uv run ruff check ." in content

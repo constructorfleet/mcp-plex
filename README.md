@@ -231,7 +231,7 @@ Connection settings can be provided via environment variables:
 ## Development
 Run linting and tests through `uv`:
 ```bash
-uv run ruff .
+uv run ruff check .
 uv run pytest
 ```
 
