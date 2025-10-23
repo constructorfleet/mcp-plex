@@ -230,12 +230,21 @@ def test_server_tools(monkeypatch):
             == []
         )
 
+        async def _watched_rating_keys(_self):
+            return {"61960"}
+
+        monkeypatch.setattr(
+            type(server.server), "get_watched_rating_keys", _watched_rating_keys
+        )
+
         rec = asyncio.run(
             server.recommend_media.fn(
-                identifier=movie_id, limit=1, summarize_for_llm=False
+                identifier=movie_id, limit=2, summarize_for_llm=False
             )
         )
-        assert rec and rec[0]["plex"]["rating_key"] == "61960"
+        rating_keys = {item["plex"]["rating_key"] for item in rec}
+        assert len(rec) <= 2
+        assert "61960" not in rating_keys
 
         assert (
             asyncio.run(

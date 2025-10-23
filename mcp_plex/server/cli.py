@@ -74,6 +74,11 @@ def main(argv: list[str] | None = None) -> None:
         help="Cross-encoder reranker model name (env: RERANKER_MODEL)",
     )
     parser.add_argument(
+        "--recommend-user",
+        default=settings.recommend_user,
+        help="Plex username whose watch history should be excluded (env: PLEX_RECOMMEND_USER)",
+    )
+    parser.add_argument(
         "--log-level",
         type=str.lower,
         choices=["critical", "error", "warning", "info", "debug", "notset"],
@@ -129,6 +134,7 @@ def main(argv: list[str] | None = None) -> None:
     settings.dense_model = args.dense_model
     settings.sparse_model = args.sparse_model
     settings.reranker_model = args.reranker_model
+    settings.recommend_user = args.recommend_user
 
     log_level_name = _resolve_log_level(args.log_level)
     logging.basicConfig(level=getattr(logging, log_level_name.upper(), logging.INFO))

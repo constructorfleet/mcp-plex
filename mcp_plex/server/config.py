@@ -44,6 +44,9 @@ class Settings(BaseSettings):
     plex_player_aliases: PlexPlayerAliasMap = Field(
         default_factory=dict, validation_alias="PLEX_PLAYER_ALIASES"
     )
+    recommend_user: str | None = Field(
+        default=None, validation_alias="PLEX_RECOMMEND_USER"
+    )
 
     @field_validator("plex_player_aliases", mode="before")
     @classmethod
