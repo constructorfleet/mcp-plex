@@ -134,6 +134,8 @@ class PlexServer(FastMCP):
         self._plex_identity: dict[str, Any] | None = None
         self._plex_client: PlexServerClient | None = None
         self._plex_client_lock = asyncio.Lock()
+        self._watched_rating_keys: set[str] | None = None
+        self._watched_rating_keys_lock = asyncio.Lock()
 
     def _build_default_qdrant_client(self) -> AsyncQdrantClient:
         """Construct a new Qdrant client using the server settings."""
@@ -162,6 +164,7 @@ class PlexServer(FastMCP):
             self._qdrant_client = None
         self._plex_client = None
         self._plex_identity = None
+        self._watched_rating_keys = None
 
     @property
     def settings(self) -> Settings:  # type: ignore[override]
@@ -206,6 +209,122 @@ class PlexServer(FastMCP):
             self._reranker = reranker
             self._reranker_loaded = True
         return self._reranker
+
+    async def get_watched_rating_keys(self) -> set[str]:
+        """Return cached Plex rating keys watched by the configured user."""
+
+        user = self.settings.recommend_user
+        if not user:
+            return set()
+        history_limit = max(self.settings.recommend_history_limit, 0)
+        if self._watched_rating_keys is not None:
+            return set(self._watched_rating_keys)
+
+        async with self._watched_rating_keys_lock:
+            if self._watched_rating_keys is not None:
+                return set(self._watched_rating_keys)
+
+            try:
+                plex_client = await _get_plex_client()
+            except Exception as exc:  # noqa: BLE001 - allow logged fallback
+                logger.warning(
+                    "Unable to load Plex client for watch history: %s", exc, exc_info=exc
+                )
+                self._watched_rating_keys = set()
+                return set()
+
+            def _load_history() -> set[str]:
+                if history_limit == 0:
+                    return set()
+                try:
+                    account = plex_client.myPlexAccount()
+                except PlexApiException as exc:  # pragma: no cover - network failure
+                    logger.warning(
+                        "Failed to load Plex account for watch history: %s", exc, exc_info=exc
+                    )
+                    return set()
+                except Exception as exc:  # noqa: BLE001 - unexpected library error
+                    logger.warning(
+                        "Unexpected error loading Plex account: %s", exc, exc_info=exc
+                    )
+                    return set()
+
+                if account is None:
+                    return set()
+
+                try:
+                    plex_user = account.user(user)
+                except PlexApiException as exc:  # pragma: no cover - network failure
+                    logger.warning(
+                        "Failed to resolve Plex user %s: %s", user, exc, exc_info=exc
+                    )
+                    return set()
+                except Exception as exc:  # noqa: BLE001 - unexpected library error
+                    logger.warning(
+                        "Unexpected error resolving Plex user %s: %s", user, exc, exc_info=exc
+                    )
+                    return set()
+
+                if plex_user is None:
+                    return set()
+
+                try:
+                    history_kwargs: dict[str, Any] = {"server": plex_client}
+                    if history_limit > 0:
+                        history_kwargs["maxresults"] = history_limit
+                    history_items = plex_user.history(**history_kwargs)
+                except TypeError:
+                    try:
+                        user_id = getattr(plex_user, "id", None)
+                        history_kwargs = {"accountID": user_id}
+                        if history_limit > 0:
+                            history_kwargs["maxresults"] = history_limit
+                        history_items = plex_client.history(**history_kwargs)
+                    except Exception as exc:  # noqa: BLE001 - unexpected signature change
+                        logger.warning(
+                            "Unable to load Plex history for %s: %s",
+                            user,
+                            exc,
+                            exc_info=exc,
+                        )
+                        return set()
+                except PlexApiException as exc:  # pragma: no cover - network failure
+                    logger.warning(
+                        "Failed to load Plex watch history for %s: %s",
+                        user,
+                        exc,
+                        exc_info=exc,
+                    )
+                    return set()
+                except Exception as exc:  # noqa: BLE001 - unexpected library error
+                    logger.warning(
+                        "Unexpected error loading Plex history for %s: %s",
+                        user,
+                        exc,
+                        exc_info=exc,
+                    )
+                    return set()
+
+                rating_keys: set[str] = set()
+                for item in history_items or []:
+                    rating_key = getattr(item, "ratingKey", None)
+                    if rating_key is None:
+                        rating_key = getattr(item, "rating_key", None)
+                    if rating_key is None:
+                        continue
+                    try:
+                        normalized = str(rating_key).strip()
+                    except Exception:  # noqa: BLE001 - guard from bad reprs
+                        continue
+                    if normalized:
+                        rating_keys.add(normalized)
+                    if history_limit > 0 and len(rating_keys) >= history_limit:
+                        break
+                return rating_keys
+
+            watched = await asyncio.to_thread(_load_history)
+            self._watched_rating_keys = watched
+            return set(watched)
 
     def clear_plex_identity_cache(self) -> None:
         """Reset cached Plex identity metadata."""

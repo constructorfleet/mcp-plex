@@ -230,12 +230,21 @@ def test_server_tools(monkeypatch):
             == []
         )
 
+        async def _watched_rating_keys(_self):
+            return {"61960"}
+
+        monkeypatch.setattr(
+            type(server.server), "get_watched_rating_keys", _watched_rating_keys
+        )
+
         rec = asyncio.run(
             server.recommend_media.fn(
-                identifier=movie_id, limit=1, summarize_for_llm=False
+                identifier=movie_id, limit=2, summarize_for_llm=False
             )
         )
-        assert rec and rec[0]["plex"]["rating_key"] == "61960"
+        rating_keys = {item["plex"]["rating_key"] for item in rec}
+        assert len(rec) <= 2
+        assert "61960" not in rating_keys
 
         assert (
             asyncio.run(
@@ -254,6 +263,50 @@ def test_server_tools(monkeypatch):
             asyncio.run(server.media_poster.fn(identifier="0"))
         with pytest.raises(ValueError):
             asyncio.run(server.media_background.fn(identifier="0"))
+
+
+def test_get_watched_rating_keys_limits_history_items(monkeypatch):
+    monkeypatch.setenv("PLEX_URL", "http://example.com")
+    monkeypatch.setenv("PLEX_TOKEN", "token")
+    monkeypatch.setenv("PLEX_RECOMMEND_USER", "history-user")
+    monkeypatch.setenv("PLEX_RECOMMEND_HISTORY_LIMIT", "7")
+
+    module = importlib.reload(importlib.import_module("mcp_plex.server"))
+
+    assert module.server.settings.recommend_history_limit == 7
+
+    history_calls: list[dict[str, Any]] = []
+
+    class DummyHistoryItem:
+        def __init__(self, rating_key: str) -> None:
+            self.ratingKey = rating_key
+
+    class DummyUser:
+        def history(self, **kwargs):
+            history_calls.append(kwargs)
+            return [DummyHistoryItem(str(index)) for index in range(20)]
+
+    class DummyAccount:
+        def user(self, name: str):
+            assert name == "history-user"
+            return DummyUser()
+
+    class DummyClient:
+        def myPlexAccount(self):
+            return DummyAccount()
+
+    async def fake_get_client():
+        return DummyClient()
+
+    monkeypatch.setattr(module, "_get_plex_client", fake_get_client)
+
+    watched = asyncio.run(module.server.get_watched_rating_keys())
+
+    assert history_calls, "Expected history to be requested"
+    assert history_calls[0].get("maxresults") == 7
+    assert len(watched) == 7
+
+    asyncio.run(module.server.close())
 
 
 def test_media_library_tools_have_metadata(monkeypatch):

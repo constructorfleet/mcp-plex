@@ -703,22 +703,72 @@ def register_media_library_tools(server: "PlexServer") -> None:
             if summarize_for_llm:
                 return media_helpers.summarize_media_items_for_llm([])
             return []
+        def _normalize_rating_key(value: object) -> str | None:
+            try:
+                text = str(value).strip()
+            except Exception:  # noqa: BLE001 - guard against unusual reprs
+                return None
+            return text or None
+
+        positive_rating_key: str | None = None
+        if isinstance(record.payload, Mapping):
+            original_data = media_helpers._flatten_payload(
+                cast(Mapping[str, JSONValue] | None, record.payload)
+            )
+            plex_info = media_helpers._extract_plex_metadata(original_data)
+            key_value = plex_info.get("rating_key")
+            positive_rating_key = _normalize_rating_key(key_value)
+
         rec_query = models.RecommendQuery(
             recommend=models.RecommendInput(positive=[record.id])
         )
+        raw_watched_keys = await server.get_watched_rating_keys()
+        watched_keys = {
+            normalized
+            for key in raw_watched_keys
+            if (normalized := _normalize_rating_key(key)) is not None
+        }
+        exclusion_values: set[str] = set(watched_keys)
+        query_filter = None
+        if exclusion_values:
+            query_filter = models.Filter(
+                must_not=[
+                    models.FieldCondition(
+                        key="data.plex.rating_key",
+                        match=models.MatchAny(any=list(exclusion_values)),
+                    )
+                ]
+            )
+
+        extra_candidates = 1 + min(len(exclusion_values), 20) if exclusion_values else 1
+        query_limit = min(limit + extra_candidates, 100)
+
         response = await server.qdrant_client.query_points(
             collection_name="media-items",
             query=rec_query,
-            limit=limit,
+            limit=query_limit,
             with_payload=True,
             using="dense",
+            query_filter=query_filter,
         )
-        results = [
-            media_helpers._flatten_payload(
+        results: list[AggregatedMediaItem] = []
+        for r in response.points:
+            data = media_helpers._flatten_payload(
                 cast(Mapping[str, JSONValue] | None, r.payload)
             )
-            for r in response.points
-        ]
+            if not watched_keys:
+                results.append(data)
+                continue
+            plex_info = media_helpers._extract_plex_metadata(data)
+            rating_key = plex_info.get("rating_key")
+            normalized = _normalize_rating_key(rating_key)
+            if normalized and normalized in watched_keys:
+                continue
+            if normalized and positive_rating_key and normalized == positive_rating_key:
+                continue
+            results.append(data)
+        if len(results) > limit:
+            results = results[:limit]
         if summarize_for_llm:
             return media_helpers.summarize_media_items_for_llm(results)
         return results
