@@ -245,21 +245,21 @@ def register_media_library_tools(server: "PlexServer") -> None:
             Field(description="Exact release year", examples=[2020]),
         ] = None,
         year_from: Annotated[
-            int,
+            int | None,
             Field(
                 default=None,
                 description="Minimum release year",
                 examples=[2018],
-                json_schema_extra={"nullable": True},
+                json_schema_extra={"nullable": True, "type": "integer"},
             ),
         ] = None,
         year_to: Annotated[
-            int,
+            int | None,
             Field(
                 default=None,
                 description="Maximum release year",
                 examples=[2024],
-                json_schema_extra={"nullable": True},
+                json_schema_extra={"nullable": True, "type": "integer"},
             ),
         ] = None,
         added_after: Annotated[
