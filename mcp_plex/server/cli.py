@@ -79,6 +79,14 @@ def main(argv: list[str] | None = None) -> None:
         help="Plex username whose watch history should be excluded (env: PLEX_RECOMMEND_USER)",
     )
     parser.add_argument(
+        "--recommend-history-limit",
+        type=int,
+        default=settings.recommend_history_limit,
+        help=(
+            "Maximum number of history entries to exclude per user (env: PLEX_RECOMMEND_HISTORY_LIMIT)"
+        ),
+    )
+    parser.add_argument(
         "--log-level",
         type=str.lower,
         choices=["critical", "error", "warning", "info", "debug", "notset"],
@@ -135,6 +143,7 @@ def main(argv: list[str] | None = None) -> None:
     settings.sparse_model = args.sparse_model
     settings.reranker_model = args.reranker_model
     settings.recommend_user = args.recommend_user
+    settings.recommend_history_limit = max(0, args.recommend_history_limit)
 
     log_level_name = _resolve_log_level(args.log_level)
     logging.basicConfig(level=getattr(logging, log_level_name.upper(), logging.INFO))

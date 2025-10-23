@@ -110,7 +110,10 @@ tools or proxies that terminate SSE).
 
 Provide `--recommend-user <username>` (or set `PLEX_RECOMMEND_USER`) when the
 server should hide items already watched by a specific Plex account from
-recommendations.
+recommendations. Pair the flag with
+`--recommend-history-limit <count>`/`PLEX_RECOMMEND_HISTORY_LIMIT` to constrain
+how many watch-history entries the server inspects (defaults to 500) so large
+libraries avoid excessive Plex API calls.
 
 The runtime also reads `MCP_TRANSPORT`, `MCP_HOST`, `MCP_PORT`, and `MCP_MOUNT`
 environment variables. When set, those values override any conflicting CLI
@@ -136,6 +139,10 @@ results:
   excluded from similarity recommendations. The server caches that user's
   rating keys and filters them from results so the caller sees only unseen
   titles.
+- `PLEX_RECOMMEND_HISTORY_LIMIT` caps how many watch-history records the server
+  fetches for the configured user when filtering recommendations. Increase it
+  if results still include previously watched items; decrease it to reduce
+  Plex API load.
 
 Examples:
 

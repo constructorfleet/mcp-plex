@@ -216,6 +216,7 @@ class PlexServer(FastMCP):
         user = self.settings.recommend_user
         if not user:
             return set()
+        history_limit = max(self.settings.recommend_history_limit, 0)
         if self._watched_rating_keys is not None:
             return set(self._watched_rating_keys)
 
@@ -233,6 +234,8 @@ class PlexServer(FastMCP):
                 return set()
 
             def _load_history() -> set[str]:
+                if history_limit == 0:
+                    return set()
                 try:
                     account = plex_client.myPlexAccount()
                 except PlexApiException as exc:  # pragma: no cover - network failure
@@ -266,11 +269,17 @@ class PlexServer(FastMCP):
                     return set()
 
                 try:
-                    history_items = plex_user.history(server=plex_client)
+                    history_kwargs: dict[str, Any] = {"server": plex_client}
+                    if history_limit > 0:
+                        history_kwargs["maxresults"] = history_limit
+                    history_items = plex_user.history(**history_kwargs)
                 except TypeError:
                     try:
                         user_id = getattr(plex_user, "id", None)
-                        history_items = plex_client.history(accountID=user_id)
+                        history_kwargs = {"accountID": user_id}
+                        if history_limit > 0:
+                            history_kwargs["maxresults"] = history_limit
+                        history_items = plex_client.history(**history_kwargs)
                     except Exception as exc:  # noqa: BLE001 - unexpected signature change
                         logger.warning(
                             "Unable to load Plex history for %s: %s",
@@ -309,6 +318,8 @@ class PlexServer(FastMCP):
                         continue
                     if normalized:
                         rating_keys.add(normalized)
+                    if history_limit > 0 and len(rating_keys) >= history_limit:
+                        break
                 return rating_keys
 
             watched = await asyncio.to_thread(_load_history)

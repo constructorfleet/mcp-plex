@@ -47,6 +47,9 @@ class Settings(BaseSettings):
     recommend_user: str | None = Field(
         default=None, validation_alias="PLEX_RECOMMEND_USER"
     )
+    recommend_history_limit: int = Field(
+        default=500, validation_alias="PLEX_RECOMMEND_HISTORY_LIMIT"
+    )
 
     @field_validator("plex_player_aliases", mode="before")
     @classmethod
