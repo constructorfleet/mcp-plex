@@ -104,7 +104,8 @@ def test_builder_stage_copies_uv_binaries(dockerfile_contents: str) -> None:
     builder_section = _builder_section(dockerfile_contents)
 
     assert (
-        "COPY --from=ghcr.io/astral-sh/uv:latest /uv /uvx /bin/" in builder_section
+        "COPY --from=ghcr.io/astral-sh/uv:latest /uv /uvx /usr/local/bin/"
+        in builder_section
     ), "Builder stage must populate uv tools from the upstream image"
 
 
