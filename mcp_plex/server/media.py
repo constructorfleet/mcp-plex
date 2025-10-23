@@ -3,7 +3,8 @@
 from __future__ import annotations
 
 from datetime import datetime, timezone
-from typing import Any, Mapping, MutableMapping, Sequence, TYPE_CHECKING, cast
+from collections.abc import Collection, Iterable, Mapping, MutableMapping, Sequence
+from typing import Any, TYPE_CHECKING, cast
 
 from qdrant_client import models
 
@@ -164,6 +165,117 @@ def _extract_plex_metadata(media: AggregatedMediaItem) -> PlexMediaMetadata:
     if isinstance(plex_value, dict):
         return cast(PlexMediaMetadata, plex_value)
     return cast(PlexMediaMetadata, {})
+
+
+def _normalize_history_rating_key(value: object) -> str | None:
+    """Normalize mixed history identifiers into rating keys."""
+
+    if value is None:
+        return None
+    if isinstance(value, str):
+        normalized = value.strip()
+        return normalized or None
+    try:
+        normalized = str(value).strip()
+    except Exception:  # noqa: BLE001 - guard against unusual reprs
+        return None
+    return normalized or None
+
+
+def _normalize_history_rating_keys(values: Iterable[object]) -> set[str]:
+    """Return normalized rating keys derived from history values."""
+
+    normalized: set[str] = set()
+    for value in values:
+        rating_key = _normalize_history_rating_key(value)
+        if rating_key:
+            normalized.add(rating_key)
+    return normalized
+
+
+def _rating_key_from_media(media: AggregatedMediaItem) -> str | None:
+    """Extract a normalized rating key from an aggregated media payload."""
+
+    plex_info = _extract_plex_metadata(media)
+    return _normalize_history_rating_key(plex_info.get("rating_key"))
+
+
+def _history_exclusion_filter(
+    watched_keys: Collection[str],
+) -> models.Filter | None:
+    """Create a Qdrant filter that omits watched rating keys."""
+
+    if not watched_keys:
+        return None
+    return models.Filter(
+        must_not=[
+            models.FieldCondition(
+                key="data.plex.rating_key",
+                match=models.MatchAny(any=list(watched_keys)),
+            )
+        ]
+    )
+
+
+def _filter_watched_recommendations(
+    candidates: Iterable[AggregatedMediaItem],
+    watched_keys: Collection[str],
+    *,
+    positive_rating_key: str | None = None,
+    limit: int | None = None,
+) -> list[AggregatedMediaItem]:
+    """Filter recommendation candidates against watched history and limits."""
+
+    filtered: list[AggregatedMediaItem] = []
+    watched_lookup = set(watched_keys)
+    for media in candidates:
+        rating_key = _rating_key_from_media(media)
+        if watched_lookup and rating_key and rating_key in watched_lookup:
+            continue
+        if positive_rating_key and rating_key == positive_rating_key:
+            continue
+        filtered.append(media)
+        if limit is not None and len(filtered) >= limit:
+            break
+    return filtered
+
+
+async def _history_recommendations(
+    server: "PlexServer",
+    rating_keys: Collection[str],
+    limit: int,
+) -> list[AggregatedMediaItem]:
+    """Load aggregated media items corresponding to history rating keys."""
+
+    normalized_keys = _normalize_history_rating_keys(rating_keys)
+    if not normalized_keys or limit <= 0:
+        return []
+
+    candidate_limit = max(limit * 2, limit, len(normalized_keys))
+    candidate_limit = min(candidate_limit, 100)
+    filter_obj = models.Filter(
+        must=[
+            models.FieldCondition(
+                key="data.plex.rating_key",
+                match=models.MatchAny(any=list(normalized_keys)),
+            )
+        ]
+    )
+    points, _ = await server.qdrant_client.scroll(
+        collection_name="media-items",
+        scroll_filter=filter_obj,
+        limit=candidate_limit,
+        with_payload=True,
+    )
+    results: list[AggregatedMediaItem] = []
+    for point in points:
+        data = _flatten_payload(cast(Mapping[str, JSONValue] | None, point.payload))
+        rating_key = _rating_key_from_media(data)
+        if rating_key and rating_key in normalized_keys:
+            results.append(data)
+        if len(results) >= limit:
+            break
+    return results
 
 
 def _collect_cache_keys(

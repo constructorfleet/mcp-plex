@@ -661,11 +661,11 @@ def register_media_library_tools(server: "PlexServer") -> None:
         return _finalize(results)
 
     @_media_tool(
-        "recommend-media",
+        "recommend-media-like",
         title="Recommend similar media",
         operation="recommend",
     )
-    async def recommend_media(
+    async def recommend_media_like(
         identifier: Annotated[
             str,
             Field(
@@ -703,44 +703,24 @@ def register_media_library_tools(server: "PlexServer") -> None:
             if summarize_for_llm:
                 return media_helpers.summarize_media_items_for_llm([])
             return []
-        def _normalize_rating_key(value: object) -> str | None:
-            try:
-                text = str(value).strip()
-            except Exception:  # noqa: BLE001 - guard against unusual reprs
-                return None
-            return text or None
-
         positive_rating_key: str | None = None
         if isinstance(record.payload, Mapping):
             original_data = media_helpers._flatten_payload(
                 cast(Mapping[str, JSONValue] | None, record.payload)
             )
             plex_info = media_helpers._extract_plex_metadata(original_data)
-            key_value = plex_info.get("rating_key")
-            positive_rating_key = _normalize_rating_key(key_value)
+            positive_rating_key = media_helpers._normalize_history_rating_key(
+                plex_info.get("rating_key")
+            )
 
         rec_query = models.RecommendQuery(
             recommend=models.RecommendInput(positive=[record.id])
         )
         raw_watched_keys = await server.get_watched_rating_keys()
-        watched_keys = {
-            normalized
-            for key in raw_watched_keys
-            if (normalized := _normalize_rating_key(key)) is not None
-        }
-        exclusion_values: set[str] = set(watched_keys)
-        query_filter = None
-        if exclusion_values:
-            query_filter = models.Filter(
-                must_not=[
-                    models.FieldCondition(
-                        key="data.plex.rating_key",
-                        match=models.MatchAny(any=list(exclusion_values)),
-                    )
-                ]
-            )
+        watched_keys = media_helpers._normalize_history_rating_keys(raw_watched_keys)
+        query_filter = media_helpers._history_exclusion_filter(watched_keys)
 
-        extra_candidates = 1 + min(len(exclusion_values), 20) if exclusion_values else 1
+        extra_candidates = 1 + min(len(watched_keys), 20) if watched_keys else 1
         query_limit = min(limit + extra_candidates, 100)
 
         response = await server.qdrant_client.query_points(
@@ -751,27 +731,63 @@ def register_media_library_tools(server: "PlexServer") -> None:
             using="dense",
             query_filter=query_filter,
         )
-        results: list[AggregatedMediaItem] = []
-        for r in response.points:
-            data = media_helpers._flatten_payload(
+        raw_results = [
+            media_helpers._flatten_payload(
                 cast(Mapping[str, JSONValue] | None, r.payload)
             )
-            if not watched_keys:
-                results.append(data)
-                continue
-            plex_info = media_helpers._extract_plex_metadata(data)
-            rating_key = plex_info.get("rating_key")
-            normalized = _normalize_rating_key(rating_key)
-            if normalized and normalized in watched_keys:
-                continue
-            if normalized and positive_rating_key and normalized == positive_rating_key:
-                continue
-            results.append(data)
-        if len(results) > limit:
-            results = results[:limit]
+            for r in response.points
+        ]
+        results = media_helpers._filter_watched_recommendations(
+            raw_results,
+            watched_keys,
+            positive_rating_key=positive_rating_key,
+            limit=limit,
+        )
         if summarize_for_llm:
             return media_helpers.summarize_media_items_for_llm(results)
         return results
+
+    @_media_tool(
+        "recommend-media",
+        title="Recommend from watch history",
+        operation="history",
+    )
+    async def recommend_media(
+        limit: Annotated[
+            int,
+            Field(
+                description="Maximum number of history-based recommendations to return",
+                ge=1,
+                le=50,
+                examples=[5],
+            ),
+        ] = 5,
+        summarize_for_llm: Annotated[
+            bool,
+            Field(
+                description=(
+                    "Return a compact summary optimized for LLM consumption. "
+                    "Set to false to receive the full JSON payload."
+                ),
+                examples=[True],
+            ),
+        ] = True,
+    ) -> MediaSummaryResponse | list[AggregatedMediaItem]:
+        """Recommend media items based solely on Plex watch history."""
+
+        raw_watched_keys = await server.get_watched_rating_keys()
+        watched_keys = media_helpers._normalize_history_rating_keys(raw_watched_keys)
+        if not watched_keys:
+            if summarize_for_llm:
+                return media_helpers.summarize_media_items_for_llm([])
+            return []
+
+        history_results = await media_helpers._history_recommendations(
+            server, watched_keys, limit
+        )
+        if summarize_for_llm:
+            return media_helpers.summarize_media_items_for_llm(history_results)
+        return history_results
 
     @_media_tool("new-movies", title="Newest movies", operation="recent-movies")
     async def new_movies(
