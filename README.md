@@ -21,6 +21,15 @@ tools through the [Model Context Protocol](https://github.com/modelcontextprotoc
    uv sync --extra dev
    ```
 
+## Development
+Run the formatting and test suites before sending patches so pull requests stay
+green:
+
+```bash
+uv run ruff check .
+uv run pytest
+```
+
 ## Usage
 ### Load Plex Metadata
 Load sample data into Qdrant:
