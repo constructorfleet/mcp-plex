@@ -53,3 +53,13 @@ def test_dockerignore_excludes_heavy_paths(dockerignore_entries: set[str]) -> No
 
     for pattern in required_patterns:
         assert pattern in dockerignore_entries, f"Missing {pattern} from .dockerignore"
+
+
+def test_dockerfile_copies_project_metadata_for_uv(dockerfile_contents: str) -> None:
+    """The runtime image must include pyproject metadata so uv can resolve scripts."""
+
+    expected_phrase = "COPY pyproject.toml"
+
+    assert (
+        expected_phrase in dockerfile_contents
+    ), "Expected runtime stage to copy pyproject.toml for uv run entry points"
