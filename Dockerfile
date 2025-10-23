@@ -2,6 +2,9 @@
 FROM nvidia/cuda:12.4.1-cudnn-runtime-ubuntu22.04 AS base
 
 ENV UV_LINK_MODE=copy
+RUN apt-get update \
+    && apt-get install -y --no-install-recommends curl ca-certificates \
+    && rm -rf /var/lib/apt/lists/*
 RUN curl -LsSf https://astral.sh/uv/install.sh | sh
 ENV PATH="/root/.local/bin:$PATH"
 
