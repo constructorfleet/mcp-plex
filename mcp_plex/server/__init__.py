@@ -8,7 +8,7 @@ import inspect
 import json
 import logging
 import uuid
-from typing import Annotated, Any, Callable, Sequence, TYPE_CHECKING, cast
+from typing import Annotated, Any, Callable, Mapping, Sequence, TYPE_CHECKING, cast
 
 from fastapi import FastAPI
 from fastapi.openapi.docs import get_swagger_ui_html
@@ -19,6 +19,7 @@ from fastmcp.server.context import Context as FastMCPContext
 from plexapi.exceptions import PlexApiException
 from plexapi.server import PlexServer as PlexServerClient
 from plexapi.client import PlexClient
+from plexapi.playqueue import PlayQueue
 from plexapi.media import (
     AudioStream,
     MediaPartStream,
@@ -33,6 +34,7 @@ from starlette.responses import JSONResponse, PlainTextResponse, Response
 from rapidfuzz import fuzz, process
 
 from ..common.cache import MediaCache
+from ..common.types import JSONValue
 from . import media as media_helpers
 from .config import PlexPlayerAliasMap, Settings
 from .models import (
@@ -704,6 +706,38 @@ async def _invoke_player_method(
     return player
 
 
+async def _resolve_player_timeline(player: PlexPlayerMetadata) -> Any:
+    """Return the active timeline for the provided Plex player."""
+
+    plex_client = _ensure_player_client(player)
+
+    def _load_timeline() -> Any:
+        try:
+            plex_client.timelines()
+        except PlexApiException as exc:
+            raise RuntimeError("Failed to retrieve Plex player timeline") from exc
+        return plex_client.timeline
+
+    timeline = await asyncio.to_thread(_load_timeline)
+    if timeline is None:
+        display_name = player.get("display_name") or player.get("name") or "player"
+        raise RuntimeError(f"Player '{display_name}' is not reporting an active timeline")
+    return timeline
+
+
+def _resolve_rating_key(
+    media: Mapping[str, Any]
+) -> tuple[str, dict[str, JSONValue]]:
+    """Return the normalized rating key and Plex metadata for *media*."""
+
+    plex_info = media_helpers._extract_plex_metadata(media)
+    rating_key_value = plex_info.get("rating_key")
+    rating_key_normalized = media_helpers._normalize_identifier(rating_key_value)
+    if not rating_key_normalized:
+        raise ValueError("Media item is missing a Plex rating key")
+    return rating_key_normalized, plex_info
+
+
 async def _start_playback(
     rating_key: str, player: PlexPlayerMetadata, offset_seconds: int
 ) -> None:
@@ -757,11 +791,7 @@ async def play_media(
     """Play a media item on a specific Plex player."""
 
     media = await media_helpers._get_media_data(server, identifier)
-    plex_info = media_helpers._extract_plex_metadata(media)
-    rating_key_value = plex_info.get("rating_key")
-    rating_key_normalized = media_helpers._normalize_identifier(rating_key_value)
-    if not rating_key_normalized:
-        raise ValueError("Media item is missing a Plex rating key")
+    rating_key_normalized, plex_info = _resolve_rating_key(media)
 
     players = await _get_plex_players()
     target = _match_player(player, players)
@@ -775,6 +805,60 @@ async def play_media(
         "title": plex_info.get("title") or media.get("title"),
         "offset_seconds": offset_seconds or 0,
         "player_capabilities": capabilities,
+    }
+
+
+@server.tool("queue-media")
+async def queue_media(
+    identifier: Annotated[
+        str,
+        Field(
+            description="Rating key, IMDb/TMDb ID, or media title",
+            examples=["49915", "tt8367814", "The Gentlemen"],
+        ),
+    ],
+    player: PlayerIdentifier,
+    play_next: Annotated[
+        bool,
+        Field(
+            description=(
+                "Insert the media immediately after the current item when true; "
+                "otherwise append it to the end of the queue."
+            ),
+            examples=[True],
+        ),
+    ] = False,
+) -> dict[str, Any]:
+    """Add a media item to the active play queue for a Plex player."""
+
+    media = await media_helpers._get_media_data(server, identifier)
+    rating_key_normalized, plex_info = _resolve_rating_key(media)
+
+    players = await _get_plex_players()
+    target = _match_player(player, players)
+    timeline = await _resolve_player_timeline(target)
+    play_queue_id = getattr(timeline, "playQueueID", None)
+    if not play_queue_id:
+        display_name = target.get("display_name") or target.get("name") or "player"
+        raise RuntimeError(f"Player '{display_name}' does not have an active play queue")
+
+    plex_server = await _get_plex_client()
+
+    def _enqueue() -> tuple[int, int]:
+        queue = PlayQueue.get(plex_server, play_queue_id, own=True)
+        media_item = plex_server.fetchItem(f"/library/metadata/{rating_key_normalized}")
+        updated = queue.addItem(media_item, playNext=play_next)
+        return updated.playQueueTotalCount, updated.playQueueVersion
+
+    queue_size, queue_version = await asyncio.to_thread(_enqueue)
+
+    return {
+        "player": target.get("display_name"),
+        "rating_key": rating_key_normalized,
+        "title": plex_info.get("title") or media.get("title"),
+        "position": "next" if play_next else "end",
+        "queue_size": queue_size,
+        "queue_version": queue_version,
     }
 
 
