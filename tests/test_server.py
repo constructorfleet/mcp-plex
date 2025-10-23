@@ -605,6 +605,49 @@ def test_playback_control_tools_send_commands(monkeypatch):
     monkeypatch.setenv("PLEX_URL", "http://plex.test:32400")
     monkeypatch.setenv("PLEX_TOKEN", "token")
 
+    class FakeAudioStream:
+        def __init__(self, stream_id: int, language: str, channels: int) -> None:
+            self.id = stream_id
+            self.language = language
+            self.channels = channels
+
+    class FakeSubtitleStream:
+        def __init__(
+            self,
+            stream_id: int,
+            language: str,
+            *,
+            forced: bool = False,
+            default: bool = False,
+        ) -> None:
+            self.id = stream_id
+            self.language = language
+            self.forced = forced
+            self.default = default
+            self.streamType = 3
+
+    class FakeSessionPlayer:
+        def __init__(self, machine_identifier: str, client_identifier: str) -> None:
+            self.machineIdentifier = machine_identifier
+            self.clientIdentifier = client_identifier
+
+    class FakeSession:
+        def __init__(
+            self,
+            players: list[FakeSessionPlayer],
+            audio_streams: list[FakeAudioStream],
+            subtitle_streams: list[FakeSubtitleStream],
+        ) -> None:
+            self.players = players
+            self._audio_streams = audio_streams
+            self._subtitle_streams = subtitle_streams
+
+        def audioStreams(self) -> list[FakeAudioStream]:
+            return list(self._audio_streams)
+
+        def subtitleStreams(self) -> list[FakeSubtitleStream]:
+            return list(self._subtitle_streams)
+
     class FakeClient:
         def __init__(self) -> None:
             self.machineIdentifier = "machine-123"
@@ -620,8 +663,8 @@ def test_playback_control_tools_send_commands(monkeypatch):
             self.previous_calls: list[str] = []
             self.forward_calls: list[str] = []
             self.back_calls: list[str] = []
-            self.subtitle_calls: list[tuple[str, str]] = []
-            self.audio_calls: list[tuple[str, str]] = []
+            self.subtitle_calls: list[dict[str, Any]] = []
+            self.audio_calls: list[dict[str, Any]] = []
 
         def pause(self, mtype: str = "video") -> None:
             self.pause_calls.append(mtype)
@@ -641,11 +684,11 @@ def test_playback_control_tools_send_commands(monkeypatch):
         def stepBack(self, mtype: str = "video") -> None:
             self.back_calls.append(mtype)
 
-        def setSubtitleStream(self, stream_id: str, mtype: str = "video") -> None:
-            self.subtitle_calls.append((stream_id, mtype))
+        def setSubtitleStream(self, stream: Any, mtype: str = "video") -> None:
+            self.subtitle_calls.append({"stream": stream, "media_type": mtype})
 
-        def setAudioStream(self, stream_id: str, mtype: str = "video") -> None:
-            self.audio_calls.append((stream_id, mtype))
+        def setAudioStream(self, stream: FakeAudioStream, mtype: str = "video") -> None:
+            self.audio_calls.append({"stream": stream, "media_type": mtype})
 
     class FakePlex:
         def __init__(self, baseurl: str, token: str) -> None:
@@ -653,9 +696,31 @@ def test_playback_control_tools_send_commands(monkeypatch):
             assert token == "token"
             self.machineIdentifier = "server-001"
             self._client = FakeClient()
+            self._sessions = [
+                FakeSession(
+                    [
+                        FakeSessionPlayer(
+                            self._client.machineIdentifier,
+                            self._client.clientIdentifier,
+                        )
+                    ],
+                    [
+                        FakeAudioStream(101, "eng", 2),
+                        FakeAudioStream(202, "eng", 6),
+                        FakeAudioStream(303, "spa", 6),
+                    ],
+                    [
+                        FakeSubtitleStream(401, "eng"),
+                        FakeSubtitleStream(505, "spa"),
+                    ],
+                )
+            ]
 
         def clients(self) -> list[FakeClient]:
             return [self._client]
+
+        def sessions(self) -> list[FakeSession]:
+            return self._sessions
 
         def fetchItem(self, key: str) -> Any:
             return types.SimpleNamespace(key=key)
@@ -708,7 +773,7 @@ def test_playback_control_tools_send_commands(monkeypatch):
         subtitle_result = asyncio.run(
             server.set_subtitle.fn(
                 player="Plex for Apple TV",
-                subtitle_stream_id="sub-1",
+                subtitle_language="spa",
                 media_type="video",
             )
         )
@@ -716,29 +781,43 @@ def test_playback_control_tools_send_commands(monkeypatch):
             "player": "Plex for Apple TV",
             "command": "set-subtitle",
             "media_type": "video",
-            "subtitle_stream_id": "sub-1",
+            "subtitle_language": "spa",
+            "subtitle_stream_id": 505,
             "player_capabilities": ["controller", "player"],
         }
-        assert fake_plex._client.subtitle_calls == [("sub-1", "video")]
+        assert len(fake_plex._client.subtitle_calls) == 1
+        subtitle_call = fake_plex._client.subtitle_calls[0]
+        subtitle_stream = subtitle_call["stream"]
+        assert isinstance(subtitle_stream, FakeSubtitleStream)
+        assert subtitle_stream.id == 505
+        assert subtitle_stream.language == "spa"
+        assert subtitle_call["media_type"] == "video"
 
         audio_result = asyncio.run(
             server.set_audio.fn(
                 player="Plex for Apple TV",
-                audio_stream_id="aud-7",
+                audio_language="eng",
                 media_type="video",
             )
         )
-        assert audio_result == {
-            "player": "Plex for Apple TV",
-            "command": "set-audio",
-            "media_type": "video",
-            "audio_stream_id": "aud-7",
-            "player_capabilities": ["controller", "player"],
-        }
-        assert fake_plex._client.audio_calls == [("aud-7", "video")]
+        assert audio_result["player"] == "Plex for Apple TV"
+        assert audio_result["command"] == "set-audio"
+        assert audio_result["media_type"] == "video"
+        assert audio_result["audio_language"] == "eng"
+        assert audio_result["player_capabilities"] == ["controller", "player"]
+        assert audio_result["audio_channels"] == 6
+        assert audio_result["audio_stream_id"] == 202
+        assert len(fake_plex._client.audio_calls) == 1
+        audio_call = fake_plex._client.audio_calls[0]
+        stream = audio_call["stream"]
+        assert isinstance(stream, FakeAudioStream)
+        assert stream.id == 202
+        assert stream.language == "eng"
+        assert stream.channels == 6
+        assert audio_call["media_type"] == "video"
 
 
-def test_set_subtitle_requires_stream_id(monkeypatch):
+def test_set_subtitle_requires_language(monkeypatch):
     monkeypatch.setenv("PLEX_URL", "http://plex.test:32400")
     monkeypatch.setenv("PLEX_TOKEN", "token")
 
@@ -749,7 +828,7 @@ def test_set_subtitle_requires_stream_id(monkeypatch):
             self.provides = "player"
             self.title = "Living Room"
 
-        def setSubtitleStream(self, stream_id: str, mtype: str = "video") -> None:  # noqa: ARG002
+        def setSubtitleStream(self, language: str, mtype: str = "video") -> None:  # noqa: ARG002
             raise AssertionError("Should not be called")
 
     class FakePlex:
@@ -772,9 +851,9 @@ def test_set_subtitle_requires_stream_id(monkeypatch):
         server._plex_client = None
         server._plex_identity = None
 
-        with pytest.raises(ValueError, match="subtitle stream id"):
+        with pytest.raises(ValueError, match="subtitle language"):
             asyncio.run(
-                server.set_subtitle.fn(player="Living Room", subtitle_stream_id="")
+                server.set_subtitle.fn(player="Living Room", subtitle_language="")
             )
 def test_match_player_fuzzy_alias_resolution():
     players: list[server_module.PlexPlayerMetadata] = [

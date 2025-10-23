@@ -19,6 +19,12 @@ from fastmcp.server.context import Context as FastMCPContext
 from plexapi.exceptions import PlexApiException
 from plexapi.server import PlexServer as PlexServerClient
 from plexapi.client import PlexClient
+from plexapi.media import (
+    AudioStream,
+    MediaPartStream,
+    Session as PlexSession,
+    SubtitleStream,
+)
 from pydantic import BaseModel, Field, create_model
 from qdrant_client.async_qdrant_client import AsyncQdrantClient
 from starlette.requests import Request
@@ -742,66 +748,315 @@ async def rewind_media(
 @server.tool("set-subtitle")
 async def set_subtitle(
     player: PlayerIdentifier,
-    subtitle_stream_id: Annotated[
+    subtitle_language: Annotated[
         str,
         Field(
-            description="Subtitle stream identifier from the media metadata",
-            examples=["1234"],
+            description="Subtitle language code from the media metadata",
+            examples=["spa"],
         ),
     ],
     media_type: MediaType = "video",
 ) -> dict[str, Any]:
-    """Select the subtitle stream for the current playback session."""
+    """Select the subtitle language for the current playback session."""
 
-    if not subtitle_stream_id:
-        raise ValueError("subtitle stream id is required")
-    player_entry = await _invoke_player_method(
-        player,
-        "setSubtitleStream",
-        args=(subtitle_stream_id,),
-        media_type=media_type,
-    )
+    if not subtitle_language:
+        raise ValueError("subtitle language is required")
+    player_entry = await _resolve_player_entry(player)
+    stream = await _resolve_subtitle_stream(player_entry, subtitle_language)
+    plex_client = _ensure_player_client(player_entry)
+    method = getattr(plex_client, "setSubtitleStream", None)
+    if method is None:
+        display_name = (
+            player_entry.get("display_name")
+            or player_entry.get("name")
+            or "player"
+        )
+        raise RuntimeError(f"Player '{display_name}' does not support setSubtitleStream")
+    kwargs: dict[str, Any] = {}
+    if media_type is not None:
+        kwargs["mtype"] = media_type
+
+    def _call() -> None:
+        target = stream if stream is not None else subtitle_language
+        method(target, **kwargs)
+
+    try:
+        await asyncio.to_thread(_call)
+    except PlexApiException as exc:
+        raise RuntimeError("Failed to execute setSubtitleStream via plexapi") from exc
     response = _player_response(player_entry, command="set-subtitle", media_type=media_type)
-    response["subtitle_stream_id"] = subtitle_stream_id
+    response["subtitle_language"] = subtitle_language
+    if stream is not None:
+        stream_id = getattr(stream, "id", None)
+        if stream_id is not None:
+            response["subtitle_stream_id"] = stream_id
     return response
+
+
+def _normalize_session_identifier(value: Any) -> str:
+    if value is None:
+        return ""
+    try:
+        normalized = str(value)
+    except Exception:
+        return ""
+    return normalized.strip().lower()
+
+
+def _collect_session_players(session: PlexSession | Any) -> list[Any]:
+    players = getattr(session, "players", None)
+    if isinstance(players, (list, tuple, set)):
+        return [player for player in players if player is not None]
+    if players is not None:
+        try:
+            return [player for player in players if player is not None]
+        except TypeError:
+            pass
+    player = getattr(session, "player", None)
+    if player is None:
+        return []
+    return [player]
+
+
+def _collect_audio_streams(session: PlexSession | Any) -> list[AudioStream]:
+    streams: list[AudioStream] = []
+    getter = getattr(session, "audioStreams", None)
+    if callable(getter):
+        try:
+            result = getter()
+        except Exception as exc:  # pragma: no cover - defensive guard
+            logger.debug("Failed to fetch audio streams: %s", exc, exc_info=exc)
+        else:
+            if isinstance(result, (list, tuple, set)):
+                streams.extend(cast(Sequence[AudioStream], result))
+            elif result is not None:
+                streams.append(cast(AudioStream, result))
+    return streams
+
+
+def _collect_subtitle_streams(session: PlexSession | Any) -> list[SubtitleStream]:
+    streams: list[SubtitleStream] = []
+    getter = getattr(session, "subtitleStreams", None)
+    if callable(getter):
+        try:
+            result = getter()
+        except Exception as exc:  # pragma: no cover - defensive guard
+            logger.debug("Failed to fetch subtitle streams: %s", exc, exc_info=exc)
+        else:
+            if isinstance(result, (list, tuple, set)):
+                streams.extend(cast(Sequence[SubtitleStream], result))
+            elif result is not None:
+                streams.append(cast(SubtitleStream, result))
+    if not streams:
+        media_items = getattr(session, "media", None)
+        if isinstance(media_items, (list, tuple, set)):
+            for media in media_items:
+                parts = getattr(media, "parts", None)
+                if not isinstance(parts, (list, tuple, set)):
+                    continue
+                for part in parts:
+                    part_streams = getattr(part, "streams", None)
+                    if not isinstance(part_streams, (list, tuple, set)):
+                        continue
+                    for stream in part_streams:
+                        stream_type = _coerce_int(getattr(stream, "streamType", None))
+                        if stream_type == 3:
+                            streams.append(cast(SubtitleStream, stream))
+    return streams
+
+
+async def _find_player_session(player: PlexPlayerMetadata) -> PlexSession | None:
+    machine_identifier = _normalize_session_identifier(
+        player.get("machine_identifier")
+    )
+    client_identifier = _normalize_session_identifier(
+        player.get("client_identifier")
+    )
+    if not machine_identifier and not client_identifier:
+        return None
+    plex_client = await _get_plex_client()
+
+    def _load_sessions() -> list[PlexSession]:
+        sessions = plex_client.sessions()
+        if isinstance(sessions, list):
+            return cast(list[PlexSession], sessions)
+        try:
+            return list(cast(Sequence[PlexSession], sessions))
+        except TypeError:
+            return [cast(PlexSession, sessions)]
+
+    try:
+        sessions = await asyncio.to_thread(_load_sessions)
+    except Exception as exc:  # pragma: no cover - defensive guard
+        logger.debug("Failed to load Plex sessions: %s", exc, exc_info=exc)
+        return None
+
+    for session in sessions:
+        for candidate in _collect_session_players(session):
+            session_machine = _normalize_session_identifier(
+                getattr(candidate, "machineIdentifier", None)
+                or getattr(candidate, "machine_identifier", None)
+            )
+            session_client = _normalize_session_identifier(
+                getattr(candidate, "clientIdentifier", None)
+                or getattr(candidate, "client_identifier", None)
+            )
+            if machine_identifier and session_machine == machine_identifier:
+                return session
+            if client_identifier and session_client == client_identifier:
+                return session
+    return None
+
+
+def _normalize_stream_language(stream: MediaPartStream | Any) -> str | None:
+    for attribute in ("languageTag", "languageCode", "language", "locale"):
+        value = getattr(stream, attribute, None)
+        if value is None:
+            continue
+        try:
+            text = str(value)
+        except Exception:
+            continue
+        normalized = text.strip().lower()
+        if not normalized:
+            continue
+        if "-" in normalized:
+            normalized = normalized.split("-", 1)[0]
+        return normalized
+    return None
+
+
+def _coerce_int(value: Any) -> int:
+    if value is None:
+        return 0
+    if isinstance(value, bool):
+        return 0
+    try:
+        return int(value)
+    except Exception:
+        return 0
+
+
+def _extract_audio_channel_count(stream: AudioStream | MediaPartStream | Any) -> int:
+    channels = _coerce_int(getattr(stream, "channels", None))
+    if channels:
+        return channels
+    return _coerce_int(getattr(stream, "audioChannelCount", None))
+
+
+def _audio_stream_rank(
+    stream: AudioStream | MediaPartStream | Any,
+) -> tuple[int, int, int]:
+    channels = _extract_audio_channel_count(stream)
+    bitrate = _coerce_int(getattr(stream, "bitrate", None))
+    stream_id = _coerce_int(getattr(stream, "id", None))
+    return (channels, bitrate, stream_id)
+
+
+def _select_best_audio_stream(
+    session: PlexSession | Any, audio_language: str
+) -> AudioStream | None:
+    normalized_language = audio_language.strip().lower()
+    if not normalized_language:
+        return None
+    streams = _collect_audio_streams(session)
+    if not streams:
+        return None
+    best_stream: AudioStream | None = None
+    best_rank: tuple[int, int, int] | None = None
+    for stream in streams:
+        stream_language = _normalize_stream_language(stream)
+        if stream_language != normalized_language:
+            continue
+        rank = _audio_stream_rank(stream)
+        if best_rank is None or rank > best_rank:
+            best_rank = rank
+            best_stream = stream
+    return best_stream
+
+
+def _select_subtitle_stream(
+    session: PlexSession | Any, subtitle_language: str
+) -> SubtitleStream | None:
+    normalized_language = subtitle_language.strip().lower()
+    if not normalized_language:
+        return None
+    streams = _collect_subtitle_streams(session)
+    if not streams:
+        return None
+    for stream in streams:
+        stream_language = _normalize_stream_language(stream)
+        if stream_language == normalized_language:
+            return stream
+    return None
+
+
+async def _resolve_audio_stream(
+    player: PlexPlayerMetadata, audio_language: str
+) -> AudioStream | None:
+    session = await _find_player_session(player)
+    if session is None:
+        return None
+    return _select_best_audio_stream(session, audio_language)
+
+
+async def _resolve_subtitle_stream(
+    player: PlexPlayerMetadata, subtitle_language: str
+) -> SubtitleStream | None:
+    session = await _find_player_session(player)
+    if session is None:
+        return None
+    return _select_subtitle_stream(session, subtitle_language)
 
 
 @server.tool("set-audio")
 async def set_audio(
-    player: Annotated[
+    player: PlayerIdentifier,
+    audio_language: Annotated[
         str,
         Field(
-            description="Friendly name, machine identifier, or client identifier",
-            examples=["Living Room"],
+            description="Audio language code from the media metadata",
+            examples=["eng"],
         ),
     ],
-    audio_stream_id: Annotated[
-        str,
-        Field(
-            description="Audio stream identifier from the media metadata",
-            examples=["2345"],
-        ),
-    ],
-    media_type: Annotated[
-        str | None,
-        Field(
-            description="Plex media type being controlled (video/music/photo)",
-            examples=["video"],
-        ),
-    ] = "video",
+    media_type: MediaType = "video",
 ) -> dict[str, Any]:
-    """Select the audio stream for the current playback session."""
+    """Select the audio language for the current playback session."""
 
-    if not audio_stream_id:
-        raise ValueError("audio stream id is required")
-    player_entry = await _invoke_player_method(
-        player,
-        "setAudioStream",
-        args=(audio_stream_id,),
-        media_type=media_type,
-    )
+    if not audio_language:
+        raise ValueError("audio language is required")
+    player_entry = await _resolve_player_entry(player)
+    stream = await _resolve_audio_stream(player_entry, audio_language)
+    plex_client = _ensure_player_client(player_entry)
+    method = getattr(plex_client, "setAudioStream", None)
+    if method is None:
+        display_name = (
+            player_entry.get("display_name")
+            or player_entry.get("name")
+            or "player"
+        )
+        raise RuntimeError(f"Player '{display_name}' does not support setAudioStream")
+    kwargs: dict[str, Any] = {}
+    if media_type is not None:
+        kwargs["mtype"] = media_type
+
+    def _call() -> None:
+        target = stream if stream is not None else audio_language
+        method(target, **kwargs)
+
+    try:
+        await asyncio.to_thread(_call)
+    except PlexApiException as exc:
+        raise RuntimeError("Failed to execute setAudioStream via plexapi") from exc
     response = _player_response(player_entry, command="set-audio", media_type=media_type)
-    response["audio_stream_id"] = audio_stream_id
+    response["audio_language"] = audio_language
+    if stream is not None:
+        channels = _extract_audio_channel_count(stream)
+        if channels:
+            response["audio_channels"] = channels
+        stream_id = getattr(stream, "id", None)
+        if stream_id is not None:
+            response["audio_stream_id"] = stream_id
     return response
 
 
