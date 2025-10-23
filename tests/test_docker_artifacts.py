@@ -10,6 +10,11 @@ DOCKERIGNORE = Path(".dockerignore")
 CUDA_IMAGE = "nvidia/cuda:12.4.1-cudnn-runtime-ubuntu22.04"
 BUILDER_STAGE_DESCRIPTOR = f"{CUDA_IMAGE} AS builder"
 RUNTIME_STAGE_DESCRIPTOR = CUDA_IMAGE
+UV_INSTALL_DIR = "/opt/uv"
+UV_INSTALL_ENV_DIRECTIVE = f"ENV UV_PYTHON_INSTALL_DIR={UV_INSTALL_DIR}"
+UV_INSTALL_COPY_DIRECTIVE = (
+    f"COPY --from=builder --chown=app:app {UV_INSTALL_DIR} {UV_INSTALL_DIR}"
+)
 
 
 def _extract_stage(contents: str, stage_descriptor: str) -> str:
@@ -158,3 +163,20 @@ def test_runtime_stage_copies_virtualenv_with_chown(dockerfile_contents: str) ->
     ), "Runtime stage should retain the project entrypoint"
 
     assert "CMD" in runtime_section, "Runtime stage should define a default command"
+
+
+def test_dockerfile_preserves_uv_python_installation(dockerfile_contents: str) -> None:
+    """Runtime stage should retain the uv-managed Python installation for app user access."""
+
+    builder_section = _builder_section(dockerfile_contents)
+    runtime_section = _runtime_section(dockerfile_contents)
+
+    assert (
+        UV_INSTALL_ENV_DIRECTIVE in builder_section
+    ), "Builder stage must pin the uv Python install directory"
+    assert (
+        UV_INSTALL_ENV_DIRECTIVE in runtime_section
+    ), "Runtime stage must expose the uv Python install directory"
+    assert (
+        UV_INSTALL_COPY_DIRECTIVE in runtime_section
+    ), "Runtime stage should copy the uv-managed Python interpreter into place"
