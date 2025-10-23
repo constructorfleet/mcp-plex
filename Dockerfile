@@ -1,6 +1,8 @@
 # syntax=docker/dockerfile:1
 FROM nvidia/cuda:12.4.1-cudnn-runtime-ubuntu22.04 AS builder
 
+ENV PATH="/root/.local/bin:$PATH"
+
 COPY --from=ghcr.io/astral-sh/uv:latest /uv /uvx /bin/
 
 WORKDIR /app
@@ -16,6 +18,8 @@ RUN --mount=type=cache,target=/root/.cache/uv \
     uv sync --locked --no-editable --link-mode=copy
 
 FROM nvidia/cuda:12.4.1-cudnn-runtime-ubuntu22.04
+
+ENV PATH="/root/.local/bin:$PATH"
 
 ENV PATH="/app/.venv/bin:$PATH"
 WORKDIR /app
