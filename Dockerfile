@@ -2,6 +2,7 @@
 FROM nvidia/cuda:12.4.1-cudnn-runtime-ubuntu22.04 AS base
 
 ENV UV_LINK_MODE=copy
+ENV XDG_BIN_HOME="/usr/local/bin"
 RUN curl -LsSf https://astral.sh/uv/install.sh | sh
 ENV PATH="/root/.local/bin:$PATH"
 

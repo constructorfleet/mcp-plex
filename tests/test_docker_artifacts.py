@@ -7,6 +7,7 @@ import pytest
 
 DOCKERFILE = Path("Dockerfile")
 DOCKERIGNORE = Path(".dockerignore")
+BASE_STAGE_DESCRIPTOR = "nvidia/cuda:12.4.1-cudnn-runtime-ubuntu22.04 AS base"
 
 
 def _extract_stage(contents: str, stage_descriptor: str) -> str:
@@ -85,3 +86,12 @@ def test_dockerfile_sets_uv_path_in_builder_stage(dockerfile_contents: str) -> N
     assert (
         expected_env in builder_section
     ), "Builder stage must export uv install path before invoking uv"
+
+
+def test_dockerfile_sets_uv_install_dir_for_base(dockerfile_contents: str) -> None:
+    """Ensure the base stage installs uv to a globally accessible directory."""
+
+    base_section = _extract_stage(dockerfile_contents, BASE_STAGE_DESCRIPTOR)
+    expected_env = 'ENV XDG_BIN_HOME="/usr/local/bin"'
+
+    assert expected_env in base_section, "Base stage must direct uv installer to /usr/local/bin"
