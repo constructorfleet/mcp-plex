@@ -645,6 +645,127 @@ def test_play_media_with_alias(monkeypatch):
         assert offset_call["kwargs"]["offset"] == offset_seconds * 1000
 
 
+def test_queue_media_adds_to_queue(monkeypatch):
+    monkeypatch.setenv("PLEX_URL", "http://plex.test:32400")
+    monkeypatch.setenv("PLEX_TOKEN", "token")
+    monkeypatch.setenv(
+        "PLEX_PLAYER_ALIASES",
+        json.dumps(
+            {
+                "machine-123": ["Living Room"],
+                "client-abc": ["Living Room"],
+                "machine-123:client-abc": ["Living Room"],
+            }
+        ),
+    )
+
+    class FakeTimeline:
+        def __init__(self) -> None:
+            self.playQueueID = 42
+            self.playQueueItemID = 101
+            self.playQueueVersion = 3
+            self.state = "playing"
+            self.type = "video"
+
+    class FakeClient:
+        def __init__(self) -> None:
+            self.machineIdentifier = "machine-123"
+            self.clientIdentifier = "client-abc"
+            self.provides = "player,controller"
+            self.address = "10.0.0.5"
+            self.port = 32500
+            self.product = "Plex for Apple TV"
+            self.title = "Plex for Apple TV"
+            self._timeline = FakeTimeline()
+
+        def timelines(self, wait: int = 0):
+            return [self._timeline]
+
+        @property
+        def timeline(self):
+            return self._timeline
+
+    class FakeMedia:
+        def __init__(self, key: str) -> None:
+            self.key = key
+
+    class FakePlex:
+        def __init__(self, baseurl: str, token: str) -> None:
+            assert baseurl.rstrip("/") == "http://plex.test:32400"
+            assert token == "token"
+            self.machineIdentifier = "server-001"
+            self._client = FakeClient()
+            self.fetch_requests: list[str] = []
+
+        def clients(self) -> list[FakeClient]:
+            return [self._client]
+
+        def fetchItem(self, key: str) -> FakeMedia:
+            self.fetch_requests.append(key)
+            return FakeMedia(key)
+
+    queue_calls: list[dict[str, object]] = []
+    get_calls: list[tuple[int, dict[str, object]]] = []
+
+    class FakePlayQueue:
+        def __init__(self) -> None:
+            self.playQueueTotalCount = 1
+            self.playQueueVersion = 5
+
+        def addItem(self, item: FakeMedia, playNext: bool = False, refresh: bool = True):
+            queue_calls.append(
+                {
+                    "item": item,
+                    "playNext": playNext,
+                    "refresh": refresh,
+                }
+            )
+            self.playQueueTotalCount += 1
+            self.playQueueVersion += 1
+            return self
+
+    fake_queue = FakePlayQueue()
+
+    class _FakePlayQueue:
+        @classmethod
+        def get(cls, plex_server, playQueueID: int, **kwargs):  # type: ignore[no-untyped-def]
+            get_calls.append((playQueueID, kwargs))
+            return fake_queue
+
+    with _load_server(monkeypatch) as server:
+        monkeypatch.setattr(server, "PlexServerClient", FakePlex)
+        monkeypatch.setattr(server, "PlayQueue", _FakePlayQueue, raising=False)
+
+        result_next = asyncio.run(
+            server.queue_media.fn(identifier="49915", player="Living Room", play_next=True)
+        )
+
+        assert result_next["player"] == "Living Room"
+        assert result_next["rating_key"] == "49915"
+        assert result_next["position"] == "next"
+        assert result_next["queue_size"] == fake_queue.playQueueTotalCount
+        assert queue_calls[-1]["playNext"] is True
+        assert queue_calls[-1]["refresh"] is True
+        assert server.server._plex_client.fetch_requests == ["/library/metadata/49915"]
+        assert get_calls[-1][0] == 42
+        assert get_calls[-1][1]["own"] is True
+
+        queue_calls.clear()
+        fake_queue.playQueueTotalCount = 3
+        fake_queue.playQueueVersion = 7
+        server.server._plex_client.fetch_requests.clear()
+
+        result_end = asyncio.run(
+            server.queue_media.fn(identifier="49915", player="Living Room", play_next=False)
+        )
+
+        assert result_end["player"] == "Living Room"
+        assert result_end["rating_key"] == "49915"
+        assert result_end["position"] == "end"
+        assert result_end["queue_size"] == fake_queue.playQueueTotalCount
+        assert queue_calls[-1]["playNext"] is False
+        assert server.server._plex_client.fetch_requests == ["/library/metadata/49915"]
+
 def test_play_media_allows_controller_only_client(monkeypatch):
     monkeypatch.setenv("PLEX_URL", "http://plex.test:32400")
     monkeypatch.setenv("PLEX_TOKEN", "token")
