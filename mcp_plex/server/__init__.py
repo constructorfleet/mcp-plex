@@ -583,15 +583,27 @@ def _match_player(
         return graph, labels
 
     alias_graph, alias_labels = _build_alias_graph()
+    alias_graph_keys = tuple(alias_graph)
 
     def _expand_aliases(value: str) -> set[str]:
-        if not alias_graph:
+        if not alias_graph_keys:
             return set()
         normalized_value = value.strip().lower()
-        if not normalized_value or normalized_value not in alias_graph:
+        if not normalized_value:
             return set()
-        seen = {normalized_value}
-        stack = [normalized_value]
+        target_value = normalized_value
+        if target_value not in alias_graph:
+            match = process.extractOne(
+                normalized_value,
+                alias_graph_keys,
+                scorer=fuzz.WRatio,
+                score_cutoff=_FUZZY_MATCH_THRESHOLD,
+            )
+            if match is None:
+                return set()
+            target_value = match[0]
+        seen = {target_value}
+        stack = [target_value]
         related: set[str] = set()
         while stack:
             current = stack.pop()
