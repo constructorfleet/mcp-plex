@@ -8,6 +8,7 @@ ENV PATH="/root/.local/bin:$PATH"
 WORKDIR /app
 
 FROM base AS builder
+ENV PATH="/root/.local/bin:$PATH"
 COPY docker/pyproject.deps.toml ./pyproject.toml
 COPY uv.lock ./uv.lock
 RUN uv sync --no-dev --frozen && mv pyproject.toml pyproject.deps.toml
