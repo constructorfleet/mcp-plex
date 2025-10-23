@@ -1158,6 +1158,35 @@ def test_match_player_alias_name_maps_to_identifier(monkeypatch):
     assert matched is players[0]
 
 
+def test_match_player_alias_fuzzy_identifier(monkeypatch):
+    original_settings = server_module.server.settings
+    fuzzy_settings = original_settings.model_copy(
+        update={"plex_player_aliases": {"Movie Room": ("Machine 1",)}}
+    )
+
+    monkeypatch.setattr(server_module.server, "_settings", fuzzy_settings)
+
+    try:
+        players: list[server_module.PlexPlayerMetadata] = [
+            {
+                "display_name": "Plex for Apple TV",
+                "name": "Plex for Apple TV",
+                "product": "Apple TV",
+                "machine_identifier": "machine-1",
+                "client_identifier": "client-1",
+                "friendly_names": [],
+                "provides": {"player"},
+                "client": None,
+            }
+        ]
+
+        matched = server_module._match_player("Movie Room", players)
+    finally:
+        monkeypatch.setattr(server_module.server, "_settings", original_settings)
+
+    assert matched is players[0]
+
+
 def test_reranker_import_failure(monkeypatch, caplog):
     monkeypatch.setenv("USE_RERANKER", "1")
     orig_import = builtins.__import__
