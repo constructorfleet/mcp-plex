@@ -310,12 +310,9 @@ class PlexServer(FastMCP):
                     rating_key = getattr(item, "ratingKey", None)
                     if rating_key is None:
                         rating_key = getattr(item, "rating_key", None)
-                    if rating_key is None:
-                        continue
-                    try:
-                        normalized = str(rating_key).strip()
-                    except Exception:  # noqa: BLE001 - guard from bad reprs
-                        continue
+                    normalized = media_helpers._normalize_history_rating_key(
+                        rating_key
+                    )
                     if normalized:
                         rating_keys.add(normalized)
                     if history_limit > 0 and len(rating_keys) >= history_limit:
@@ -340,6 +337,7 @@ _MEDIA_TOOL_EXPORTS = {
     "get_media": "get-media",
     "search_media": "search-media",
     "query_media": "query-media",
+    "recommend_media_like": "recommend-media-like",
     "recommend_media": "recommend-media",
     "new_movies": "new-movies",
     "new_shows": "new-shows",
