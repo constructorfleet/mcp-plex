@@ -230,15 +230,17 @@ def test_server_tools(monkeypatch):
             == []
         )
 
+        history_rating_keys = {"49915", "61960"}
+
         async def _watched_rating_keys(_self):
-            return {"61960"}
+            return history_rating_keys
 
         monkeypatch.setattr(
             type(server.server), "get_watched_rating_keys", _watched_rating_keys
         )
 
         rec = asyncio.run(
-            server.recommend_media.fn(
+            server.recommend_media_like.fn(
                 identifier=movie_id, limit=2, summarize_for_llm=False
             )
         )
@@ -248,10 +250,33 @@ def test_server_tools(monkeypatch):
 
         assert (
             asyncio.run(
-                server.recommend_media.fn(
+                server.recommend_media_like.fn(
                     identifier="0", limit=1, summarize_for_llm=False
                 )
             )
+            == []
+        )
+
+        history_results = asyncio.run(
+            server.recommend_media.fn(limit=2, summarize_for_llm=False)
+        )
+        assert history_results
+        history_keys = {
+            item["plex"]["rating_key"]
+            for item in history_results
+            if isinstance(item.get("plex"), dict)
+        }
+        assert history_keys <= history_rating_keys
+
+        async def _no_history(_self):
+            return set()
+
+        monkeypatch.setattr(
+            type(server.server), "get_watched_rating_keys", _no_history
+        )
+
+        assert (
+            asyncio.run(server.recommend_media.fn(limit=1, summarize_for_llm=False))
             == []
         )
 
@@ -336,12 +361,19 @@ def test_media_library_tools_have_metadata(monkeypatch):
                 ),
                 "operation": "query",
             },
-            "recommend_media": {
+            "recommend_media_like": {
                 "title": "Recommend similar media",
                 "description": (
                     "Recommend similar media items based on a reference identifier."
                 ),
                 "operation": "recommend",
+            },
+            "recommend_media": {
+                "title": "Recommend from watch history",
+                "description": (
+                    "Recommend media items based solely on Plex watch history."
+                ),
+                "operation": "history",
             },
             "new_movies": {
                 "title": "Newest movies",
