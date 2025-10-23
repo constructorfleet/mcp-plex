@@ -33,6 +33,26 @@ Run continuously with a delay between runs:
 uv run load-data --continuous --delay 600
 ```
 
+### Configure live Plex access
+
+Provide the loader with your Plex and TMDb credentials when ingesting a live
+library. You can pass them as CLI options or export the mirrored environment
+variables before running the command:
+
+```bash
+uv run load-data \
+  --plex-url "https://plex.example.com" \
+  --plex-token "token-goes-here" \
+  --tmdb-api-key "tmdb-key" \
+  --qdrant-url http://localhost:6333
+```
+
+The flags above map directly to `PLEX_URL`, `PLEX_TOKEN`, and `TMDB_API_KEY`.
+Setting the environment variables keeps secrets out of shell history while the
+CLI options help with one-off runs. Specify `--plex-chunk-size` or its
+environment twin `PLEX_CHUNK_SIZE` when Plex servers throttle large fetches;
+smaller chunk sizes reduce request bursts at the cost of additional API calls.
+
 ### IMDb Retry Configuration
 The loader exposes CLI flags (and mirrored environment variables) that control
 how it retries IMDb lookups and how aggressively it backs off when hitting
