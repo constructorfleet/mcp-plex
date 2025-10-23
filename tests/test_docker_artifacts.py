@@ -7,18 +7,37 @@ import pytest
 
 DOCKERFILE = Path("Dockerfile")
 DOCKERIGNORE = Path(".dockerignore")
-BASE_STAGE_DESCRIPTOR = "nvidia/cuda:12.4.1-cudnn-runtime-ubuntu22.04 AS base"
+CUDA_IMAGE = "nvidia/cuda:12.4.1-cudnn-runtime-ubuntu22.04"
+BUILDER_STAGE_DESCRIPTOR = f"{CUDA_IMAGE} AS builder"
+RUNTIME_STAGE_DESCRIPTOR = CUDA_IMAGE
 
 
 def _extract_stage(contents: str, stage_descriptor: str) -> str:
     """Return the body of a Docker stage defined by a FROM line."""
 
-    marker = f"FROM {stage_descriptor}"
-    assert marker in contents, f"Missing Docker stage: {stage_descriptor}"
+    segments = contents.split("FROM ")[1:]
+    for segment in segments:
+        header, *body_lines = segment.splitlines()
+        if header.strip() == stage_descriptor:
+            stage_body = "\n".join(body_lines)
+            next_from = stage_body.find("\nFROM ")
+            return stage_body if next_from == -1 else stage_body[:next_from]
 
-    stage_body = contents.split(marker, 1)[1]
-    next_from = stage_body.find("\nFROM ")
-    return stage_body if next_from == -1 else stage_body[:next_from]
+    raise AssertionError(f"Missing Docker stage: {stage_descriptor}")
+
+
+
+def _builder_section(contents: str) -> str:
+    """Convenience accessor for the builder stage."""
+
+    return _extract_stage(contents, BUILDER_STAGE_DESCRIPTOR)
+
+
+
+def _runtime_section(contents: str) -> str:
+    """Convenience accessor for the runtime stage."""
+
+    return _extract_stage(contents, RUNTIME_STAGE_DESCRIPTOR)
 
 
 @pytest.fixture()
@@ -40,14 +59,15 @@ def dockerignore_entries() -> set[str]:
     }
 
 
-def test_dockerfile_uses_runtime_cuda_image(dockerfile_contents: str) -> None:
-    """Ensure the Dockerfile relies on the lighter runtime CUDA base image."""
+def test_dockerfile_uses_nvidia_cuda_images(dockerfile_contents: str) -> None:
+    """Ensure the Dockerfile relies on the CUDA runtime image for both stages."""
 
-    assert "FROM nvidia/cuda:12.4.1-cudnn-runtime-ubuntu22.04" in dockerfile_contents
+    assert f"FROM {BUILDER_STAGE_DESCRIPTOR}" in dockerfile_contents
+    assert f"\nFROM {CUDA_IMAGE}" in dockerfile_contents
 
 
 def test_dockerfile_does_not_install_curl_via_apt(dockerfile_contents: str) -> None:
-    """The base CUDA image already supplies curl, so extra apt layers are wasteful."""
+    """The base image already supplies curl, so extra apt layers are wasteful."""
 
     assert "apt-get install" not in dockerfile_contents
 
@@ -70,28 +90,70 @@ def test_dockerignore_excludes_heavy_paths(dockerignore_entries: set[str]) -> No
 def test_dockerfile_copies_project_metadata_for_uv(dockerfile_contents: str) -> None:
     """The runtime image must include pyproject metadata so uv can resolve scripts."""
 
-    expected_phrase = "COPY pyproject.toml"
+    runtime_section = _runtime_section(dockerfile_contents)
+    expected_phrase = "COPY --from=builder /app/pyproject.toml ./pyproject.toml"
 
     assert (
-        expected_phrase in dockerfile_contents
+        expected_phrase in runtime_section
     ), "Expected runtime stage to copy pyproject.toml for uv run entry points"
 
 
-def test_dockerfile_sets_uv_path_in_builder_stage(dockerfile_contents: str) -> None:
-    """Ensure the builder stage exports the uv binary on PATH before syncing deps."""
+def test_builder_stage_copies_uv_binaries(dockerfile_contents: str) -> None:
+    """Builder stage should source uv binaries from the official image."""
 
-    builder_section = _extract_stage(dockerfile_contents, "base AS builder")
-    expected_env = 'ENV PATH="/root/.local/bin:$PATH"'
+    builder_section = _builder_section(dockerfile_contents)
 
     assert (
-        expected_env in builder_section
-    ), "Builder stage must export uv install path before invoking uv"
+        "COPY --from=ghcr.io/astral-sh/uv:latest /uv /uvx /bin/" in builder_section
+    ), "Builder stage must populate uv tools from the upstream image"
 
 
-def test_dockerfile_sets_uv_install_dir_for_base(dockerfile_contents: str) -> None:
-    """Ensure the base stage installs uv to a globally accessible directory."""
+def test_builder_uv_sync_runs_in_non_editable_mode(dockerfile_contents: str) -> None:
+    """Builder stage should follow uv guidance by avoiding editable installs."""
 
-    base_section = _extract_stage(dockerfile_contents, BASE_STAGE_DESCRIPTOR)
-    expected_env = 'ENV XDG_BIN_HOME="/usr/local/bin"'
+    builder_section = _builder_section(dockerfile_contents)
 
-    assert expected_env in base_section, "Base stage must direct uv installer to /usr/local/bin"
+    sync_lines = [
+        line.strip()
+        for line in builder_section.splitlines()
+        if "uv sync" in line
+    ]
+
+    assert sync_lines, "Expected builder stage to invoke uv sync"
+    assert all(
+        "--no-editable" in line for line in sync_lines
+    ), "uv sync calls must disable editable installs in builder stage"
+    assert any(
+        "--no-install-project" in line for line in sync_lines
+    ), "Builder stage should prime dependencies without the project using --no-install-project"
+
+
+def test_builder_dependency_sync_pattern(dockerfile_contents: str) -> None:
+    """Ensure the builder stage primes dependencies before adding the project."""
+
+    builder_section = _builder_section(dockerfile_contents)
+
+    first_sync_index = builder_section.find("uv sync --locked --no-install-project --no-editable")
+    add_index = builder_section.find("ADD . /app")
+    second_sync_index = builder_section.find("uv sync --locked --no-editable", add_index)
+
+    assert first_sync_index != -1, "Dependency-only sync missing in builder stage"
+    assert add_index != -1, "Expected builder stage to add project sources"
+    assert second_sync_index != -1, "Expected builder stage to resync after adding project"
+    assert first_sync_index < add_index < second_sync_index, "Sync and add ordering must follow uv guidance"
+
+
+def test_runtime_stage_copies_virtualenv_with_chown(dockerfile_contents: str) -> None:
+    """Ensure the runtime image receives the prepared virtual environment with ownership set."""
+
+    runtime_section = _runtime_section(dockerfile_contents)
+
+    assert (
+        "COPY --from=builder --chown=app:app /app/.venv /app/.venv" in runtime_section
+    ), "Runtime stage must copy the virtual environment with the app user ownership"
+
+    assert (
+        "ENTRYPOINT [\"./entrypoint.sh\"]" in runtime_section
+    ), "Runtime stage should retain the project entrypoint"
+
+    assert "CMD" in runtime_section, "Runtime stage should define a default command"
