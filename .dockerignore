@@ -1,0 +1,14 @@
+.git
+.venv
+__pycache__
+*.pyc
+*.pyo
+*.pyd
+*.so
+*.dll
+mcp_plex.egg-info/
+sample-data/
+docs/
+tests/
+*.log
+__MACOSX
