@@ -1,5 +1,9 @@
 from pathlib import Path
+
 import pytest
+
+
+PROJECT_ROOT = Path(__file__).resolve().parent.parent
 
 
 IMDB_RETRY_DOC_TOKENS = (
@@ -21,8 +25,7 @@ IMDB_RETRY_DOC_TOKENS = (
 
 
 def test_readme_documents_server_cache_and_reranker_settings():
-    readme = Path(__file__).resolve().parent.parent / "README.md"
-    content = readme.read_text(encoding="utf-8")
+    content = read_readme()
 
     for key in ("CACHE_SIZE", "USE_RERANKER", "PLEX_PLAYER_ALIASES"):
         assert key in content
@@ -30,5 +33,16 @@ def test_readme_documents_server_cache_and_reranker_settings():
 
 @pytest.mark.parametrize("token", IMDB_RETRY_DOC_TOKENS)
 def test_readme_documents_imdb_retry_controls(token: str) -> None:
-    readme = Path("README.md").read_text(encoding="utf-8")
+    readme = read_readme()
     assert token in readme
+
+
+def test_readme_documents_dev_checks() -> None:
+    readme = read_readme()
+
+    assert "uv run ruff check ." in readme
+    assert "uv run pytest" in readme
+
+
+def read_readme() -> str:
+    return (PROJECT_ROOT / "README.md").read_text(encoding="utf-8")
