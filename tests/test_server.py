@@ -321,6 +321,21 @@ def test_media_library_tools_have_metadata(monkeypatch):
         asyncio.run(module.server.close())
 
 
+def test_query_media_year_range_schema_uses_integers(monkeypatch):
+    module, _ = _reload_server_with_dummy_reranker(monkeypatch)
+    try:
+        properties = module.query_media.parameters["properties"]
+        year_from_schema = properties["year_from"]
+        year_to_schema = properties["year_to"]
+
+        assert year_from_schema["type"] == "integer"
+        assert year_from_schema.get("nullable") is True
+        assert year_to_schema["type"] == "integer"
+        assert year_to_schema.get("nullable") is True
+    finally:
+        asyncio.run(module.server.close())
+
+
 def test_get_media_data_caches_external_ids(monkeypatch):
     with _load_server(monkeypatch) as server:
         call_count = 0

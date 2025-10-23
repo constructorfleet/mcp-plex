@@ -246,11 +246,21 @@ def register_media_library_tools(server: "PlexServer") -> None:
         ] = None,
         year_from: Annotated[
             int | None,
-            Field(description="Minimum release year", examples=[2018]),
+            Field(
+                default=None,
+                description="Minimum release year",
+                examples=[2018],
+                json_schema_extra={"nullable": True, "type": "integer"},
+            ),
         ] = None,
         year_to: Annotated[
             int | None,
-            Field(description="Maximum release year", examples=[2024]),
+            Field(
+                default=None,
+                description="Maximum release year",
+                examples=[2024],
+                json_schema_extra={"nullable": True, "type": "integer"},
+            ),
         ] = None,
         added_after: Annotated[
             int | None,
@@ -408,6 +418,24 @@ def register_media_library_tools(server: "PlexServer") -> None:
                 return media_helpers.summarize_media_items_for_llm(items)
             return items
 
+        def _append_range_condition(
+            conditions: list[models.FieldCondition],
+            key: str,
+            *,
+            gte: int | None,
+            lte: int | None,
+        ) -> None:
+            if gte is None and lte is None:
+                return
+            range_kwargs: dict[str, int] = {}
+            if gte is not None:
+                range_kwargs["gte"] = gte
+            if lte is not None:
+                range_kwargs["lte"] = lte
+            conditions.append(
+                models.FieldCondition(key=key, range=models.Range(**range_kwargs))
+            )
+
         vector_queries: list[tuple[str, models.Document]] = []
         positive_point_ids: list[Any] = []
         similar_identifiers = _listify(similar_to)
@@ -459,22 +487,10 @@ def register_media_library_tools(server: "PlexServer") -> None:
             must.append(
                 models.FieldCondition(key="year", match=models.MatchValue(value=year))
             )
-        if year_from is not None or year_to is not None:
-            rng: dict[str, int] = {}
-            if year_from is not None:
-                rng["gte"] = year_from
-            if year_to is not None:
-                rng["lte"] = year_to
-            must.append(models.FieldCondition(key="year", range=models.Range(**rng)))
-        if added_after is not None or added_before is not None:
-            rng_at: dict[str, int] = {}
-            if added_after is not None:
-                rng_at["gte"] = added_after
-            if added_before is not None:
-                rng_at["lte"] = added_before
-            must.append(
-                models.FieldCondition(key="added_at", range=models.Range(**rng_at))
-            )
+        _append_range_condition(must, "year", gte=year_from, lte=year_to)
+        _append_range_condition(
+            must, "added_at", gte=added_after, lte=added_before
+        )
 
         for actor in _listify(actors):
             condition = models.FieldCondition(
