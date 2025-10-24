@@ -4,6 +4,8 @@ ARG CUDA_TAG=12.4.1-cudnn-runtime-ubuntu22.04
 FROM ghcr.io/astral-sh/uv:0.4.27 AS uvbin
 
 # -------------------- Builder --------------------
+ARG CUDA_TAG=12.4.1-cudnn-runtime-ubuntu22.04
+
 FROM nvidia/cuda:${CUDA_TAG} AS builder
 ENV DEBIAN_FRONTEND=noninteractive
 
@@ -55,6 +57,8 @@ RUN set -eux; \
     test -x /opt/venv/bin/python
 
 # -------------------- Runtime --------------------
+ARG CUDA_TAG=12.4.1-cudnn-runtime-ubuntu22.04
+
 FROM nvidia/cuda:${CUDA_TAG} AS runtime
 ENV DEBIAN_FRONTEND=noninteractive
 
