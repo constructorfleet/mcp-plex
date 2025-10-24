@@ -12,3 +12,13 @@ docs/
 tests/
 *.log
 __MACOSX
+.git
+.venv
+**/__pycache__/
+**/*.pyc
+.mypy_cache
+.pytest_cache
+.ruff_cache
+dist
+build
+.DS_Store
