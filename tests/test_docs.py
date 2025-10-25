@@ -19,6 +19,12 @@ IMDB_RETRY_DOC_TOKENS = (
     "Conservative retry policy",
 )
 
+PLEX_FIXTURE_DOC_TOKENS = (
+    "PLEX_CLIENTS_FILE",
+    "plex_clients_file",
+    "Plex clients fixture",
+)
+
 
 
 def _read_readme_text() -> str:
@@ -41,3 +47,9 @@ def test_readme_documents_imdb_retry_controls(token: str) -> None:
 def test_readme_documents_ruff_check_command() -> None:
     content = _read_readme_text()
     assert "uv run ruff check ." in content
+
+
+@pytest.mark.parametrize("token", PLEX_FIXTURE_DOC_TOKENS)
+def test_readme_documents_plex_clients_fixture_settings(token: str) -> None:
+    content = _read_readme_text()
+    assert token in content
