@@ -9,6 +9,7 @@ import json
 import logging
 from pathlib import Path
 import uuid
+from functools import wraps
 from typing import Annotated, Any, Callable, Mapping, Sequence, TYPE_CHECKING, cast
 
 from fastapi import FastAPI
@@ -17,6 +18,7 @@ from fastapi.openapi.utils import get_openapi
 from fastmcp.prompts import Message
 from fastmcp.server import FastMCP
 from fastmcp.server.context import Context as FastMCPContext
+from plexapi import base as plex_base
 from plexapi.exceptions import PlexApiException
 from plexapi.server import PlexServer as PlexServerClient
 from plexapi.client import PlexClient
@@ -466,6 +468,76 @@ def _load_configured_plex_clients() -> list[PlexClient] | None:
         return [_build_configured_client(entry) for entry in raw_entries]
     except Exception as exc:  # pragma: no cover - surfaced in tests
         raise RuntimeError("Failed to parse configured Plex clients file") from exc
+
+
+def _configured_client_lookup() -> dict[str, PlexClient]:
+    """Return configured Plex clients indexed by normalized identifiers."""
+
+    clients = _load_configured_plex_clients()
+    if not clients:
+        return {}
+
+    lookup: dict[str, PlexClient] = {}
+    for client in clients:
+        machine_identifier = _normalize_session_identifier(
+            getattr(client, "machineIdentifier", None)
+        )
+        client_identifier = _normalize_session_identifier(
+            getattr(client, "clientIdentifier", None)
+        )
+        identifier = _normalize_session_identifier(getattr(client, "identifier", None))
+
+        for candidate in (machine_identifier, client_identifier, identifier):
+            if candidate and candidate not in lookup:
+                lookup[candidate] = client
+
+        if machine_identifier and client_identifier:
+            combined = f"{machine_identifier}:{client_identifier}"
+            if combined not in lookup:
+                lookup[combined] = client
+
+    return lookup
+
+
+def _get_configured_client(identifier: str | None) -> PlexClient | None:
+    """Return the configured Plex client matching the provided identifier."""
+
+    normalized = _normalize_session_identifier(identifier)
+    if not normalized:
+        return None
+    lookup = _configured_client_lookup()
+    if not lookup:
+        return None
+    return lookup.get(normalized)
+
+
+def _monkey_patch_plex_session_player() -> None:
+    """Monkey patch plexapi's PlexSession.player to use configured clients."""
+
+    descriptor = getattr(plex_base.PlexSession, "player", None)
+    if descriptor is None:
+        return
+    if getattr(descriptor, "_mcp_plex_patched", False):
+        return
+    original_func = getattr(descriptor, "func", None)
+    if original_func is None:
+        return
+
+    @wraps(original_func)
+    def _patched_player(self: Any) -> Any:
+        value = original_func(self)
+        if isinstance(value, str):
+            configured = _get_configured_client(value)
+            if configured is not None:
+                return configured
+        return value
+
+    patched = plex_base.cached_data_property(_patched_player)
+    setattr(patched, "_mcp_plex_patched", True)
+    setattr(patched, "_mcp_plex_original", descriptor)
+    setattr(patched, "_mcp_plex_original_func", original_func)
+    patched.__set_name__(plex_base.PlexSession, "player")
+    setattr(plex_base.PlexSession, "player", patched)
 
 
 def _parse_configured_clients_payload(
@@ -1222,6 +1294,10 @@ def _collect_session_players(session: PlexSession | Any) -> list[Any]:
     player = getattr(session, "player", None)
     if player is None:
         return []
+    if isinstance(player, str):
+        configured = _get_configured_client(player)
+        if configured is not None:
+            return [configured]
     return [player]
 
 
@@ -1630,6 +1706,8 @@ def _register_rest_endpoints() -> None:
 
 
 _register_rest_endpoints()
+
+_monkey_patch_plex_session_player()
 
 
 def main(argv: list[str] | None = None) -> None:
