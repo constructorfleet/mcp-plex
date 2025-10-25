@@ -15,6 +15,7 @@ from typing import Any
 import pytest
 from qdrant_client import models
 from starlette.testclient import TestClient
+from plexapi.exceptions import PlexApiException
 
 from mcp_plex import loader
 from mcp_plex import server as server_module
@@ -962,22 +963,26 @@ def test_playback_control_tools_send_commands(monkeypatch):
             "command": "pause",
             "media_type": "video",
             "player_capabilities": ["controller", "player"],
+            "success": True,
         }
         assert fake_plex._client.pause_calls == ["video"]
 
         resume_result = asyncio.run(server.resume_media.fn(player="Plex for Apple TV"))
         assert resume_result["command"] == "resume"
         assert resume_result["player"] == "Plex for Apple TV"
+        assert resume_result["success"] is True
         assert fake_plex._client.play_calls == ["video"]
 
         next_result = asyncio.run(server.next_media.fn(player="Plex for Apple TV"))
         assert next_result["command"] == "next"
+        assert next_result["success"] is True
         assert fake_plex._client.next_calls == ["video"]
 
         previous_result = asyncio.run(
             server.previous_media.fn(player="Plex for Apple TV")
         )
         assert previous_result["command"] == "previous"
+        assert previous_result["success"] is True
         assert fake_plex._client.previous_calls == ["video"]
 
         fastforward_result = asyncio.run(
@@ -985,10 +990,12 @@ def test_playback_control_tools_send_commands(monkeypatch):
         )
         assert fastforward_result["command"] == "fastforward"
         assert fastforward_result["media_type"] == "music"
+        assert fastforward_result["success"] is True
         assert fake_plex._client.forward_calls == ["music"]
 
         rewind_result = asyncio.run(server.rewind_media.fn(player="Plex for Apple TV"))
         assert rewind_result["command"] == "rewind"
+        assert rewind_result["success"] is True
         assert fake_plex._client.back_calls == ["video"]
 
         subtitle_result = asyncio.run(
@@ -1005,6 +1012,7 @@ def test_playback_control_tools_send_commands(monkeypatch):
             "subtitle_language": "spa",
             "subtitle_stream_id": 505,
             "player_capabilities": ["controller", "player"],
+            "success": True,
         }
         assert len(fake_plex._client.subtitle_calls) == 1
         subtitle_call = fake_plex._client.subtitle_calls[0]
@@ -1028,6 +1036,7 @@ def test_playback_control_tools_send_commands(monkeypatch):
         assert audio_result["player_capabilities"] == ["controller", "player"]
         assert audio_result["audio_channels"] == 6
         assert audio_result["audio_stream_id"] == 202
+        assert audio_result["success"] is True
         assert len(fake_plex._client.audio_calls) == 1
         audio_call = fake_plex._client.audio_calls[0]
         stream = audio_call["stream"]
@@ -1036,6 +1045,55 @@ def test_playback_control_tools_send_commands(monkeypatch):
         assert stream.language == "eng"
         assert stream.channels == 6
         assert audio_call["media_type"] == "video"
+
+
+def test_playback_control_reports_command_errors(monkeypatch):
+    monkeypatch.setenv("PLEX_URL", "http://plex.test:32400")
+    monkeypatch.setenv("PLEX_TOKEN", "token")
+
+    class FaultyClient:
+        def __init__(self) -> None:
+            self.machineIdentifier = "client-001"
+            self.clientIdentifier = "client-001"
+            self.title = "Plex for Apple TV"
+            self.provides = {"controller", "player"}
+            self.address = "127.0.0.1"
+            self.port = 32500
+
+        def pause(self, mtype: str = "video") -> None:  # noqa: ARG002 - plexapi parity
+            raise PlexApiException("Mock pause failure")
+
+    class FaultyPlex:
+        def __init__(self, baseurl: str, token: str) -> None:
+            assert baseurl.rstrip("/") == "http://plex.test:32400"
+            assert token == "token"
+            self._client = FaultyClient()
+
+        def clients(self) -> list[FaultyClient]:
+            return [self._client]
+
+        def sessions(self) -> list[Any]:
+            return []
+
+    with _load_server(monkeypatch) as server:
+        faulty_plex = FaultyPlex("http://plex.test:32400", "token")
+        monkeypatch.setattr(
+            server,
+            "PlexServerClient",
+            lambda baseurl, token: faulty_plex,
+        )
+        server._plex_client = None
+        server._plex_identity = None
+
+        result = asyncio.run(server.pause_media.fn(player="Plex for Apple TV"))
+        assert result == {
+            "player": "Plex for Apple TV",
+            "command": "pause",
+            "media_type": "video",
+            "player_capabilities": ["controller", "player"],
+            "success": False,
+            "error": "Mock pause failure",
+        }
 
 
 def test_set_subtitle_requires_language(monkeypatch):
