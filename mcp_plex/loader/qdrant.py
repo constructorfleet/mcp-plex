@@ -3,12 +3,16 @@
 from __future__ import annotations
 
 import asyncio
+import math
+import random
+import time
 import logging
 import warnings
-from typing import TYPE_CHECKING, Sequence, TypedDict
+from typing import TYPE_CHECKING, Iterable, List, Optional, Sequence, TypedDict
 
 from qdrant_client import models
 from qdrant_client.async_qdrant_client import AsyncQdrantClient
+from qdrant_client.http.models import WriteOrdering
 
 from ..common.types import AggregatedItem, JSONValue
 
@@ -280,27 +284,161 @@ def build_point(
     )
 
 
+def _chunk(seq: Sequence[models.PointStruct], size: int) -> Iterable[Sequence[models.PointStruct]]:
+    for i in range(0, len(seq), size):
+        yield seq[i : i + size]
+
+
+async def _upsert_batch(
+    client: AsyncQdrantClient,
+    collection: str,
+    batch: Sequence[models.PointStruct],
+    *,
+    max_retries: int,
+    initial_backoff_s: float,
+    retry_queue: Optional[asyncio.Queue[List[models.PointStruct]]],
+    batch_idx: int,
+    total_batches: int,
+) -> int:
+    """Returns number of points successfully upserted (len(batch) or 0 if handed to retry_queue)."""
+    attempt = 0
+    batch_list = list(batch)
+    while True:
+        try:
+            # Fast path: weak ordering, don't block the write pipeline
+            await client.upsert(
+                collection_name=collection,
+                points=batch_list,
+                wait=False,
+                ordering=WriteOrdering.WEAK,
+            )
+            return len(batch)
+        except Exception as e:
+            attempt += 1
+            if attempt > max_retries:
+                # Shove it to the retry queue and move on
+                if retry_queue is not None:
+                    try:
+                        await retry_queue.put(list(batch_list))
+                        logger.error(
+                            "Batch %d/%d permanently failed after %d attempts; queued for retry: %s",
+                            batch_idx,
+                            total_batches,
+                            attempt - 1,
+                            e,
+                        )
+                    except Exception:
+                        logger.exception("Failed to enqueue failed batch %d/%d", batch_idx, total_batches)
+                else:
+                    logger.exception(
+                        "Batch %d/%d permanently failed after %d attempts (no retry queue): %s",
+                        batch_idx,
+                        total_batches,
+                        attempt - 1,
+                        e,
+                    )
+                return 0
+
+            # Exponential backoff with jitter
+            sleep_s = (initial_backoff_s * (2 ** (attempt - 1))) * (0.5 + random.random())
+            # Cap backoff so we don't take a nap long enough to miss a birthday
+            sleep_s = min(sleep_s, 10.0)
+            logger.warning(
+                "Upsert batch %d/%d failed (attempt %d/%d): %s; backing off %.2fs",
+                batch_idx,
+                total_batches,
+                attempt,
+                max_retries,
+                e,
+                sleep_s,
+            )
+            await asyncio.sleep(sleep_s)
+
+
+async def _bounded_gather(coros, *, limit: int):
+    sem = asyncio.Semaphore(limit)
+
+    async def _runner(coro):
+        async with sem:
+            return await coro
+
+    return await asyncio.gather(*(_runner(c) for c in coros), return_exceptions=False)
+
+
 async def _upsert_in_batches(
     client: AsyncQdrantClient,
     collection_name: str,
     points: Sequence[models.PointStruct],
     *,
-    batch_size: int,
-    retry_queue: asyncio.Queue[list[models.PointStruct]] | None = None,
+    batch_size: int = 2000,
+    concurrency: int = 8,
+    max_retries: int = 4,
+    initial_backoff_s: float = 0.25,
+    retry_queue: Optional[asyncio.Queue[List[models.PointStruct]]] = None,
 ) -> None:
-    """Upsert points into Qdrant in batches, logging HTTP errors."""
+    """
+    High-throughput upsert:
+      - batches points
+      - runs upserts concurrently with weak ordering and wait=False
+      - retries transient failures with exponential backoff + jitter
+      - optionally pushes perma-failed batches to retry_queue
+    """
 
     total = len(points)
-    for i in range(0, total, batch_size):
-        batch = points[i : i + batch_size]
-        try:
-            await client.upsert(collection_name=collection_name, points=batch)
-        except Exception:
-            logger.exception("Failed to upsert batch %d-%d", i, i + len(batch))
-            if retry_queue is not None:
-                await retry_queue.put(list(batch))
-        else:
-            logger.info("Upserted %d/%d points", min(i + len(batch), total), total)
+    if total == 0:
+        logger.info("No points to upsert. Graceful idleness. Touch grass.")
+        return
+
+    batches = list(_chunk(points, batch_size))
+    total_batches = len(batches)
+    t0 = time.perf_counter()
+
+    # Submit tasks
+    tasks = [
+        _upsert_batch(
+            client,
+            collection_name,
+            batch,
+            max_retries=max_retries,
+            initial_backoff_s=initial_backoff_s,
+            retry_queue=retry_queue,
+            batch_idx=i + 1,
+            total_batches=total_batches,
+        )
+        for i, batch in enumerate(batches)
+    ]
+
+    # Concurrency with backpressure
+    completed_points = 0
+    for i in range(0, len(tasks), concurrency):
+        chunk = tasks[i : i + concurrency]
+        # Run a window of tasks
+        results = await _bounded_gather(chunk, limit=concurrency)
+        completed_points += sum(results)
+
+        done = min(i + concurrency, len(tasks))
+        pct = (done / total_batches) * 100
+        elapsed = time.perf_counter() - t0
+        rps = (completed_points / elapsed) if elapsed > 0 else math.inf
+        logger.info(
+            "Upsert progress: %d/%d batches (%.1f%%), %d/%d points, ~%.0f pts/s",
+            done,
+            total_batches,
+            pct,
+            completed_points,
+            total,
+            rps,
+        )
+
+    elapsed = time.perf_counter() - t0
+    rps = (completed_points / elapsed) if elapsed > 0 else math.inf
+    logger.info(
+        "Upsert complete: %d/%d points in %.2fs (%.0f pts/s).",
+        completed_points,
+        total,
+        elapsed,
+        rps,
+    )
 
 
 async def _process_qdrant_retry_queue(
