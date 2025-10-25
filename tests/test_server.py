@@ -962,22 +962,26 @@ def test_playback_control_tools_send_commands(monkeypatch):
             "command": "pause",
             "media_type": "video",
             "player_capabilities": ["controller", "player"],
+            "success": True,
         }
         assert fake_plex._client.pause_calls == ["video"]
 
         resume_result = asyncio.run(server.resume_media.fn(player="Plex for Apple TV"))
         assert resume_result["command"] == "resume"
         assert resume_result["player"] == "Plex for Apple TV"
+        assert resume_result["success"] is True
         assert fake_plex._client.play_calls == ["video"]
 
         next_result = asyncio.run(server.next_media.fn(player="Plex for Apple TV"))
         assert next_result["command"] == "next"
+        assert next_result["success"] is True
         assert fake_plex._client.next_calls == ["video"]
 
         previous_result = asyncio.run(
             server.previous_media.fn(player="Plex for Apple TV")
         )
         assert previous_result["command"] == "previous"
+        assert previous_result["success"] is True
         assert fake_plex._client.previous_calls == ["video"]
 
         fastforward_result = asyncio.run(
@@ -985,10 +989,12 @@ def test_playback_control_tools_send_commands(monkeypatch):
         )
         assert fastforward_result["command"] == "fastforward"
         assert fastforward_result["media_type"] == "music"
+        assert fastforward_result["success"] is True
         assert fake_plex._client.forward_calls == ["music"]
 
         rewind_result = asyncio.run(server.rewind_media.fn(player="Plex for Apple TV"))
         assert rewind_result["command"] == "rewind"
+        assert rewind_result["success"] is True
         assert fake_plex._client.back_calls == ["video"]
 
         subtitle_result = asyncio.run(
@@ -1005,6 +1011,7 @@ def test_playback_control_tools_send_commands(monkeypatch):
             "subtitle_language": "spa",
             "subtitle_stream_id": 505,
             "player_capabilities": ["controller", "player"],
+            "success": True,
         }
         assert len(fake_plex._client.subtitle_calls) == 1
         subtitle_call = fake_plex._client.subtitle_calls[0]
@@ -1028,6 +1035,7 @@ def test_playback_control_tools_send_commands(monkeypatch):
         assert audio_result["player_capabilities"] == ["controller", "player"]
         assert audio_result["audio_channels"] == 6
         assert audio_result["audio_stream_id"] == 202
+        assert audio_result["success"] is True
         assert len(fake_plex._client.audio_calls) == 1
         audio_call = fake_plex._client.audio_calls[0]
         stream = audio_call["stream"]

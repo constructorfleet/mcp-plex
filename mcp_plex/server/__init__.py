@@ -1143,12 +1143,14 @@ async def queue_media(
 def _player_response(
     player: PlexPlayerMetadata, *, command: str, media_type: str | None
 ) -> dict[str, Any]:
+    display_name = player.get("display_name")
     capabilities = sorted(player.get("provides", set()))
     return {
-        "player": player.get("display_name"),
+        "player": display_name,
         "command": command,
         "media_type": media_type,
         "player_capabilities": capabilities,
+        "success": True,
     }
 
 
