@@ -25,7 +25,6 @@ from mcp_plex.loader.qdrant import (
     _ensure_collection,
     _process_qdrant_retry_queue,
     _resolve_dense_model_params,
-    _upsert_in_batches,
     build_point,
 )
 from mcp_plex.loader.pipeline.channels import IMDbRetryQueue
@@ -259,54 +258,86 @@ def test_process_imdb_retry_queue_requeues(monkeypatch):
     assert queue.snapshot() == ["tt0111161"]
 
 
-def test_upsert_in_batches_handles_errors():
+def test_upsert_batch_retries_transient_failures(monkeypatch):
     class DummyClient:
         def __init__(self):
-            self.calls = 0
+            self.calls: list[dict[str, object]] = []
 
         async def upsert(self, collection_name: str, points, **kwargs):
-            self.calls += 1
-            if self.calls == 2:
+            self.calls.append({"collection": collection_name, "kwargs": kwargs, "points": points})
+            if len(self.calls) < 3:
                 raise httpx.ConnectError("fail", request=httpx.Request("POST", ""))
-
-    client = DummyClient()
-    points = [models.PointStruct(id=i, vector={}, payload={}) for i in range(3)]
-    asyncio.run(
-        _upsert_in_batches(
-            client,
-            "c",
-            points,
-            batch_size=1,
-        )
-    )
-    assert client.calls == 3
-
-
-def test_upsert_in_batches_enqueues_retry_batches():
-    class DummyClient:
-        def __init__(self):
-            self.calls = 0
-
-        async def upsert(self, collection_name: str, points, **kwargs):
-            self.calls += 1
-            if self.calls == 1:
-                raise httpx.ReadTimeout("timeout", request=httpx.Request("POST", ""))
 
     client = DummyClient()
     points = [models.PointStruct(id=i, vector={}, payload={}) for i in range(2)]
     retry_queue: asyncio.Queue[list[models.PointStruct]] = asyncio.Queue()
+    sleeps: list[float] = []
+
+    async def fake_sleep(delay: float) -> None:
+        sleeps.append(delay)
+
+    monkeypatch.setattr(loader_qdrant.asyncio, "sleep", fake_sleep)
+    monkeypatch.setattr(loader_qdrant.random, "random", lambda: 0.5)
 
     async def main() -> None:
-        await _upsert_in_batches(
+        result = await loader_qdrant._upsert_batch(
             client,
             "collection",
             points,
-            batch_size=1,
+            max_retries=3,
+            initial_backoff_s=0.1,
             retry_queue=retry_queue,
+            batch_idx=1,
+            total_batches=1,
         )
+        assert result == len(points)
 
     asyncio.run(main())
+
+    assert [call["kwargs"]["wait"] for call in client.calls] == [False, False, False]
+    assert [call["kwargs"]["ordering"] for call in client.calls] == [loader_qdrant.WriteOrdering.WEAK] * 3
+    assert sleeps == [0.1, 0.2]
+    assert retry_queue.empty()
+
+
+def test_upsert_batch_queues_permanent_failures(monkeypatch):
+    class DummyClient:
+        def __init__(self):
+            self.calls = 0
+
+        async def upsert(self, collection_name: str, points, **kwargs):
+            self.calls += 1
+            raise httpx.ReadTimeout("timeout", request=httpx.Request("POST", ""))
+
+    client = DummyClient()
+    points = [models.PointStruct(id=i, vector={}, payload={}) for i in range(3)]
+    retry_queue: asyncio.Queue[list[models.PointStruct]] = asyncio.Queue()
+
+    async def fake_sleep(_: float) -> None:
+        pass
+
+    monkeypatch.setattr(loader_qdrant.asyncio, "sleep", fake_sleep)
+    monkeypatch.setattr(loader_qdrant.random, "random", lambda: 0.5)
+
+    async def main() -> None:
+        result = await loader_qdrant._upsert_batch(
+            client,
+            "collection",
+            points,
+            max_retries=2,
+            initial_backoff_s=0.05,
+            retry_queue=retry_queue,
+            batch_idx=1,
+            total_batches=1,
+        )
+        assert result == 0
+
+    asyncio.run(main())
+
+    assert client.calls == 3
     assert retry_queue.qsize() == 1
+    queued_batch = retry_queue.get_nowait()
+    assert [point.id for point in queued_batch] == [point.id for point in points]
 
 
 def test_process_qdrant_retry_queue_retries_batches(monkeypatch):

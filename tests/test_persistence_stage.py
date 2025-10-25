@@ -139,7 +139,11 @@ def test_persistence_stage_populates_retry_queue_on_failure() -> None:
 
         class _FailingClient:
             async def upsert(
-                self, *, collection_name: str, points: list[list[int]]
+                self,
+                *,
+                collection_name: str,
+                points: list[list[int]],
+                **kwargs: object,
             ) -> None:
                 raise RuntimeError("boom")
 
@@ -149,6 +153,8 @@ def test_persistence_stage_populates_retry_queue_on_failure() -> None:
                 "media-items",
                 batch,
                 batch_size=1,
+                max_retries=1,
+                initial_backoff_s=0.0,
                 retry_queue=retry_queue,
             )
 
