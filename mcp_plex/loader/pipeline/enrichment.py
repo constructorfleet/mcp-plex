@@ -338,6 +338,7 @@ class EnrichmentStage:
         imdb_batch_limit: int = 5,
         imdb_requests_per_window: int | None = None,
         imdb_window_seconds: float = 1.0,
+        idle_retry_delay: float = 0.05,
         logger: logging.Logger | None = None,
     ) -> None:
         self._http_client_factory: HTTPClientFactory = http_client_factory
@@ -363,6 +364,9 @@ class EnrichmentStage:
             limit=imdb_requests_per_window,
             interval=float(imdb_window_seconds),
         )
+        if idle_retry_delay < 0:
+            raise ValueError("idle_retry_delay must be non-negative")
+        self._idle_retry_delay = float(idle_retry_delay)
         requested_movie_batch_size = require_positive(
             int(movie_batch_size), name="movie_batch_size"
         )
@@ -386,6 +390,12 @@ class EnrichmentStage:
 
         return self._imdb_retry_queue
 
+    @property
+    def idle_retry_delay(self) -> float:
+        """Seconds waited after idle retry cycles to yield the event loop."""
+
+        return self._idle_retry_delay
+
     async def run(self) -> None:
         """Execute the enrichment stage."""
 
@@ -401,6 +411,7 @@ class EnrichmentStage:
                 got_item = True
             except asyncio.QueueEmpty:
                 if await self._retry_imdb_batches():
+                    await self._idle_pause()
                     continue
                 batch = await self._ingest_queue.get()
                 got_item = True
@@ -448,6 +459,15 @@ class EnrichmentStage:
             "Enrichment stage completed; persistence sentinel emitted (retry queue=%d).",
             self._imdb_retry_queue.qsize(),
         )
+
+    async def _idle_pause(self) -> None:
+        """Yield control after retry work to avoid busy-looping when idle."""
+
+        delay = self._idle_retry_delay
+        if delay <= 0:
+            await asyncio.sleep(0)
+            return
+        await asyncio.sleep(delay)
 
     async def _handle_movie_batch(self, batch: MovieBatch) -> None:
         """Enrich and forward Plex movie batches to the persistence stage."""

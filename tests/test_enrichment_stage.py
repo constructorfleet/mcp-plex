@@ -1032,6 +1032,48 @@ def test_retry_imdb_batches_returns_false_when_no_progress(monkeypatch):
     assert pending and pending[0].plex.rating_key == "1"
 
 
+def test_enrichment_stage_yields_after_retry_progress():
+    pause_calls: list[None] = []
+
+    async def scenario() -> list[None]:
+        ingest_queue: asyncio.Queue = asyncio.Queue()
+        persistence_queue: asyncio.Queue = asyncio.Queue()
+        retry_queue = IMDbRetryQueue(["tt-idle"])
+
+        stage = EnrichmentStage(
+            http_client_factory=lambda: _StubHTTPClient(),
+            tmdb_api_key="",
+            ingest_queue=ingest_queue,
+            persistence_queue=persistence_queue,
+            imdb_retry_queue=retry_queue,
+            movie_batch_size=2,
+            episode_batch_size=2,
+        )
+
+        calls = 0
+
+        async def fake_retry() -> bool:
+            nonlocal calls
+            calls += 1
+            return calls == 1
+
+        async def fake_pause() -> None:
+            pause_calls.append(None)
+            await asyncio.sleep(0)
+
+        stage._retry_imdb_batches = fake_retry  # type: ignore[assignment]
+        stage._idle_pause = fake_pause  # type: ignore[attr-defined]
+
+        run_task = asyncio.create_task(stage.run())
+        await asyncio.sleep(0)
+        await ingest_queue.put(INGEST_DONE)
+        await run_task
+        return pause_calls
+
+    pauses = asyncio.run(scenario())
+    assert len(pauses) >= 1
+
+
 class _FakeResponse:
     def __init__(self, status_code: int, payload: dict[str, Any]):
         self.status_code = status_code
