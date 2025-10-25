@@ -9,6 +9,7 @@ import json
 import logging
 from pathlib import Path
 import uuid
+from functools import wraps
 from typing import Annotated, Any, Callable, Mapping, Sequence, TYPE_CHECKING, cast
 
 from fastapi import FastAPI
@@ -17,6 +18,7 @@ from fastapi.openapi.utils import get_openapi
 from fastmcp.prompts import Message
 from fastmcp.server import FastMCP
 from fastmcp.server.context import Context as FastMCPContext
+from plexapi import base as plex_base
 from plexapi.exceptions import PlexApiException
 from plexapi.server import PlexServer as PlexServerClient
 from plexapi.client import PlexClient
@@ -507,6 +509,35 @@ def _get_configured_client(identifier: str | None) -> PlexClient | None:
     if not lookup:
         return None
     return lookup.get(normalized)
+
+
+def _monkey_patch_plex_session_player() -> None:
+    """Monkey patch plexapi's PlexSession.player to use configured clients."""
+
+    descriptor = getattr(plex_base.PlexSession, "player", None)
+    if descriptor is None:
+        return
+    if getattr(descriptor, "_mcp_plex_patched", False):
+        return
+    original_func = getattr(descriptor, "func", None)
+    if original_func is None:
+        return
+
+    @wraps(original_func)
+    def _patched_player(self: Any) -> Any:
+        value = original_func(self)
+        if isinstance(value, str):
+            configured = _get_configured_client(value)
+            if configured is not None:
+                return configured
+        return value
+
+    patched = plex_base.cached_data_property(_patched_player)
+    setattr(patched, "_mcp_plex_patched", True)
+    setattr(patched, "_mcp_plex_original", descriptor)
+    setattr(patched, "_mcp_plex_original_func", original_func)
+    patched.__set_name__(plex_base.PlexSession, "player")
+    setattr(plex_base.PlexSession, "player", patched)
 
 
 def _parse_configured_clients_payload(
@@ -1675,6 +1706,8 @@ def _register_rest_endpoints() -> None:
 
 
 _register_rest_endpoints()
+
+_monkey_patch_plex_session_player()
 
 
 def main(argv: list[str] | None = None) -> None:

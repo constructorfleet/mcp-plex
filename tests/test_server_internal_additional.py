@@ -8,6 +8,7 @@ from types import SimpleNamespace
 
 import pytest
 from plexapi.exceptions import PlexApiException
+from plexapi import base as plex_base
 
 from mcp_plex import server as server_module
 from mcp_plex.server import PlexServer
@@ -260,6 +261,53 @@ def test_collect_session_players_uses_configured_client_for_identifier(
     assert getattr(selected, "identifier", None) == "client-99"
     assert getattr(selected, "machineIdentifier", None) == "machine-42"
     assert getattr(selected, "title", None) == "Movie Nook"
+
+
+def test_plex_session_player_returns_configured_client(monkeypatch, tmp_path):
+    payload = [
+        {
+            "machineIdentifier": "machine-42",
+            "clientIdentifier": "client-99",
+            "name": "Movie Nook",
+            "host": "10.0.0.9",
+            "port": 32400,
+        }
+    ]
+    payload_path = tmp_path / "clients.json"
+    payload_path.write_text(json.dumps(payload), encoding="utf-8")
+
+    original_settings = server_module.server.settings
+    updated_settings = original_settings.model_copy(
+        update={"plex_clients_file": payload_path}
+    )
+    monkeypatch.setattr(server_module.server, "_settings", updated_settings)
+
+    created: list[SimpleNamespace] = []
+
+    class StubPlexClient(SimpleNamespace):
+        def __init__(self, **kwargs):
+            created.append(SimpleNamespace(**kwargs))
+            super().__init__(**kwargs)
+
+    monkeypatch.setattr(server_module, "PlexClient", StubPlexClient)
+
+    class DummySession(plex_base.PlexSession):
+        def __init__(self):
+            self._data = object()
+
+        def findItem(self, data, etag=None, **_kwargs):
+            return "client-99"
+
+    try:
+        session = DummySession()
+        player = session.player
+    finally:
+        monkeypatch.setattr(server_module.server, "_settings", original_settings)
+
+    assert isinstance(player, StubPlexClient)
+    assert getattr(player, "identifier", None) == "client-99"
+    assert getattr(player, "machineIdentifier", None) == "machine-42"
+    assert created
 
 
 def test_match_player_skips_blank_candidates():
