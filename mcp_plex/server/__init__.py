@@ -7,6 +7,7 @@ import importlib.metadata
 import inspect
 import json
 import logging
+from pathlib import Path
 import uuid
 from typing import Annotated, Any, Callable, Mapping, Sequence, TYPE_CHECKING, cast
 
@@ -30,8 +31,10 @@ from pydantic import BaseModel, Field, create_model
 from qdrant_client.async_qdrant_client import AsyncQdrantClient
 from starlette.requests import Request
 from starlette.responses import JSONResponse, PlainTextResponse, Response
+from xml.etree import ElementTree
 
 from rapidfuzz import fuzz, process
+import yaml
 
 from ..common.cache import MediaCache
 from ..common.types import JSONValue
@@ -440,15 +443,199 @@ async def _fetch_plex_identity() -> dict[str, Any]:
     return server._plex_identity
 
 
+def _load_configured_plex_clients() -> list[PlexClient] | None:
+    """Return Plex clients defined via the configured fixture file."""
+
+    path_value = server.settings.plex_clients_file
+    if not path_value:
+        return None
+    path = Path(path_value)
+    try:
+        data = path.read_text(encoding="utf-8")
+    except FileNotFoundError as exc:  # pragma: no cover - executed via tests
+        raise RuntimeError(
+            f"Configured Plex clients file '{path}' does not exist"
+        ) from exc
+    except OSError as exc:  # pragma: no cover - executed via tests
+        raise RuntimeError(
+            f"Failed to read configured Plex clients file '{path}'"
+        ) from exc
+
+    try:
+        raw_entries = _parse_configured_clients_payload(path, data)
+        return [_build_configured_client(entry) for entry in raw_entries]
+    except Exception as exc:  # pragma: no cover - surfaced in tests
+        raise RuntimeError("Failed to parse configured Plex clients file") from exc
+
+
+def _parse_configured_clients_payload(
+    path: Path, payload: str
+) -> list[Mapping[str, Any]]:
+    """Parse fixture payload into mapping entries."""
+
+    suffix = path.suffix.lower()
+    if suffix in {".yaml", ".yml"}:
+        loaded = yaml.safe_load(payload) or {}
+    elif suffix == ".json":
+        loaded = json.loads(payload)
+    else:
+        return _parse_configured_clients_xml(payload)
+    return _normalize_configured_clients_data(loaded)
+
+
+def _parse_configured_clients_xml(payload: str) -> list[Mapping[str, Any]]:
+    """Return client entries from an XML payload."""
+
+    root = ElementTree.fromstring(payload)
+    servers: list[Mapping[str, Any]] = []
+    for server_element in root.findall(".//Server"):
+        entry: dict[str, Any] = dict(server_element.attrib)
+        xml_aliases = [
+            alias_element.text
+            for alias_element in server_element.findall("Alias")
+        ]
+        aliases = _normalize_alias_values(xml_aliases)
+        if aliases:
+            entry["aliases"] = aliases
+        servers.append(entry)
+    return servers
+
+
+def _normalize_configured_clients_data(
+    payload: Any,
+) -> list[Mapping[str, Any]]:
+    """Normalize JSON/YAML payloads into mapping entries."""
+
+    if isinstance(payload, Mapping):
+        if "MediaContainer" in payload:
+            return _normalize_configured_clients_data(payload["MediaContainer"])
+        if "Server" in payload:
+            return _normalize_configured_clients_data(payload["Server"])
+        return [value for value in payload.values() if isinstance(value, Mapping)]
+    if isinstance(payload, Sequence) and not isinstance(payload, (str, bytes, bytearray)):
+        normalized: list[Mapping[str, Any]] = []
+        for item in payload:
+            if isinstance(item, Mapping):
+                normalized.append(item)
+        return normalized
+    return []
+
+
+def _build_configured_client(entry: Mapping[str, Any]) -> PlexClient:
+    """Construct a Plex client instance from fixture data."""
+
+    def _normalize_value(key: str) -> str | None:
+        value = entry.get(key)
+        if value is None:
+            return None
+        value_str = str(value).strip()
+        return value_str or None
+
+    machine_identifier = _normalize_value("machineIdentifier")
+    client_identifier = _normalize_value("clientIdentifier")
+    identifier = (
+        _normalize_value("identifier")
+        or client_identifier
+        or machine_identifier
+    )
+    host_value = _normalize_value("host")
+    address = _normalize_value("address") or host_value
+    scheme = _normalize_value("scheme") or "http"
+    port_value = entry.get("port") or entry.get("portNumber")
+    port: int | None
+    if isinstance(port_value, int):
+        port = port_value
+    else:
+        try:
+            port = int(str(port_value).strip()) if port_value is not None else None
+        except ValueError:
+            port = None
+    baseurl = _normalize_value("baseurl")
+    if not baseurl and address:
+        address_part = address
+        if port is not None:
+            address_part = f"{address_part}:{port}"
+        baseurl = f"{scheme}://{address_part}"
+
+    token = _normalize_value("token") or server.settings.plex_token
+    plex_client = PlexClient(
+        baseurl=baseurl,
+        identifier=identifier,
+        token=token,
+        connect=False,
+    )
+
+    def _assign(attr: str, value: Any) -> None:
+        if value is not None:
+            setattr(plex_client, attr, value)
+
+    _assign("machineIdentifier", machine_identifier)
+    _assign("clientIdentifier", client_identifier)
+    _assign("address", address)
+    _assign("host", host_value)
+    _assign("port", port)
+    _assign("protocol", _normalize_value("protocol"))
+    _assign("protocolVersion", _normalize_value("protocolVersion"))
+    _assign("product", _normalize_value("product"))
+    _assign("deviceClass", _normalize_value("deviceClass"))
+    title = _normalize_value("title") or _normalize_value("name")
+    _assign("title", title)
+    _assign("name", title)
+    provides = entry.get("protocolCapabilities") or entry.get("provides")
+    if isinstance(provides, (list, tuple, set)):
+        provides_str = ",".join(
+            str(capability).strip()
+            for capability in provides
+            if str(capability).strip()
+        )
+    else:
+        provides_str = str(provides).strip() if provides else ""
+    _assign("provides", provides_str)
+
+    aliases = _normalize_alias_values(
+        entry.get("aliases") or entry.get("Alias") or entry.get("alias")
+    )
+    if aliases:
+        setattr(plex_client, "aliases", tuple(aliases))
+
+    return plex_client
+
+
+def _normalize_alias_values(raw_aliases: Any) -> list[str]:
+    """Return a list of normalized alias strings."""
+
+    if raw_aliases is None:
+        return []
+    if isinstance(raw_aliases, str):
+        alias_value = raw_aliases.strip()
+        return [alias_value] if alias_value else []
+    if isinstance(raw_aliases, Sequence) and not isinstance(
+        raw_aliases, (str, bytes, bytearray)
+    ):
+        normalized: list[str] = []
+        for alias in raw_aliases:
+            if alias is None:
+                continue
+            alias_text = str(alias).strip()
+            if alias_text and alias_text not in normalized:
+                normalized.append(alias_text)
+        return normalized
+    return []
+
+
 async def _get_plex_players() -> list[PlexPlayerMetadata]:
     """Return Plex players available for playback commands."""
 
-    plex_client = await _get_plex_client()
+    configured_clients = _load_configured_plex_clients()
+    if configured_clients is not None:
+        raw_clients = configured_clients
+    else:
+        plex_client = await _get_plex_client()
 
-    def _load_clients() -> list[Any]:
-        return list(plex_client.clients())
+        def _load_clients() -> list[Any]:
+            return list(plex_client.clients())
 
-    raw_clients = await asyncio.to_thread(_load_clients)
+        raw_clients = await asyncio.to_thread(_load_clients)
     aliases: PlexPlayerAliasMap = server.settings.plex_player_aliases
     reverse_aliases: dict[str, list[str]] = {}
     for alias_key, alias_values in aliases.items():
@@ -501,6 +688,13 @@ async def _get_plex_players() -> list[PlexPlayerMetadata]:
                 _add_alias(alias)
             for alias in reverse_aliases.get(identifier, []):
                 _add_alias(alias)
+
+        for alias in getattr(client, "aliases", ()):  # type: ignore[arg-type]
+            if alias is None:
+                continue
+            alias_str = str(alias).strip()
+            if alias_str:
+                _add_alias(alias_str)
 
         _collect_alias(machine_id)
         _collect_alias(client_id)

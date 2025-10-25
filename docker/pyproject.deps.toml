@@ -1,12 +1,13 @@
 [project]
 name = "mcp-plex"
-version = "2.1.1"
+version = "2.1.2"
 requires-python = ">=3.11,<3.13"
 dependencies = [
   "fastmcp>=2.11.2",
   "fastapi>=0.115.0",
   "pydantic>=2.11.7",
   "plexapi>=4.17.0",
+  "PyYAML>=6.0.2",
   "qdrant-client[fastembed-gpu]>=1.15.1",
   "rapidfuzz>=3.13.0",
   "scikit-learn>=1.7.1",

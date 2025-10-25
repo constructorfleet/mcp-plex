@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import json
 from collections.abc import Mapping, Sequence
+from pathlib import Path
 from typing import Any
 
 from pydantic import AnyHttpUrl, Field, field_validator
@@ -43,6 +44,9 @@ class Settings(BaseSettings):
     plex_token: str | None = Field(default=None, validation_alias="PLEX_TOKEN")
     plex_player_aliases: PlexPlayerAliasMap = Field(
         default_factory=dict, validation_alias="PLEX_PLAYER_ALIASES"
+    )
+    plex_clients_file: Path | None = Field(
+        default=None, validation_alias="PLEX_CLIENTS_FILE"
     )
     recommend_user: str | None = Field(
         default=None, validation_alias="PLEX_RECOMMEND_USER"
