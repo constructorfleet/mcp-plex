@@ -15,6 +15,7 @@ from typing import Any
 import pytest
 from qdrant_client import models
 from starlette.testclient import TestClient
+from plexapi.exceptions import PlexApiException
 
 from mcp_plex import loader
 from mcp_plex import server as server_module
@@ -1044,6 +1045,55 @@ def test_playback_control_tools_send_commands(monkeypatch):
         assert stream.language == "eng"
         assert stream.channels == 6
         assert audio_call["media_type"] == "video"
+
+
+def test_playback_control_reports_command_errors(monkeypatch):
+    monkeypatch.setenv("PLEX_URL", "http://plex.test:32400")
+    monkeypatch.setenv("PLEX_TOKEN", "token")
+
+    class FaultyClient:
+        def __init__(self) -> None:
+            self.machineIdentifier = "client-001"
+            self.clientIdentifier = "client-001"
+            self.title = "Plex for Apple TV"
+            self.provides = {"controller", "player"}
+            self.address = "127.0.0.1"
+            self.port = 32500
+
+        def pause(self, mtype: str = "video") -> None:  # noqa: ARG002 - plexapi parity
+            raise PlexApiException("Mock pause failure")
+
+    class FaultyPlex:
+        def __init__(self, baseurl: str, token: str) -> None:
+            assert baseurl.rstrip("/") == "http://plex.test:32400"
+            assert token == "token"
+            self._client = FaultyClient()
+
+        def clients(self) -> list[FaultyClient]:
+            return [self._client]
+
+        def sessions(self) -> list[Any]:
+            return []
+
+    with _load_server(monkeypatch) as server:
+        faulty_plex = FaultyPlex("http://plex.test:32400", "token")
+        monkeypatch.setattr(
+            server,
+            "PlexServerClient",
+            lambda baseurl, token: faulty_plex,
+        )
+        server._plex_client = None
+        server._plex_identity = None
+
+        result = asyncio.run(server.pause_media.fn(player="Plex for Apple TV"))
+        assert result == {
+            "player": "Plex for Apple TV",
+            "command": "pause",
+            "media_type": "video",
+            "player_capabilities": ["controller", "player"],
+            "success": False,
+            "error": "Mock pause failure",
+        }
 
 
 def test_set_subtitle_requires_language(monkeypatch):

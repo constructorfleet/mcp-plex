@@ -939,6 +939,16 @@ async def _resolve_player_entry(query: str) -> PlexPlayerMetadata:
     return _match_player(query, players)
 
 
+class PlayerCommandError(RuntimeError):
+    """Error raised when a Plex player command cannot be completed."""
+
+    def __init__(
+        self, message: str, *, player: PlexPlayerMetadata | None = None
+    ) -> None:
+        super().__init__(message)
+        self.player = player
+
+
 def _ensure_player_client(player: PlexPlayerMetadata) -> PlexClient:
     """Return the Plex client object for the resolved player."""
 
@@ -960,13 +970,20 @@ async def _invoke_player_method(
 ) -> PlexPlayerMetadata:
     """Execute a Plex client method and return the resolved player metadata."""
 
-    player = await _resolve_player_entry(player_query)
-    plex_client = _ensure_player_client(player)
+    try:
+        player = await _resolve_player_entry(player_query)
+    except ValueError as exc:
+        raise PlayerCommandError(str(exc)) from exc
+    try:
+        plex_client = _ensure_player_client(player)
+    except ValueError as exc:
+        raise PlayerCommandError(str(exc), player=player) from exc
     method = getattr(plex_client, method_name, None)
     if method is None:
         display_name = player.get("display_name") or player.get("name") or "player"
-        raise RuntimeError(
-            f"Player '{display_name}' does not support {method_name}"
+        raise PlayerCommandError(
+            f"Player '{display_name}' does not support {method_name}",
+            player=player,
         )
     kwargs: dict[str, Any] = {}
     if media_type is not None:
@@ -978,9 +995,11 @@ async def _invoke_player_method(
     try:
         await asyncio.to_thread(_call)
     except PlexApiException as exc:
-        raise RuntimeError(
-            f"Failed to execute {method_name} via plexapi"
-        ) from exc
+        message = str(exc).strip() or f"Failed to execute {method_name} via plexapi"
+        raise PlayerCommandError(message, player=player) from exc
+    except Exception as exc:
+        message = str(exc).strip() or f"Failed to execute {method_name}"
+        raise PlayerCommandError(message, player=player) from exc
     return player
 
 
@@ -1141,17 +1160,84 @@ async def queue_media(
 
 
 def _player_response(
-    player: PlexPlayerMetadata, *, command: str, media_type: str | None
+    player: PlexPlayerMetadata | str,
+    *,
+    command: str,
+    media_type: str | None,
+    success: bool = True,
+    error: str | None = None,
 ) -> dict[str, Any]:
-    display_name = player.get("display_name")
-    capabilities = sorted(player.get("provides", set()))
-    return {
+    if isinstance(player, Mapping):
+        display_name = (
+            player.get("display_name")
+            or player.get("name")
+            or player.get("product")
+            or "player"
+        )
+        capabilities = sorted(player.get("provides", set()))
+    else:
+        display_name = str(player)
+        capabilities = []
+    response: dict[str, Any] = {
         "player": display_name,
         "command": command,
         "media_type": media_type,
         "player_capabilities": capabilities,
-        "success": True,
+        "success": success,
     }
+    if error is not None:
+        response["error"] = error
+    return response
+
+
+def _player_failure_response(
+    player: PlexPlayerMetadata | str | None,
+    *,
+    fallback: PlayerIdentifier,
+    command: str,
+    media_type: str | None,
+    error: Exception,
+) -> dict[str, Any]:
+    message = str(error).strip() or error.__class__.__name__
+    target = player if player is not None else fallback
+    return _player_response(
+        target,
+        command=command,
+        media_type=media_type,
+        success=False,
+        error=message,
+    )
+
+
+async def _player_command_result(
+    player: PlayerIdentifier,
+    *,
+    method_name: str,
+    command: str,
+    media_type: MediaType,
+    args: Sequence[Any] = (),
+) -> dict[str, Any]:
+    try:
+        player_entry = await _invoke_player_method(
+            player, method_name, args=args, media_type=media_type
+        )
+    except PlayerCommandError as exc:
+        return _player_failure_response(
+            exc.player,
+            fallback=player,
+            command=command,
+            media_type=media_type,
+            error=exc,
+        )
+    except Exception as exc:
+        return _player_failure_response(
+            None,
+            fallback=player,
+            command=command,
+            media_type=media_type,
+            error=exc,
+        )
+    return _player_response(player_entry, command=command, media_type=media_type)
 
 
 @server.tool("pause-media")
@@ -1161,8 +1247,12 @@ async def pause_media(
 ) -> dict[str, Any]:
     """Pause playback on the selected Plex player."""
 
-    player_entry = await _invoke_player_method(player, "pause", media_type=media_type)
-    return _player_response(player_entry, command="pause", media_type=media_type)
+    return await _player_command_result(
+        player,
+        method_name="pause",
+        command="pause",
+        media_type=media_type,
+    )
 
 
 @server.tool("resume-media")
@@ -1172,8 +1262,12 @@ async def resume_media(
 ) -> dict[str, Any]:
     """Resume playback on the selected Plex player."""
 
-    player_entry = await _invoke_player_method(player, "play", media_type=media_type)
-    return _player_response(player_entry, command="resume", media_type=media_type)
+    return await _player_command_result(
+        player,
+        method_name="play",
+        command="resume",
+        media_type=media_type,
+    )
 
 
 @server.tool("next-media")
@@ -1183,8 +1277,12 @@ async def next_media(
 ) -> dict[str, Any]:
     """Skip to the next item on the selected Plex player."""
 
-    player_entry = await _invoke_player_method(player, "skipNext", media_type=media_type)
-    return _player_response(player_entry, command="next", media_type=media_type)
+    return await _player_command_result(
+        player,
+        method_name="skipNext",
+        command="next",
+        media_type=media_type,
+    )
 
 
 @server.tool("previous-media")
@@ -1194,10 +1292,12 @@ async def previous_media(
 ) -> dict[str, Any]:
     """Skip to the previous item on the selected Plex player."""
 
-    player_entry = await _invoke_player_method(
-        player, "skipPrevious", media_type=media_type
+    return await _player_command_result(
+        player,
+        method_name="skipPrevious",
+        command="previous",
+        media_type=media_type,
     )
-    return _player_response(player_entry, command="previous", media_type=media_type)
 
 
 @server.tool("fastforward-media")
@@ -1207,11 +1307,11 @@ async def fastforward_media(
 ) -> dict[str, Any]:
     """Step forward in the current item on the selected Plex player."""
 
-    player_entry = await _invoke_player_method(
-        player, "stepForward", media_type=media_type
-    )
-    return _player_response(
-        player_entry, command="fastforward", media_type=media_type
+    return await _player_command_result(
+        player,
+        method_name="stepForward",
+        command="fastforward",
+        media_type=media_type,
     )
 
 
@@ -1222,8 +1322,12 @@ async def rewind_media(
 ) -> dict[str, Any]:
     """Step backward in the current item on the selected Plex player."""
 
-    player_entry = await _invoke_player_method(player, "stepBack", media_type=media_type)
-    return _player_response(player_entry, command="rewind", media_type=media_type)
+    return await _player_command_result(
+        player,
+        method_name="stepBack",
+        command="rewind",
+        media_type=media_type,
+    )
 
 
 @server.tool("set-subtitle")
@@ -1240,31 +1344,54 @@ async def set_subtitle(
 ) -> dict[str, Any]:
     """Select the subtitle language for the current playback session."""
 
-    if not subtitle_language:
-        raise ValueError("subtitle language is required")
-    player_entry = await _resolve_player_entry(player)
-    stream = await _resolve_subtitle_stream(player_entry, subtitle_language)
-    plex_client = _ensure_player_client(player_entry)
-    method = getattr(plex_client, "setSubtitleStream", None)
-    if method is None:
-        display_name = (
-            player_entry.get("display_name")
-            or player_entry.get("name")
-            or "player"
-        )
-        raise RuntimeError(f"Player '{display_name}' does not support setSubtitleStream")
-    kwargs: dict[str, Any] = {}
-    if media_type is not None:
-        kwargs["mtype"] = media_type
-
-    def _call() -> None:
-        target = stream if stream is not None else subtitle_language
-        method(target, **kwargs)
-
+    player_entry: PlexPlayerMetadata | None = None
+    stream: SubtitleStream | None = None
     try:
-        await asyncio.to_thread(_call)
-    except PlexApiException as exc:
-        raise RuntimeError("Failed to execute setSubtitleStream via plexapi") from exc
+        if not subtitle_language:
+            raise PlayerCommandError("subtitle language is required")
+        player_entry = await _resolve_player_entry(player)
+        stream = await _resolve_subtitle_stream(player_entry, subtitle_language)
+        plex_client = _ensure_player_client(player_entry)
+        method = getattr(plex_client, "setSubtitleStream", None)
+        if method is None:
+            display_name = (
+                player_entry.get("display_name")
+                or player_entry.get("name")
+                or "player"
+            )
+            raise PlayerCommandError(
+                f"Player '{display_name}' does not support setSubtitleStream",
+                player=player_entry,
+            )
+        kwargs: dict[str, Any] = {}
+        if media_type is not None:
+            kwargs["mtype"] = media_type
+
+        def _call() -> None:
+            target = stream if stream is not None else subtitle_language
+            method(target, **kwargs)
+
+        try:
+            await asyncio.to_thread(_call)
+        except PlexApiException as exc:
+            message = str(exc).strip() or "Failed to execute setSubtitleStream via plexapi"
+            raise PlayerCommandError(message, player=player_entry) from exc
+    except PlayerCommandError as exc:
+        return _player_failure_response(
+            exc.player or player_entry,
+            fallback=player,
+            command="set-subtitle",
+            media_type=media_type,
+            error=exc,
+        )
+    except Exception as exc:
+        return _player_failure_response(
+            player_entry,
+            fallback=player,
+            command="set-subtitle",
+            media_type=media_type,
+            error=exc,
+        )
     response = _player_response(player_entry, command="set-subtitle", media_type=media_type)
     response["subtitle_language"] = subtitle_language
     if stream is not None:
@@ -1508,31 +1635,54 @@ async def set_audio(
 ) -> dict[str, Any]:
     """Select the audio language for the current playback session."""
 
-    if not audio_language:
-        raise ValueError("audio language is required")
-    player_entry = await _resolve_player_entry(player)
-    stream = await _resolve_audio_stream(player_entry, audio_language)
-    plex_client = _ensure_player_client(player_entry)
-    method = getattr(plex_client, "setAudioStream", None)
-    if method is None:
-        display_name = (
-            player_entry.get("display_name")
-            or player_entry.get("name")
-            or "player"
-        )
-        raise RuntimeError(f"Player '{display_name}' does not support setAudioStream")
-    kwargs: dict[str, Any] = {}
-    if media_type is not None:
-        kwargs["mtype"] = media_type
-
-    def _call() -> None:
-        target = stream if stream is not None else audio_language
-        method(target, **kwargs)
-
+    player_entry: PlexPlayerMetadata | None = None
+    stream: AudioStream | None = None
     try:
-        await asyncio.to_thread(_call)
-    except PlexApiException as exc:
-        raise RuntimeError("Failed to execute setAudioStream via plexapi") from exc
+        if not audio_language:
+            raise PlayerCommandError("audio language is required")
+        player_entry = await _resolve_player_entry(player)
+        stream = await _resolve_audio_stream(player_entry, audio_language)
+        plex_client = _ensure_player_client(player_entry)
+        method = getattr(plex_client, "setAudioStream", None)
+        if method is None:
+            display_name = (
+                player_entry.get("display_name")
+                or player_entry.get("name")
+                or "player"
+            )
+            raise PlayerCommandError(
+                f"Player '{display_name}' does not support setAudioStream",
+                player=player_entry,
+            )
+        kwargs: dict[str, Any] = {}
+        if media_type is not None:
+            kwargs["mtype"] = media_type
+
+        def _call() -> None:
+            target = stream if stream is not None else audio_language
+            method(target, **kwargs)
+
+        try:
+            await asyncio.to_thread(_call)
+        except PlexApiException as exc:
+            message = str(exc).strip() or "Failed to execute setAudioStream via plexapi"
+            raise PlayerCommandError(message, player=player_entry) from exc
+    except PlayerCommandError as exc:
+        return _player_failure_response(
+            exc.player or player_entry,
+            fallback=player,
+            command="set-audio",
+            media_type=media_type,
+            error=exc,
+        )
+    except Exception as exc:
+        return _player_failure_response(
+            player_entry,
+            fallback=player,
+            command="set-audio",
+            media_type=media_type,
+            error=exc,
+        )
     response = _player_response(player_entry, command="set-audio", media_type=media_type)
     response["audio_language"] = audio_language
     if stream is not None:
