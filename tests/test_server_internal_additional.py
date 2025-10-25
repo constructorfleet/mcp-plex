@@ -160,6 +160,64 @@ def test_get_plex_players_supports_alias_key_lookup(monkeypatch):
     assert matched is players[0]
 
 
+def test_get_plex_players_uses_fixture_when_available(monkeypatch, tmp_path):
+    xml_payload = """
+    <MediaContainer size="2">
+        <Server name="Apple TV" host="10.0.12.122" address="10.0.12.122" port="32500" machineIdentifier="243795C0-C395-4C64-AFD9-E12390C86595" version="8.45" protocol="plex" product="Plex for Apple TV" deviceClass="stb" protocolVersion="2" protocolCapabilities="playback,playqueues,timeline,provider-playback">
+            <Alias>Movie Room TV</Alias>
+            <Alias>Movie Room</Alias>
+        </Server>
+        <Server name="Apple TV" host="10.0.12.94" address="10.0.12.94" port="32500" machineIdentifier="243795C0-C395-4C64-AFD9-E12390C86212" version="8.45" protocol="plex" product="Plex for Apple TV" deviceClass="stb" protocolVersion="2" protocolCapabilities="playback,playqueues,timeline,provider-playback">
+            <Alias>Office AppleTV</Alias>
+            <Alias>Office TV</Alias>
+            <Alias>Office</Alias>
+        </Server>
+    </MediaContainer>
+    """
+    payload_path = tmp_path / "clients.xml"
+    payload_path.write_text(xml_payload, encoding="utf-8")
+
+    original_settings = server_module.server.settings
+    updated_settings = original_settings.model_copy(
+        update={"plex_clients_file": payload_path}
+    )
+    monkeypatch.setattr(server_module.server, "_settings", updated_settings)
+
+    calls: list[str] = []
+
+    async def _unexpected_call() -> None:
+        calls.append("clients")
+        return SimpleNamespace(clients=lambda: [])
+
+    monkeypatch.setattr(server_module, "_get_plex_client", _unexpected_call)
+
+    created: list[SimpleNamespace] = []
+
+    class StubPlexClient(SimpleNamespace):
+        def __init__(self, **kwargs):
+            created.append(SimpleNamespace(**kwargs))
+
+    monkeypatch.setattr(server_module, "PlexClient", StubPlexClient)
+
+    try:
+        players = asyncio.run(server_module._get_plex_players())
+    finally:
+        monkeypatch.setattr(server_module.server, "_settings", original_settings)
+
+    assert not calls
+    assert len(players) == 2
+    assert players[0]["display_name"] == "Movie Room TV"
+    assert players[0]["friendly_names"] == ["Movie Room TV", "Movie Room"]
+    assert players[0]["provides"] == {
+        "playback",
+        "playqueues",
+        "timeline",
+        "provider-playback",
+    }
+    assert created[0].baseurl == "http://10.0.12.122:32500"
+    assert created[0].identifier == "243795C0-C395-4C64-AFD9-E12390C86595"
+
+
 def test_match_player_skips_blank_candidates():
     player = {
         "display_name": "Living Room",

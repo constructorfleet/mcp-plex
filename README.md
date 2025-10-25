@@ -135,6 +135,13 @@ results:
   tuple syntax to align with the server CLI parser. Alias values may reference
   Plex display names as well as machine or client identifiers, and the server
   will resolve the appropriate player in either direction.
+- `PLEX_CLIENTS_FILE` points at a YAML, JSON, or XML Plex clients fixture that
+  overrides live client discovery. Define the same path with
+  `plex_clients_file=/abs/path/clients.yaml` inside a `.env` file or settings
+  profile when you prefer configuration files over environment variables. Each
+  entry should include the fields that Plex would normally report via the
+  `/clients` endpoint so playback control never depends on unstable discovery
+  responses.
 - `PLEX_RECOMMEND_USER` names a Plex user whose watch history should be
   excluded from similarity recommendations. The server caches that user's
   rating keys and filters them from results so the caller sees only unseen
@@ -162,6 +169,40 @@ PLEX_PLAYER_ALIASES='{"movie_room":"6B4C9A5E-E333-4DB3-A8E7-49C8F5933EB1"}' \
 
 # Tuple syntax is also accepted for aliases.
 PLEX_PLAYER_ALIASES="[(\"living_room\", \"Plex for Roku\")]" uv run mcp-server
+
+# Load a Plex clients fixture to bypass flaky discovery responses.
+PLEX_CLIENTS_FILE=/opt/mcp/config/clients.yaml uv run mcp-server
+
+#### Plex clients fixture
+
+Defining a Plex clients fixture locks the server to a curated set of players so
+playback continues even when the `/clients` endpoint returns stale metadata.
+The file mirrors the format returned by Plex and may be authored in XML, JSON,
+or YAML. Each `<Server>`/object entry maps directly to a `PlexClient` instance
+with optional `<Alias>` elements that become friendly names during player
+matching. For example:
+
+```xml
+<MediaContainer size="2">
+  <Server name="Apple TV" address="10.0.12.122" port="32500"
+          machineIdentifier="243795C0-C395-4C64-AFD9-E12390C86595"
+          product="Plex for Apple TV" protocolCapabilities="playback,playqueues,timeline">
+    <Alias>Movie Room TV</Alias>
+    <Alias>Movie Room</Alias>
+  </Server>
+  <Server name="Apple TV" address="10.0.12.94" port="32500"
+          machineIdentifier="243795C0-C395-4C64-AFD9-E12390C86212"
+          product="Plex for Apple TV" protocolCapabilities="playback,playqueues,timeline">
+    <Alias>Office AppleTV</Alias>
+    <Alias>Office TV</Alias>
+    <Alias>Office</Alias>
+  </Server>
+</MediaContainer>
+```
+
+The same structure works in JSON or YAML using `MediaContainer` and `Server`
+keys. When the file is loaded, the server instantiates `PlexClient` objects with
+the provided metadata and reuses the alias list when matching playback commands.
 ```
 
 ### Embedding Models
