@@ -3,6 +3,7 @@ from __future__ import annotations
 import asyncio
 import importlib
 import importlib.metadata as metadata
+import json
 from types import SimpleNamespace
 
 import pytest
@@ -216,6 +217,49 @@ def test_get_plex_players_uses_fixture_when_available(monkeypatch, tmp_path):
     }
     assert created[0].baseurl == "http://10.0.12.122:32500"
     assert created[0].identifier == "243795C0-C395-4C64-AFD9-E12390C86595"
+
+
+def test_collect_session_players_uses_configured_client_for_identifier(
+    monkeypatch, tmp_path
+):
+    payload = [
+        {
+            "machineIdentifier": "machine-42",
+            "clientIdentifier": "client-99",
+            "name": "Movie Nook",
+            "host": "10.0.0.9",
+            "port": 32400,
+        }
+    ]
+    payload_path = tmp_path / "clients.json"
+    payload_path.write_text(json.dumps(payload), encoding="utf-8")
+
+    original_settings = server_module.server.settings
+    updated_settings = original_settings.model_copy(
+        update={"plex_clients_file": payload_path}
+    )
+    monkeypatch.setattr(server_module.server, "_settings", updated_settings)
+
+    created: list[SimpleNamespace] = []
+
+    class StubPlexClient(SimpleNamespace):
+        def __init__(self, **kwargs):
+            created.append(SimpleNamespace(**kwargs))
+            super().__init__(**kwargs)
+
+    monkeypatch.setattr(server_module, "PlexClient", StubPlexClient)
+
+    try:
+        session = SimpleNamespace(player="client-99")
+        players = server_module._collect_session_players(session)
+    finally:
+        monkeypatch.setattr(server_module.server, "_settings", original_settings)
+
+    assert len(players) == 1
+    selected = players[0]
+    assert getattr(selected, "identifier", None) == "client-99"
+    assert getattr(selected, "machineIdentifier", None) == "machine-42"
+    assert getattr(selected, "title", None) == "Movie Nook"
 
 
 def test_match_player_skips_blank_candidates():

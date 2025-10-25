@@ -468,6 +468,47 @@ def _load_configured_plex_clients() -> list[PlexClient] | None:
         raise RuntimeError("Failed to parse configured Plex clients file") from exc
 
 
+def _configured_client_lookup() -> dict[str, PlexClient]:
+    """Return configured Plex clients indexed by normalized identifiers."""
+
+    clients = _load_configured_plex_clients()
+    if not clients:
+        return {}
+
+    lookup: dict[str, PlexClient] = {}
+    for client in clients:
+        machine_identifier = _normalize_session_identifier(
+            getattr(client, "machineIdentifier", None)
+        )
+        client_identifier = _normalize_session_identifier(
+            getattr(client, "clientIdentifier", None)
+        )
+        identifier = _normalize_session_identifier(getattr(client, "identifier", None))
+
+        for candidate in (machine_identifier, client_identifier, identifier):
+            if candidate and candidate not in lookup:
+                lookup[candidate] = client
+
+        if machine_identifier and client_identifier:
+            combined = f"{machine_identifier}:{client_identifier}"
+            if combined not in lookup:
+                lookup[combined] = client
+
+    return lookup
+
+
+def _get_configured_client(identifier: str | None) -> PlexClient | None:
+    """Return the configured Plex client matching the provided identifier."""
+
+    normalized = _normalize_session_identifier(identifier)
+    if not normalized:
+        return None
+    lookup = _configured_client_lookup()
+    if not lookup:
+        return None
+    return lookup.get(normalized)
+
+
 def _parse_configured_clients_payload(
     path: Path, payload: str
 ) -> list[Mapping[str, Any]]:
@@ -1222,6 +1263,10 @@ def _collect_session_players(session: PlexSession | Any) -> list[Any]:
     player = getattr(session, "player", None)
     if player is None:
         return []
+    if isinstance(player, str):
+        configured = _get_configured_client(player)
+        if configured is not None:
+            return [configured]
     return [player]
 
 
