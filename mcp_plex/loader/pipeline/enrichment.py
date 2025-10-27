@@ -473,9 +473,9 @@ class EnrichmentStage:
         """Enrich and forward Plex movie batches to the persistence stage."""
 
         movie_chunks = [
-            list(chunk)
+            chunk
             for chunk in chunk_sequence(batch.movies, self._movie_batch_size)
-            if len(chunk)
+            if chunk
         ]
         if not movie_chunks:
             return
@@ -494,9 +494,9 @@ class EnrichmentStage:
         """Enrich and forward Plex episode batches to the persistence stage."""
 
         episode_chunks = [
-            list(chunk)
+            chunk
             for chunk in chunk_sequence(batch.episodes, self._episode_batch_size)
-            if len(chunk)
+            if chunk
         ]
         if not episode_chunks:
             return
@@ -635,8 +635,7 @@ class EnrichmentStage:
     async def _handle_sample_batch(self, batch: SampleBatch) -> None:
         """Forward sample data batches directly to the persistence stage."""
 
-        for items in chunk_sequence(batch.items, self._movie_batch_size):
-            aggregated = list(items)
+        for aggregated in chunk_sequence(batch.items, self._movie_batch_size):
             if not aggregated:
                 continue
             await self._emit_persistence_batch(aggregated)

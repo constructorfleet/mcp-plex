@@ -11,6 +11,7 @@ from __future__ import annotations
 import asyncio
 from collections import deque
 from dataclasses import dataclass
+from itertools import islice
 from typing import (
     TYPE_CHECKING,
     Final,
@@ -81,12 +82,16 @@ IngestQueue: TypeAlias = asyncio.Queue[IngestQueueItem]
 PersistenceQueue: TypeAlias = asyncio.Queue[PersistenceQueueItem]
 
 
-def chunk_sequence(items: Sequence[T], size: int) -> Iterable[Sequence[T]]:
+def chunk_sequence(items: Iterable[T], size: int) -> Iterable[Sequence[T]]:
     """Yield ``items`` in chunks of at most ``size`` elements."""
 
     size = require_positive(int(size), name="size")
-    for start in range(0, len(items), size):
-        yield items[start : start + size]
+    iterator = iter(items)
+    while True:
+        chunk = list(islice(iterator, size))
+        if not chunk:
+            break
+        yield chunk
 
 
 class IMDbRetryQueue(asyncio.Queue[str]):
