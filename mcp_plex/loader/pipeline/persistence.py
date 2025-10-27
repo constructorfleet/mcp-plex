@@ -179,8 +179,7 @@ class PersistenceStage:
             total_points,
             self._upsert_buffer_size,
         )
-        for chunk in chunk_sequence(list(points), self._upsert_buffer_size):
-            batch = list(chunk)
+        for batch in chunk_sequence(points, self._upsert_buffer_size):
             if not batch:
                 continue
             await self._upsert_semaphore.acquire()

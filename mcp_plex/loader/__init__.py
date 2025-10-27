@@ -233,7 +233,7 @@ def _build_loader_orchestrator(
             await _upsert_in_batches(
                 client,
                 collection_name,
-                list(point_chunk),
+                point_chunk,
                 batch_size=qdrant_config.batch_size,
                 retry_queue=qdrant_retry_queue,
             )
