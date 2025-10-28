@@ -293,6 +293,10 @@ def build_point(
     )
 
 
+_EXISTING_POINT_RETRY_ATTEMPTS = 3
+_EXISTING_POINT_RETRY_BACKOFF_S = 0.1
+
+
 async def _existing_point_ids(
     client: AsyncQdrantClient,
     collection_name: str,
@@ -304,17 +308,30 @@ async def _existing_point_ids(
         return set()
 
     unique_ids: list[int | str] = list(dict.fromkeys(point_ids))
-    try:
-        records = await client.retrieve(
-            collection_name=collection_name,
-            ids=unique_ids,
-            with_payload=False,
-        )
-    except Exception:  # pragma: no cover - network errors logged for observability
-        logger.exception(
-            "Failed to check existing Qdrant points for %d id(s).", len(unique_ids)
-        )
-        return set()
+    records = None
+    for attempt in range(_EXISTING_POINT_RETRY_ATTEMPTS + 1):
+        try:
+            records = await client.retrieve(
+                collection_name=collection_name,
+                ids=unique_ids,
+                with_payload=False,
+            )
+            break
+        except Exception as exc:  # pragma: no cover - network errors logged for observability
+            if attempt == _EXISTING_POINT_RETRY_ATTEMPTS:
+                logger.exception(
+                    "Failed to check existing Qdrant points for %d id(s).", len(unique_ids)
+                )
+                return set()
+            next_attempt = attempt + 1
+            logger.warning(
+                "Retrying existing Qdrant point lookup after %s (attempt %d/%d).",
+                exc.__class__.__name__,
+                next_attempt,
+                _EXISTING_POINT_RETRY_ATTEMPTS,
+                exc_info=True,
+            )
+            await asyncio.sleep(_EXISTING_POINT_RETRY_BACKOFF_S * next_attempt)
 
     existing: set[str] = set()
     for record in records or []:
