@@ -111,25 +111,16 @@ def test_server_tools(monkeypatch):
     with _load_server(monkeypatch) as server:
         assert callable(media_library_tools.register_media_library_tools)
         movie_id = "49915"
-        summary = asyncio.run(server.get_media.fn(identifier=movie_id))
-        assert summary["total_results"] >= 1
-        assert summary["results"][0]["identifiers"]["rating_key"] == movie_id
+        media_items = asyncio.run(server.get_media.fn(identifier=movie_id))
+        assert isinstance(media_items, list)
+        assert media_items and media_items[0]["plex"]["rating_key"] == movie_id
+        assert isinstance(media_items[0]["plex"]["added_at"], int)
+        assert isinstance(media_items[0]["added_at"], int)
 
-        res = asyncio.run(
-            server.get_media.fn(identifier=movie_id, summarize_for_llm=False)
-        )
-        assert res and res[0]["plex"]["title"] == "The Gentlemen"
-        assert isinstance(res[0]["plex"]["added_at"], int)
-        assert isinstance(res[0]["added_at"], int)
+        imdb_items = asyncio.run(server.get_media.fn(identifier="tt8367814"))
+        assert imdb_items and imdb_items[0]["plex"]["rating_key"] == movie_id
 
-        res = asyncio.run(
-            server.get_media.fn(identifier="tt8367814", summarize_for_llm=False)
-        )
-        assert res and res[0]["plex"]["rating_key"] == movie_id
-
-        episode = asyncio.run(
-            server.get_media.fn(identifier="61960", summarize_for_llm=False)
-        )
+        episode = asyncio.run(server.get_media.fn(identifier="61960"))
         assert episode and episode[0]["show_title"] == "Alien: Earth"
         assert episode[0]["season_number"] == 1
         assert episode[0]["episode_number"] == 4
@@ -155,10 +146,9 @@ def test_server_tools(monkeypatch):
             server.search_media.fn(
                 query="Matthew McConaughey crime movie",
                 limit=1,
-                summarize_for_llm=False,
             )
         )
-        assert res and res[0]["plex"]["title"] == "The Gentlemen"
+        assert res["results"][0]["identifiers"]["rating_key"] == movie_id
 
         structured = asyncio.run(
             server.query_media.fn(
@@ -167,11 +157,10 @@ def test_server_tools(monkeypatch):
                 type="movie",
                 directors=["Guy Ritchie"],
                 limit=1,
-                summarize_for_llm=False,
             )
         )
-        assert structured and structured[0]["plex"]["title"] == "The Gentlemen"
-        assert "directors" in structured[0]
+        assert structured["results"][0]["identifiers"]["rating_key"] == movie_id
+        assert "directors" in structured["results"][0]
 
         episode_structured = asyncio.run(
             server.query_media.fn(
@@ -180,28 +169,25 @@ def test_server_tools(monkeypatch):
                 season_number=1,
                 episode_number=4,
                 limit=1,
-                summarize_for_llm=False,
             )
         )
-        assert (
-            episode_structured
-            and episode_structured[0]["plex"]["rating_key"] == "61960"
-        )
-        assert episode_structured[0]["show_title"] == "Alien: Earth"
+        episode_result = episode_structured["results"][0]
+        assert episode_result["identifiers"]["rating_key"] == "61960"
+        assert episode_result["show"] == "Alien: Earth"
 
         similar_structured = asyncio.run(
             server.query_media.fn(
                 similar_to=["49915"],
                 type="episode",
                 limit=3,
-                summarize_for_llm=False,
             )
         )
-        assert similar_structured
+        assert similar_structured["results"]
+        similar_results = similar_structured["results"]
         assert {
-            item["plex"]["rating_key"]
-            for item in similar_structured
-            if isinstance(item.get("plex"), dict)
+            item["identifiers"]["rating_key"]
+            for item in similar_results
+            if isinstance(item.get("identifiers"), dict)
         } >= {"61960"}
 
         similar_structured_int = asyncio.run(
@@ -209,27 +195,24 @@ def test_server_tools(monkeypatch):
                 similar_to=49915,
                 type="episode",
                 limit=3,
-                summarize_for_llm=False,
             )
         )
-        assert similar_structured_int
+        similar_results_int = similar_structured_int["results"]
+        assert similar_results_int
         assert {
-            item["plex"]["rating_key"]
-            for item in similar_structured_int
-            if isinstance(item.get("plex"), dict)
+            item["identifiers"]["rating_key"]
+            for item in similar_results_int
+            if isinstance(item.get("identifiers"), dict)
         } >= {"61960"}
 
-        assert (
-            asyncio.run(
-                server.query_media.fn(
-                    similar_to="does-not-exist",
-                    type="movie",
-                    limit=1,
-                    summarize_for_llm=False,
-                )
+        empty_structured = asyncio.run(
+            server.query_media.fn(
+                similar_to="does-not-exist",
+                type="movie",
+                limit=1,
             )
-            == []
         )
+        assert empty_structured["results"] == []
 
         history_rating_keys = {"49915", "61960"}
 
@@ -242,30 +225,31 @@ def test_server_tools(monkeypatch):
 
         rec = asyncio.run(
             server.recommend_media_like.fn(
-                identifier=movie_id, limit=2, summarize_for_llm=False
+                identifier=movie_id,
+                limit=2,
             )
         )
-        rating_keys = {item["plex"]["rating_key"] for item in rec}
-        assert len(rec) <= 2
+        rec_results = rec["results"]
+        rating_keys = {item["identifiers"]["rating_key"] for item in rec_results}
+        assert len(rec_results) <= 2
         assert "61960" not in rating_keys
 
         assert (
             asyncio.run(
                 server.recommend_media_like.fn(
-                    identifier="0", limit=1, summarize_for_llm=False
+                    identifier="0",
+                    limit=1,
                 )
-            )
+            )["results"]
             == []
         )
 
-        history_results = asyncio.run(
-            server.recommend_media.fn(limit=2, summarize_for_llm=False)
-        )
-        assert history_results
+        history_summary = asyncio.run(server.recommend_media.fn(limit=2))
+        assert history_summary["results"]
         history_keys = {
-            item["plex"]["rating_key"]
-            for item in history_results
-            if isinstance(item.get("plex"), dict)
+            item["identifiers"]["rating_key"]
+            for item in history_summary["results"]
+            if isinstance(item.get("identifiers"), dict)
         }
         assert history_keys <= history_rating_keys
 
@@ -276,10 +260,7 @@ def test_server_tools(monkeypatch):
             type(server.server), "get_watched_rating_keys", _no_history
         )
 
-        assert (
-            asyncio.run(server.recommend_media.fn(limit=1, summarize_for_llm=False))
-            == []
-        )
+        assert asyncio.run(server.recommend_media.fn(limit=1))["results"] == []
 
         with pytest.raises(ValueError):
             asyncio.run(server.media_item.fn(identifier="0"))
@@ -490,10 +471,9 @@ def test_search_media_prefetches_external_ids(monkeypatch):
             server.search_media.fn(
                 query="Matthew McConaughey crime movie",
                 limit=1,
-                summarize_for_llm=False,
             )
         )
-        assert results
+        assert results["results"]
 
         imdb_payload = server.server.cache.get_payload(imdb_id)
         assert imdb_payload is not None
@@ -506,31 +486,23 @@ def test_search_media_prefetches_external_ids(monkeypatch):
 
         monkeypatch.setattr(media_helpers, "_find_records", _fail_find_records)
 
-        cached = asyncio.run(
-            server.get_media.fn(identifier=imdb_id, summarize_for_llm=False)
-        )
+        cached = asyncio.run(server.get_media.fn(identifier=imdb_id))
         assert cached and cached[0]["plex"]["rating_key"] == "49915"
 
 def test_new_media_tools(monkeypatch):
     with _load_server(monkeypatch) as server:
-        movies = asyncio.run(
-            server.new_movies.fn(limit=1, summarize_for_llm=False)
-        )
-        assert movies and movies[0]["plex"]["type"] == "movie"
-        assert movies[0]["plex"]["added_at"] is not None
-        assert isinstance(movies[0]["plex"]["added_at"], int)
-        assert isinstance(movies[0]["added_at"], int)
+        movies = asyncio.run(server.new_movies.fn(limit=1))
+        assert movies["results"]
+        movie = movies["results"][0]
+        assert movie["identifiers"]["rating_key"] == "49915"
 
-        shows = asyncio.run(
-            server.new_shows.fn(limit=1, summarize_for_llm=False)
-        )
-        assert shows and shows[0]["plex"]["type"] == "episode"
-        assert shows[0]["plex"]["added_at"] is not None
-        assert isinstance(shows[0]["plex"]["added_at"], int)
-        assert isinstance(shows[0]["added_at"], int)
-        assert shows[0]["show_title"] == "Alien: Earth"
-        assert shows[0]["season_number"] == 1
-        assert shows[0]["episode_number"] == 4
+        shows = asyncio.run(server.new_shows.fn(limit=1))
+        assert shows["results"]
+        episode = shows["results"][0]
+        assert episode["identifiers"]["rating_key"] == "61960"
+        assert episode["show"] == "Alien: Earth"
+        assert episode["season"] == 1
+        assert episode["episode"] == 4
 
 
 def test_actor_movies(monkeypatch):
@@ -539,20 +511,18 @@ def test_actor_movies(monkeypatch):
             server.actor_movies.fn(
                 actor="Matthew McConaughey",
                 limit=1,
-                summarize_for_llm=False,
             )
         )
-        assert movies and movies[0]["plex"]["title"] == "The Gentlemen"
+        assert movies["results"][0]["title"] == "The Gentlemen"
 
         none = asyncio.run(
             server.actor_movies.fn(
                 actor="Matthew McConaughey",
                 year_from=1990,
                 year_to=1999,
-                summarize_for_llm=False,
             )
         )
-        assert none == []
+        assert none["results"] == []
 
 
 def test_play_media_requires_configuration(monkeypatch):
@@ -1130,10 +1100,11 @@ def test_set_subtitle_requires_language(monkeypatch):
         server._plex_client = None
         server._plex_identity = None
 
-        with pytest.raises(ValueError, match="subtitle language"):
-            asyncio.run(
-                server.set_subtitle.fn(player="Living Room", subtitle_language="")
-            )
+        result = asyncio.run(
+            server.set_subtitle.fn(player="Living Room", subtitle_language="")
+        )
+        assert result["success"] is False
+        assert "subtitle language" in result["error"]
 def test_match_player_fuzzy_alias_resolution():
     players: list[server_module.PlexPlayerMetadata] = [
         {
@@ -1341,17 +1312,6 @@ def test_rest_endpoints(monkeypatch):
 
         resp = client.post("/rest/get-media", json={"identifier": "49915"})
         assert resp.status_code == 200
-        summary_payload = resp.json()
-        assert summary_payload["total_results"] >= 1
-        summary_entry = summary_payload["results"][0]
-        assert summary_entry["identifiers"]["rating_key"] == "49915"
-        assert "description" in summary_entry
-
-        resp = client.post(
-            "/rest/get-media",
-            json={"identifier": "49915", "summarize_for_llm": False},
-        )
-        assert resp.status_code == 200
         raw_payload = resp.json()
         assert isinstance(raw_payload, list)
         assert raw_payload[0]["plex"]["rating_key"] == "49915"
@@ -1384,9 +1344,7 @@ def test_rest_endpoints(monkeypatch):
         assert get_media_schema["properties"]["identifier"]["description"].startswith(
             "Rating key"
         )
-        assert "summarize_for_llm" in get_media_schema["properties"]
-        assert get_media_schema["properties"]["summarize_for_llm"]["default"] is True
-        assert "summarize_for_llm" not in get_media_schema.get("required", [])
+        assert "summarize_for_llm" not in get_media_schema["properties"]
 
         search_media = spec["paths"]["/rest/search-media"]["post"]
         assert "parameters" not in search_media or not search_media["parameters"]
@@ -1395,8 +1353,7 @@ def test_rest_endpoints(monkeypatch):
         ]
         search_schema = _resolve(search_schema)
         assert "query" in search_schema["required"]
-        assert "summarize_for_llm" in search_schema["properties"]
-        assert "summarize_for_llm" not in search_schema.get("required", [])
+        assert "summarize_for_llm" not in search_schema["properties"]
         assert "/rest/prompt/media-info" in spec["paths"]
         assert "/rest/resource/media-ids/{identifier}" in spec["paths"]
 
@@ -1583,10 +1540,8 @@ def test_search_media_without_reranker(monkeypatch):
         monkeypatch.setattr(module.server, "_reranker_loaded", True)
         monkeypatch.setattr(module.server.settings, "use_reranker", False)
 
-        results = asyncio.run(
-            module.search_media.fn(query="test", limit=1, summarize_for_llm=False)
-        )
-        assert results[0]["plex"]["rating_key"] == "1"
+        results = asyncio.run(module.search_media.fn(query="test", limit=1))
+        assert results["results"][0]["identifiers"]["rating_key"] == "1"
 
 
 def test_search_media_with_reranker(monkeypatch):
@@ -1637,10 +1592,10 @@ def test_search_media_with_reranker(monkeypatch):
         monkeypatch.setattr(module.server, "_reranker_loaded", True)
         monkeypatch.setattr(module.server.settings, "use_reranker", True)
 
-        results = asyncio.run(
-            module.search_media.fn(query="test", limit=2, summarize_for_llm=False)
-        )
-        assert [r["plex"]["rating_key"] for r in results] == ["1", "2"]
+        results = asyncio.run(module.search_media.fn(query="test", limit=2))
+        assert [
+            r["identifiers"]["rating_key"] for r in results["results"]
+        ] == ["1", "2"]
 
 
 def test_query_media_filters(monkeypatch):
@@ -1686,11 +1641,11 @@ def test_query_media_filters(monkeypatch):
                 imdb_id="tt1",
                 tmdb_id=123,
                 limit=2,
-                summarize_for_llm=False,
             )
         )
 
-        assert result and result[0]["plex"]["rating_key"] == "1"
+        result_entry = result["results"][0]
+        assert result_entry["identifiers"]["rating_key"] == "1"
         query_filter = captured["query_filter"]
         assert query_filter is not None
         assert len(query_filter.must) >= 10
@@ -1734,11 +1689,10 @@ def test_query_media_filters_without_vectors(monkeypatch):
                 type="movie",
                 actors=["Actor"],
                 limit=1,
-                summarize_for_llm=False,
             )
         )
 
-        assert result and result[0]["plex"]["rating_key"] == "1"
+        assert result["results"][0]["identifiers"]["rating_key"] == "1"
         query_filter = captured["query_filter"]
         assert query_filter is not None
         keys = {condition.key for condition in query_filter.must}
