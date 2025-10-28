@@ -12,7 +12,11 @@ from qdrant_client import models
 
 from ...common.types import JSONValue
 from .. import media as media_helpers
-from ..models import AggregatedMediaItem, MediaSummaryResponse
+from ..models import (
+    AggregatedMediaItem,
+    AggregatedMediaItemModel,
+    MediaSummaryResponseModel,
+)
 
 if TYPE_CHECKING:  # pragma: no cover - imported for type checking only
     from .. import PlexServer
@@ -28,10 +32,23 @@ def register_media_library_tools(server: "PlexServer") -> None:
             meta={"category": "media-library", "operation": operation},
         )
 
-    def _summarize(items: list[AggregatedMediaItem]) -> MediaSummaryResponse:
+    def _to_aggregated_models(
+        payloads: list[AggregatedMediaItem],
+    ) -> list[AggregatedMediaItemModel]:
+        return [
+            AggregatedMediaItemModel.model_validate(payload)
+            if not isinstance(payload, AggregatedMediaItemModel)
+            else payload
+            for payload in payloads
+        ]
+
+    def _summarize(
+        items: list[AggregatedMediaItem],
+    ) -> MediaSummaryResponseModel:
         """Return the standard LLM summary for the provided media items."""
 
-        return media_helpers.summarize_media_items_for_llm(items)
+        summary = media_helpers.summarize_media_items_for_llm(items)
+        return MediaSummaryResponseModel.model_validate(summary)
 
     @_media_tool("get-media", title="Get media details", operation="lookup")
     async def get_media(
@@ -42,7 +59,7 @@ def register_media_library_tools(server: "PlexServer") -> None:
                 examples=["49915", "tt8367814", "The Gentlemen"],
             ),
         ],
-    ) -> list[AggregatedMediaItem]:
+    ) -> list[AggregatedMediaItemModel]:
         """Retrieve media items by rating key, IMDb/TMDb ID or title."""
 
         cached_payload = media_helpers._get_cached_payload(server.cache, identifier)
@@ -57,7 +74,7 @@ def register_media_library_tools(server: "PlexServer") -> None:
                 )
                 for r in records
             ]
-        return results
+        return _to_aggregated_models(results)
 
     @_media_tool("search-media", title="Search media library", operation="search")
     async def search_media(
@@ -77,7 +94,7 @@ def register_media_library_tools(server: "PlexServer") -> None:
                 examples=[5],
             ),
         ] = 5,
-    ) -> MediaSummaryResponse:
+    ) -> MediaSummaryResponseModel:
         """Hybrid similarity search across media items using dense and sparse vectors."""
 
         dense_doc = models.Document(text=query, model=server.settings.dense_model)
@@ -363,7 +380,7 @@ def register_media_library_tools(server: "PlexServer") -> None:
                 examples=[5],
             ),
         ] = 5,
-    ) -> MediaSummaryResponse:
+    ) -> MediaSummaryResponseModel:
         """Run a structured query against indexed payload fields and optional vector searches."""
 
         def _listify(
@@ -382,7 +399,9 @@ def register_media_library_tools(server: "PlexServer") -> None:
                         items.append(text)
             return items
 
-        def _finalize(items: list[AggregatedMediaItem]) -> MediaSummaryResponse:
+        def _finalize(
+            items: list[AggregatedMediaItem],
+        ) -> MediaSummaryResponseModel:
             return _summarize(items)
 
         def _append_range_condition(
@@ -649,7 +668,7 @@ def register_media_library_tools(server: "PlexServer") -> None:
                 examples=[5],
             ),
         ] = 5,
-    ) -> MediaSummaryResponse:
+    ) -> MediaSummaryResponseModel:
         """Recommend similar media items based on a reference identifier."""
 
         record = None
@@ -715,7 +734,7 @@ def register_media_library_tools(server: "PlexServer") -> None:
                 examples=[5],
             ),
         ] = 5,
-    ) -> MediaSummaryResponse:
+    ) -> MediaSummaryResponseModel:
         """Recommend media items based solely on Plex watch history."""
 
         raw_watched_keys = await server.get_watched_rating_keys()
@@ -739,7 +758,7 @@ def register_media_library_tools(server: "PlexServer") -> None:
                 examples=[5],
             ),
         ] = 5,
-    ) -> MediaSummaryResponse:
+    ) -> MediaSummaryResponseModel:
         """Return the most recently added movies."""
 
         query = models.OrderByQuery(
@@ -778,7 +797,7 @@ def register_media_library_tools(server: "PlexServer") -> None:
                 examples=[5],
             ),
         ] = 5,
-    ) -> MediaSummaryResponse:
+    ) -> MediaSummaryResponseModel:
         """Return the most recently added TV episodes."""
 
         query = models.OrderByQuery(
@@ -836,7 +855,7 @@ def register_media_library_tools(server: "PlexServer") -> None:
             int | None,
             Field(description="Maximum release year", examples=[1999]),
         ] = None,
-    ) -> MediaSummaryResponse:
+    ) -> MediaSummaryResponseModel:
         """Return movies featuring the given actor, optionally filtered by release year."""
 
         must = [

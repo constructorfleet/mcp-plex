@@ -1778,6 +1778,18 @@ async def openapi_json(request: Request) -> Response:  # noqa: ARG001
     return JSONResponse(_OPENAPI_SCHEMA)
 
 
+def _normalize_response_payload(value: object) -> object:
+    """Convert tool responses into JSON-serializable structures."""
+
+    if isinstance(value, BaseModel):
+        return _normalize_response_payload(value.model_dump(mode="python"))
+    if isinstance(value, Mapping):
+        return {k: _normalize_response_payload(v) for k, v in value.items()}
+    if isinstance(value, Sequence) and not isinstance(value, (str, bytes, bytearray)):
+        return [_normalize_response_payload(v) for v in value]
+    return value
+
+
 def _register_rest_endpoints() -> None:
     def _register(
         path: str, method: str, handler: Callable, fn: Callable, name: str
@@ -1798,7 +1810,8 @@ def _register_rest_endpoints() -> None:
                 arguments = {}
             async with FastMCPContext(fastmcp=server):
                 result = await _tool.fn(**arguments)
-            return JSONResponse(result)
+            normalized = _normalize_response_payload(result)
+            return JSONResponse(normalized)
 
         _register(
             f"/rest/{name}",
