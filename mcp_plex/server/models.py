@@ -19,7 +19,9 @@ class _DictLikeModel(BaseModel, Mapping[str, object]):
     )
 
     def _as_dict(self) -> dict[str, object]:
-        return self.model_dump(mode="python")
+        return self.model_dump(
+            mode="python", exclude_none=True, exclude_unset=True
+        )
 
     def __getitem__(self, key: str) -> object:
         return self._as_dict()[key]
@@ -46,6 +48,20 @@ class _DictLikeModel(BaseModel, Mapping[str, object]):
 
     def values(self) -> ValuesView[object]:
         return self._as_dict().values()
+
+    def __eq__(self, other: object) -> bool:  # type: ignore[override]
+        if isinstance(other, BaseModel):
+            return self._as_dict() == other.model_dump(
+                mode="python", exclude_none=True, exclude_unset=True
+            )
+        if isinstance(other, Mapping):
+            return self._as_dict() == dict(other.items())
+        if isinstance(other, (list, tuple)):
+            return False
+        return self._as_dict() == other
+
+    def __ne__(self, other: object) -> bool:
+        return not self.__eq__(other)
 
 
 class PlexTag(TypedDict, total=False):
