@@ -99,3 +99,16 @@ def test_get_media_returns_pydantic_models_from_cache(monkeypatch: pytest.Monkey
         assert first.model_dump()["title"] == "Example Movie"
 
     asyncio.run(_run())
+
+
+def test_normalize_response_payload_excludes_empty_fields() -> None:
+    class DemoModel(BaseModel):
+        required: str
+        optional_none: str | None = None
+        optional_value: str | None = None
+
+    payload = DemoModel(required="value", optional_value="present")
+
+    normalized = server_module._normalize_response_payload(payload)
+
+    assert normalized == {"required": "value", "optional_value": "present"}

@@ -1790,7 +1790,10 @@ def _normalize_response_payload(value: object) -> object:
     """Convert tool responses into JSON-serializable structures."""
 
     if isinstance(value, BaseModel):
-        return _normalize_response_payload(value.model_dump(mode="python"))
+        dumped = value.model_dump(
+            mode="python", exclude_none=True, exclude_unset=True
+        )
+        return _normalize_response_payload(dumped)
     if isinstance(value, Mapping):
         return {k: _normalize_response_payload(v) for k, v in value.items()}
     if isinstance(value, Sequence) and not isinstance(value, (str, bytes, bytearray)):
