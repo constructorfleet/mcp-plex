@@ -44,6 +44,9 @@ from . import media as media_helpers
 from .config import PlexPlayerAliasMap, Settings
 from .models import (
     PlexPlayerMetadata,
+    PlayMediaResponseModel,
+    PlayerCommandResponseModel,
+    QueueMediaResponseModel,
 )
 from .tools.media_library import register_media_library_tools
 
@@ -1084,7 +1087,7 @@ async def play_media(
             examples=[0],
         ),
     ] = 0,
-) -> dict[str, Any]:
+) -> PlayMediaResponseModel:
     """Play a media item on a specific Plex player."""
 
     media = await media_helpers._get_media_data(server, identifier)
@@ -1096,13 +1099,13 @@ async def play_media(
 
     capabilities = sorted(target.get("provides", set()))
 
-    return {
-        "player": target.get("display_name"),
-        "rating_key": rating_key_normalized,
-        "title": plex_info.get("title") or media.get("title"),
-        "offset_seconds": offset_seconds or 0,
-        "player_capabilities": capabilities,
-    }
+    return PlayMediaResponseModel(
+        player=cast(str | None, target.get("display_name")),
+        rating_key=rating_key_normalized,
+        title=cast(str | None, plex_info.get("title") or media.get("title")),
+        offset_seconds=offset_seconds or 0,
+        player_capabilities=capabilities,
+    )
 
 
 @server.tool("queue-media")
@@ -1125,7 +1128,7 @@ async def queue_media(
             examples=[True],
         ),
     ] = False,
-) -> dict[str, Any]:
+) -> QueueMediaResponseModel:
     """Add a media item to the active play queue for a Plex player."""
 
     media = await media_helpers._get_media_data(server, identifier)
@@ -1149,24 +1152,24 @@ async def queue_media(
 
     queue_size, queue_version = await asyncio.to_thread(_enqueue)
 
-    return {
-        "player": target.get("display_name"),
-        "rating_key": rating_key_normalized,
-        "title": plex_info.get("title") or media.get("title"),
-        "position": "next" if play_next else "end",
-        "queue_size": queue_size,
-        "queue_version": queue_version,
-    }
+    return QueueMediaResponseModel(
+        player=cast(str | None, target.get("display_name")),
+        rating_key=rating_key_normalized,
+        title=cast(str | None, plex_info.get("title") or media.get("title")),
+        position="next" if play_next else "end",
+        queue_size=queue_size,
+        queue_version=queue_version,
+    )
 
 
 def _player_response(
-    player: PlexPlayerMetadata | str,
+    player: PlexPlayerMetadata | str | None,
     *,
     command: str,
     media_type: str | None,
     success: bool = True,
     error: str | None = None,
-) -> dict[str, Any]:
+) -> PlayerCommandResponseModel:
     if isinstance(player, Mapping):
         display_name = (
             player.get("display_name")
@@ -1175,19 +1178,20 @@ def _player_response(
             or "player"
         )
         capabilities = sorted(player.get("provides", set()))
+    elif player is None:
+        display_name = "player"
+        capabilities = []
     else:
         display_name = str(player)
         capabilities = []
-    response: dict[str, Any] = {
-        "player": display_name,
-        "command": command,
-        "media_type": media_type,
-        "player_capabilities": capabilities,
-        "success": success,
-    }
-    if error is not None:
-        response["error"] = error
-    return response
+    return PlayerCommandResponseModel(
+        player=display_name,
+        command=command,
+        media_type=media_type,
+        player_capabilities=capabilities,
+        success=success,
+        error=error,
+    )
 
 
 def _player_failure_response(
@@ -1197,7 +1201,7 @@ def _player_failure_response(
     command: str,
     media_type: str | None,
     error: Exception,
-) -> dict[str, Any]:
+) -> PlayerCommandResponseModel:
     message = str(error).strip() or error.__class__.__name__
     target = player if player is not None else fallback
     return _player_response(
@@ -1216,7 +1220,7 @@ async def _player_command_result(
     command: str,
     media_type: MediaType,
     args: Sequence[Any] = (),
-) -> dict[str, Any]:
+) -> PlayerCommandResponseModel:
     try:
         player_entry = await _invoke_player_method(
             player, method_name, args=args, media_type=media_type
@@ -1244,7 +1248,7 @@ async def _player_command_result(
 async def pause_media(
     player: PlayerIdentifier,
     media_type: MediaType = "video",
-) -> dict[str, Any]:
+) -> PlayerCommandResponseModel:
     """Pause playback on the selected Plex player."""
 
     return await _player_command_result(
@@ -1259,7 +1263,7 @@ async def pause_media(
 async def resume_media(
     player: PlayerIdentifier,
     media_type: MediaType = "video",
-) -> dict[str, Any]:
+) -> PlayerCommandResponseModel:
     """Resume playback on the selected Plex player."""
 
     return await _player_command_result(
@@ -1274,7 +1278,7 @@ async def resume_media(
 async def next_media(
     player: PlayerIdentifier,
     media_type: MediaType = "video",
-) -> dict[str, Any]:
+) -> PlayerCommandResponseModel:
     """Skip to the next item on the selected Plex player."""
 
     return await _player_command_result(
@@ -1289,7 +1293,7 @@ async def next_media(
 async def previous_media(
     player: PlayerIdentifier,
     media_type: MediaType = "video",
-) -> dict[str, Any]:
+) -> PlayerCommandResponseModel:
     """Skip to the previous item on the selected Plex player."""
 
     return await _player_command_result(
@@ -1304,7 +1308,7 @@ async def previous_media(
 async def fastforward_media(
     player: PlayerIdentifier,
     media_type: MediaType = "video",
-) -> dict[str, Any]:
+) -> PlayerCommandResponseModel:
     """Step forward in the current item on the selected Plex player."""
 
     return await _player_command_result(
@@ -1319,7 +1323,7 @@ async def fastforward_media(
 async def rewind_media(
     player: PlayerIdentifier,
     media_type: MediaType = "video",
-) -> dict[str, Any]:
+) -> PlayerCommandResponseModel:
     """Step backward in the current item on the selected Plex player."""
 
     return await _player_command_result(
@@ -1341,7 +1345,7 @@ async def set_subtitle(
         ),
     ],
     media_type: MediaType = "video",
-) -> dict[str, Any]:
+) -> PlayerCommandResponseModel:
     """Select the subtitle language for the current playback session."""
 
     player_entry: PlexPlayerMetadata | None = None
@@ -1392,13 +1396,15 @@ async def set_subtitle(
             media_type=media_type,
             error=exc,
         )
-    response = _player_response(player_entry, command="set-subtitle", media_type=media_type)
-    response["subtitle_language"] = subtitle_language
+    response = _player_response(
+        player_entry, command="set-subtitle", media_type=media_type
+    )
+    updates = {"subtitle_language": subtitle_language}
     if stream is not None:
         stream_id = getattr(stream, "id", None)
         if stream_id is not None:
-            response["subtitle_stream_id"] = stream_id
-    return response
+            updates["subtitle_stream_id"] = stream_id
+    return response.with_updates(**updates)
 
 
 def _normalize_session_identifier(value: Any) -> str:
@@ -1632,7 +1638,7 @@ async def set_audio(
         ),
     ],
     media_type: MediaType = "video",
-) -> dict[str, Any]:
+) -> PlayerCommandResponseModel:
     """Select the audio language for the current playback session."""
 
     player_entry: PlexPlayerMetadata | None = None
@@ -1683,16 +1689,18 @@ async def set_audio(
             media_type=media_type,
             error=exc,
         )
-    response = _player_response(player_entry, command="set-audio", media_type=media_type)
-    response["audio_language"] = audio_language
+    response = _player_response(
+        player_entry, command="set-audio", media_type=media_type
+    )
+    updates = {"audio_language": audio_language}
     if stream is not None:
         channels = _extract_audio_channel_count(stream)
         if channels:
-            response["audio_channels"] = channels
+            updates["audio_channels"] = channels
         stream_id = getattr(stream, "id", None)
         if stream_id is not None:
-            response["audio_stream_id"] = stream_id
-    return response
+            updates["audio_stream_id"] = stream_id
+    return response.with_updates(**updates)
 
 
 @server.custom_route("/rest", methods=["GET"])
@@ -1778,6 +1786,21 @@ async def openapi_json(request: Request) -> Response:  # noqa: ARG001
     return JSONResponse(_OPENAPI_SCHEMA)
 
 
+def _normalize_response_payload(value: object) -> object:
+    """Convert tool responses into JSON-serializable structures."""
+
+    if isinstance(value, BaseModel):
+        dumped = value.model_dump(
+            mode="python", exclude_none=True, exclude_unset=True
+        )
+        return _normalize_response_payload(dumped)
+    if isinstance(value, Mapping):
+        return {k: _normalize_response_payload(v) for k, v in value.items()}
+    if isinstance(value, Sequence) and not isinstance(value, (str, bytes, bytearray)):
+        return [_normalize_response_payload(v) for v in value]
+    return value
+
+
 def _register_rest_endpoints() -> None:
     def _register(
         path: str, method: str, handler: Callable, fn: Callable, name: str
@@ -1798,7 +1821,8 @@ def _register_rest_endpoints() -> None:
                 arguments = {}
             async with FastMCPContext(fastmcp=server):
                 result = await _tool.fn(**arguments)
-            return JSONResponse(result)
+            normalized = _normalize_response_payload(result)
+            return JSONResponse(normalized)
 
         _register(
             f"/rest/{name}",
