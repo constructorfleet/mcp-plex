@@ -304,17 +304,39 @@ async def _existing_point_ids(
         return set()
 
     unique_ids: list[int | str] = list(dict.fromkeys(point_ids))
-    try:
-        records = await client.retrieve(
-            collection_name=collection_name,
-            ids=unique_ids,
-            with_payload=False,
-        )
-    except Exception:  # pragma: no cover - network errors logged for observability
-        logger.exception(
-            "Failed to check existing Qdrant points for %d id(s).", len(unique_ids)
-        )
-        return set()
+    total = len(unique_ids)
+
+    async def retrieve_range(start: int, end: int) -> list[models.Record]:
+        if start >= end:
+            return []
+        ids = unique_ids[start:end]
+        try:
+            result = await client.retrieve(
+                collection_name=collection_name,
+                ids=ids,
+                with_payload=False,
+            )
+            return list(result or [])
+        except Exception:
+            span = end - start
+            if span == 1:  # pragma: no cover - network errors logged for observability
+                logger.exception(
+                    "Failed to check existing Qdrant point %s in collection %s.",
+                    _normalise_point_id(unique_ids[start]),
+                    collection_name,
+                )
+                return []
+            midpoint = start + span // 2
+            logger.debug(
+                "Retrying Qdrant retrieve for %d ids in smaller batches (total=%d).",
+                span,
+                total,
+            )
+            left = await retrieve_range(start, midpoint)
+            right = await retrieve_range(midpoint, end)
+            return left + right
+
+    records = await retrieve_range(0, total)
 
     existing: set[str] = set()
     for record in records or []:
