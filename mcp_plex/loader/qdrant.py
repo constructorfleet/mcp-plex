@@ -297,6 +297,10 @@ _EXISTING_POINT_RETRY_ATTEMPTS = 3
 _EXISTING_POINT_RETRY_BACKOFF_S = 0.1
 
 
+_SINGLE_RETRIEVE_MAX_ATTEMPTS = 3
+_SINGLE_RETRIEVE_INITIAL_BACKOFF_S = 0.1
+
+
 async def _existing_point_ids(
     client: AsyncQdrantClient,
     collection_name: str,
@@ -313,7 +317,38 @@ async def _existing_point_ids(
     async def retrieve_range(start: int, end: int) -> list[models.Record]:
         if start >= end:
             return []
+
         ids = unique_ids[start:end]
+        span = end - start
+
+        if span == 1:
+            backoff = _SINGLE_RETRIEVE_INITIAL_BACKOFF_S
+            for attempt in range(_SINGLE_RETRIEVE_MAX_ATTEMPTS):
+                try:
+                    result = await client.retrieve(
+                        collection_name=collection_name,
+                        ids=ids,
+                        with_payload=False,
+                    )
+                    return list(result or [])
+                except Exception:
+                    if attempt == _SINGLE_RETRIEVE_MAX_ATTEMPTS - 1:
+                        logger.exception(
+                            "Failed to check existing Qdrant point %s in collection %s.",
+                            _normalise_point_id(unique_ids[start]),
+                            collection_name,
+                        )
+                        return []
+                    logger.debug(
+                        "Retrying single Qdrant retrieve for %s (attempt %d/%d).",
+                        _normalise_point_id(unique_ids[start]),
+                        attempt + 1,
+                        _SINGLE_RETRIEVE_MAX_ATTEMPTS,
+                    )
+                    await asyncio.sleep(backoff)
+                    backoff *= 2
+            return []  # pragma: no cover - loop exits via return
+
         try:
             result = await client.retrieve(
                 collection_name=collection_name,
@@ -322,14 +357,6 @@ async def _existing_point_ids(
             )
             return list(result or [])
         except Exception:
-            span = end - start
-            if span == 1:  # pragma: no cover - network errors logged for observability
-                logger.exception(
-                    "Failed to check existing Qdrant point %s in collection %s.",
-                    _normalise_point_id(unique_ids[start]),
-                    collection_name,
-                )
-                return []
             midpoint = start + span // 2
             logger.debug(
                 "Retrying Qdrant retrieve for %d ids in smaller batches (total=%d).",
