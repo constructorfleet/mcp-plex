@@ -166,6 +166,33 @@ def test_run_closes_client_once(monkeypatch):
     assert CaptureClient.close_calls == 2
 
 
+def test_run_skips_existing_media(monkeypatch):
+    class ExistingClient(CaptureClient):
+        retrieved_ids: list[tuple[int | str, ...]] = []
+
+        async def retrieve(self, collection_name: str, ids, **kwargs):
+            ExistingClient.retrieved_ids.append(tuple(ids))
+
+            class _Record:
+                def __init__(self, point_id):
+                    self.id = point_id
+
+            return [_Record(point_id=id_value) for id_value in ids]
+
+    monkeypatch.setattr(loader, "AsyncQdrantClient", ExistingClient)
+    CaptureClient.captured_points = []
+    CaptureClient.upsert_calls = 0
+    ExistingClient.retrieved_ids = []
+
+    sample_dir = Path(__file__).resolve().parents[1] / "sample-data"
+
+    asyncio.run(_run_loader(sample_dir))
+
+    assert CaptureClient.captured_points == []
+    assert CaptureClient.upsert_calls == 0
+    assert ExistingClient.retrieved_ids
+
+
 def test_run_raises_for_unknown_dense_model():
     sample_dir = Path(__file__).resolve().parents[1] / "sample-data"
 

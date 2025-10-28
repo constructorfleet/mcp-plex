@@ -260,6 +260,19 @@ def _build_point_payload(item: AggregatedItem) -> QdrantPayload:
     return payload
 
 
+def _point_id_from_rating_key(rating_key: str) -> int | str:
+    """Convert a Plex rating key into the corresponding Qdrant point ID."""
+
+    rating_key = str(rating_key)
+    return int(rating_key) if rating_key.isdigit() else rating_key
+
+
+def _normalise_point_id(point_id: int | str) -> str:
+    """Return a stable string representation for comparing point identifiers."""
+
+    return str(point_id)
+
+
 def build_point(
     item: AggregatedItem,
     dense_model_name: str,
@@ -269,11 +282,7 @@ def build_point(
 
     text = _build_point_text(item)
     payload = _build_point_payload(item)
-    point_id: int | str = (
-        int(item.plex.rating_key)
-        if item.plex.rating_key.isdigit()
-        else item.plex.rating_key
-    )
+    point_id = _point_id_from_rating_key(item.plex.rating_key)
     return models.PointStruct(
         id=point_id,
         vector={
@@ -282,6 +291,38 @@ def build_point(
         },
         payload=payload,
     )
+
+
+async def _existing_point_ids(
+    client: AsyncQdrantClient,
+    collection_name: str,
+    point_ids: Sequence[int | str],
+) -> set[str]:
+    """Return the subset of ``point_ids`` already present in Qdrant."""
+
+    if not point_ids:
+        return set()
+
+    unique_ids: list[int | str] = list(dict.fromkeys(point_ids))
+    try:
+        records = await client.retrieve(
+            collection_name=collection_name,
+            ids=unique_ids,
+            with_payload=False,
+        )
+    except Exception:  # pragma: no cover - network errors logged for observability
+        logger.exception(
+            "Failed to check existing Qdrant points for %d id(s).", len(unique_ids)
+        )
+        return set()
+
+    existing: set[str] = set()
+    for record in records or []:
+        record_id = getattr(record, "id", None)
+        if record_id is None:
+            continue
+        existing.add(_normalise_point_id(record_id))
+    return existing
 
 
 def _chunk(seq: Sequence[models.PointStruct], size: int) -> Iterable[Sequence[models.PointStruct]]:
@@ -506,6 +547,9 @@ __all__ = [
     "_ensure_collection",
     "_build_point_text",
     "_build_point_payload",
+    "_point_id_from_rating_key",
+    "_normalise_point_id",
+    "_existing_point_ids",
     "QdrantPayload",
     "build_point",
     "_upsert_in_batches",

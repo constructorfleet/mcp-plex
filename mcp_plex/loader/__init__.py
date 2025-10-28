@@ -48,6 +48,9 @@ QdrantPayload = _qdrant.QdrantPayload
 build_point = _qdrant.build_point
 _upsert_in_batches = _qdrant._upsert_in_batches
 _process_qdrant_retry_queue = _qdrant._process_qdrant_retry_queue
+_point_id_from_rating_key = _qdrant._point_id_from_rating_key
+_normalise_point_id = _qdrant._normalise_point_id
+_existing_point_ids = _qdrant._existing_point_ids
 
 PlexPartialObject = _PlexPartialObject
 
@@ -220,14 +223,58 @@ def _build_loader_orchestrator(
     upserted = 0
     upsert_start = time.perf_counter()
 
+    async def _filter_new_items(
+        batch: Sequence[AggregatedItem],
+    ) -> tuple[list[AggregatedItem], int]:
+        if not batch:
+            return [], 0
+
+        point_pairs = [
+            (item, _point_id_from_rating_key(item.plex.rating_key)) for item in batch
+        ]
+        existing_ids = await _existing_point_ids(
+            client, collection_name, [point_id for _, point_id in point_pairs]
+        )
+
+        new_items: list[AggregatedItem] = []
+        skipped = 0
+        for item, point_id in point_pairs:
+            if _normalise_point_id(point_id) in existing_ids:
+                logger.debug(
+                    "Skipping Plex rating key %s; already indexed in Qdrant.",
+                    item.plex.rating_key,
+                )
+                skipped += 1
+                continue
+            new_items.append(item)
+        return new_items, skipped
+
     async def _upsert_aggregated(
         batch: Sequence[AggregatedItem],
     ) -> None:
         if not batch:
             return
-        items.extend(batch)
+
+        filtered_items, skipped = await _filter_new_items(batch)
+
+        if not filtered_items:
+            logger.info(
+                "Skipping batch of %d item(s); already present in Qdrant.",
+                len(batch),
+            )
+            return
+
+        if skipped:
+            logger.info(
+                "Skipped %d existing item(s); %d new item(s) remain.",
+                skipped,
+                len(filtered_items),
+            )
+
+        items.extend(filtered_items)
         points = [
-            build_point(item, dense_model_name, sparse_model_name) for item in batch
+            build_point(item, dense_model_name, sparse_model_name)
+            for item in filtered_items
         ]
         for point_chunk in chunk_sequence(points, upsert_buffer_size):
             await _upsert_in_batches(
