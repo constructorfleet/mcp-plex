@@ -293,6 +293,10 @@ def build_point(
     )
 
 
+_EXISTING_POINT_RETRY_ATTEMPTS = 3
+_EXISTING_POINT_RETRY_BACKOFF_S = 0.1
+
+
 async def _existing_point_ids(
     client: AsyncQdrantClient,
     collection_name: str,
