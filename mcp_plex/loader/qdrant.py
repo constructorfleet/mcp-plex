@@ -297,6 +297,10 @@ _EXISTING_POINT_RETRY_ATTEMPTS = 3
 _EXISTING_POINT_RETRY_BACKOFF_S = 0.1
 
 
+_SINGLE_RETRIEVE_MAX_ATTEMPTS = 3
+_SINGLE_RETRIEVE_INITIAL_BACKOFF_S = 0.1
+
+
 async def _existing_point_ids(
     client: AsyncQdrantClient,
     collection_name: str,
@@ -308,30 +312,62 @@ async def _existing_point_ids(
         return set()
 
     unique_ids: list[int | str] = list(dict.fromkeys(point_ids))
-    records = None
-    for attempt in range(_EXISTING_POINT_RETRY_ATTEMPTS + 1):
+    total = len(unique_ids)
+
+    async def retrieve_range(start: int, end: int) -> list[models.Record]:
+        if start >= end:
+            return []
+
+        ids = unique_ids[start:end]
+        span = end - start
+
+        if span == 1:
+            backoff = _SINGLE_RETRIEVE_INITIAL_BACKOFF_S
+            for attempt in range(_SINGLE_RETRIEVE_MAX_ATTEMPTS):
+                try:
+                    result = await client.retrieve(
+                        collection_name=collection_name,
+                        ids=ids,
+                        with_payload=False,
+                    )
+                    return list(result or [])
+                except Exception:
+                    if attempt == _SINGLE_RETRIEVE_MAX_ATTEMPTS - 1:
+                        logger.exception(
+                            "Failed to check existing Qdrant point %s in collection %s.",
+                            _normalise_point_id(unique_ids[start]),
+                            collection_name,
+                        )
+                        return []
+                    logger.debug(
+                        "Retrying single Qdrant retrieve for %s (attempt %d/%d).",
+                        _normalise_point_id(unique_ids[start]),
+                        attempt + 1,
+                        _SINGLE_RETRIEVE_MAX_ATTEMPTS,
+                    )
+                    await asyncio.sleep(backoff)
+                    backoff *= 2
+            return []  # pragma: no cover - loop exits via return
+
         try:
-            records = await client.retrieve(
+            result = await client.retrieve(
                 collection_name=collection_name,
-                ids=unique_ids,
+                ids=ids,
                 with_payload=False,
             )
-            break
-        except Exception as exc:  # pragma: no cover - network errors logged for observability
-            if attempt == _EXISTING_POINT_RETRY_ATTEMPTS:
-                logger.exception(
-                    "Failed to check existing Qdrant points for %d id(s).", len(unique_ids)
-                )
-                return set()
-            next_attempt = attempt + 1
-            logger.warning(
-                "Retrying existing Qdrant point lookup after %s (attempt %d/%d).",
-                exc.__class__.__name__,
-                next_attempt,
-                _EXISTING_POINT_RETRY_ATTEMPTS,
-                exc_info=True,
+            return list(result or [])
+        except Exception:
+            midpoint = start + span // 2
+            logger.debug(
+                "Retrying Qdrant retrieve for %d ids in smaller batches (total=%d).",
+                span,
+                total,
             )
-            await asyncio.sleep(_EXISTING_POINT_RETRY_BACKOFF_S * next_attempt)
+            left = await retrieve_range(start, midpoint)
+            right = await retrieve_range(midpoint, end)
+            return left + right
+
+    records = await retrieve_range(0, total)
 
     existing: set[str] = set()
     for record in records or []:
