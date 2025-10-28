@@ -285,6 +285,50 @@ class PlexPlayerMetadata(TypedDict, total=False):
     client: NotRequired[PlexClient | None]
 
 
+class PlayMediaResponseModel(_DictLikeModel):
+    """Response payload returned when initiating playback on a player."""
+
+    player: str | None = None
+    rating_key: str | None = None
+    title: str | None = None
+    offset_seconds: int = 0
+    player_capabilities: list[str] = Field(default_factory=list)
+
+
+class QueueMediaResponseModel(_DictLikeModel):
+    """Response payload returned when queueing media on a player."""
+
+    player: str | None = None
+    rating_key: str | None = None
+    title: str | None = None
+    position: str | None = None
+    queue_size: int | None = None
+    queue_version: int | None = None
+
+
+class PlayerCommandResponseModel(_DictLikeModel):
+    """Standardized response for player control commands."""
+
+    player: str | None = None
+    command: str
+    media_type: str | None = None
+    player_capabilities: list[str] = Field(default_factory=list)
+    success: bool = True
+    error: str | None = None
+    audio_language: str | None = None
+    audio_channels: int | None = None
+    audio_stream_id: int | None = None
+    subtitle_language: str | None = None
+    subtitle_stream_id: int | None = None
+
+    def with_updates(
+        self, **updates: object | None
+    ) -> "PlayerCommandResponseModel":
+        """Return a copy of the response with additional fields set."""
+
+        return self.model_copy(update=updates)
+
+
 __all__ = [
     "PlexTag",
     "PlexTagModel",
@@ -303,4 +347,7 @@ __all__ = [
     "MediaSummaryResponseModel",
     "QdrantMediaPayload",
     "PlexPlayerMetadata",
+    "PlayMediaResponseModel",
+    "QueueMediaResponseModel",
+    "PlayerCommandResponseModel",
 ]
