@@ -7,7 +7,9 @@ from pathlib import Path
 
 import httpx
 from qdrant_client import models
+from qdrant_client.http.exceptions import ResponseHandlingException
 import pytest
+from types import SimpleNamespace
 
 from mcp_plex import loader
 import mcp_plex.loader.qdrant as loader_qdrant
@@ -23,6 +25,7 @@ from mcp_plex.loader import (
 )
 from mcp_plex.loader.qdrant import (
     _ensure_collection,
+    _existing_point_ids,
     _process_qdrant_retry_queue,
     _resolve_dense_model_params,
     build_point,
@@ -338,6 +341,34 @@ def test_upsert_batch_queues_permanent_failures(monkeypatch):
     assert retry_queue.qsize() == 1
     queued_batch = retry_queue.get_nowait()
     assert [point.id for point in queued_batch] == [point.id for point in points]
+
+
+def test_existing_point_ids_retries_transient_errors(monkeypatch):
+    attempts = 0
+    sleeps: list[float] = []
+
+    class StubClient:
+        async def retrieve(self, **kwargs):
+            nonlocal attempts
+            attempts += 1
+            if attempts == 1:
+                raise ResponseHandlingException(RuntimeError("boom"))
+            return [SimpleNamespace(id="1")]
+
+    async def fake_sleep(delay: float) -> None:
+        sleeps.append(delay)
+
+    monkeypatch.setattr(loader_qdrant.asyncio, "sleep", fake_sleep)
+
+    async def run() -> set[str]:
+        return await _existing_point_ids(StubClient(), "collection", [1])
+
+    existing = asyncio.run(run())
+
+    assert existing == {"1"}
+    assert attempts == 2
+    assert sleeps, "expected backoff sleep between retries"
+    assert sleeps[0] > 0
 
 
 def test_process_qdrant_retry_queue_retries_batches(monkeypatch):
