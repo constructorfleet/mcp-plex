@@ -13,10 +13,7 @@ from mcp_plex.server import media as media_helpers
 
 MEDIA_LIBRARY_TOOL_NAMES = [
     "get_media",
-    "search_media",
     "query_media",
-    "recommend_media_like",
-    "recommend_media",
     "new_movies",
     "new_shows",
     "actor_movies",

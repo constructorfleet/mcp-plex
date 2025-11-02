@@ -345,10 +345,7 @@ register_media_library_tools(server)
 
 _MEDIA_TOOL_EXPORTS = {
     "get_media": "get-media",
-    "search_media": "search-media",
     "query_media": "query-media",
-    "recommend_media_like": "recommend-media-like",
-    "recommend_media": "recommend-media",
     "new_movies": "new-movies",
     "new_shows": "new-shows",
     "actor_movies": "actor-movies",
