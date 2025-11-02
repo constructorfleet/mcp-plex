@@ -24,6 +24,13 @@ from mcp_plex.server.tools import media_library as media_library_tools
 from pydantic import ValidationError
 
 
+REMOVED_MEDIA_TOOL_NAMES = (
+    "search_media",
+    "recommend_media_like",
+    "recommend_media",
+)
+
+
 def _reload_server_with_dummy_reranker(monkeypatch):
     monkeypatch.setenv("USE_RERANKER", "1")
     st_module = types.ModuleType("sentence_transformers")
@@ -142,14 +149,6 @@ def test_server_tools(monkeypatch):
         ids = json.loads(asyncio.run(server.media_ids.fn(identifier=movie_id)))
         assert ids["imdb"] == "tt8367814"
 
-        res = asyncio.run(
-            server.search_media.fn(
-                query="Matthew McConaughey crime movie",
-                limit=1,
-            )
-        )
-        assert res["results"][0]["identifiers"]["rating_key"] == movie_id
-
         structured = asyncio.run(
             server.query_media.fn(
                 dense_query="crime comedy",
@@ -214,53 +213,8 @@ def test_server_tools(monkeypatch):
         )
         assert empty_structured["results"] == []
 
-        history_rating_keys = {"49915", "61960"}
-
-        async def _watched_rating_keys(_self):
-            return history_rating_keys
-
-        monkeypatch.setattr(
-            type(server.server), "get_watched_rating_keys", _watched_rating_keys
-        )
-
-        rec = asyncio.run(
-            server.recommend_media_like.fn(
-                identifier=movie_id,
-                limit=2,
-            )
-        )
-        rec_results = rec["results"]
-        rating_keys = {item["identifiers"]["rating_key"] for item in rec_results}
-        assert len(rec_results) <= 2
-        assert "61960" not in rating_keys
-
-        assert (
-            asyncio.run(
-                server.recommend_media_like.fn(
-                    identifier="0",
-                    limit=1,
-                )
-            )["results"]
-            == []
-        )
-
-        history_summary = asyncio.run(server.recommend_media.fn(limit=2))
-        assert history_summary["results"]
-        history_keys = {
-            item["identifiers"]["rating_key"]
-            for item in history_summary["results"]
-            if isinstance(item.get("identifiers"), dict)
-        }
-        assert history_keys <= history_rating_keys
-
-        async def _no_history(_self):
-            return set()
-
-        monkeypatch.setattr(
-            type(server.server), "get_watched_rating_keys", _no_history
-        )
-
-        assert asyncio.run(server.recommend_media.fn(limit=1))["results"] == []
+        for removed_tool in REMOVED_MEDIA_TOOL_NAMES:
+            assert not hasattr(server, removed_tool)
 
         with pytest.raises(ValueError):
             asyncio.run(server.media_item.fn(identifier="0"))
@@ -327,14 +281,6 @@ def test_media_library_tools_have_metadata(monkeypatch):
                 ),
                 "operation": "lookup",
             },
-            "search_media": {
-                "title": "Search media library",
-                "description": (
-                    "Hybrid similarity search across media items using dense and sparse"
-                    " vectors."
-                ),
-                "operation": "search",
-            },
             "query_media": {
                 "title": "Query media library",
                 "description": (
@@ -342,20 +288,6 @@ def test_media_library_tools_have_metadata(monkeypatch):
                     " vector searches."
                 ),
                 "operation": "query",
-            },
-            "recommend_media_like": {
-                "title": "Recommend similar media",
-                "description": (
-                    "Recommend similar media items based on a reference identifier."
-                ),
-                "operation": "recommend",
-            },
-            "recommend_media": {
-                "title": "Recommend from watch history",
-                "description": (
-                    "Recommend media items based solely on Plex watch history."
-                ),
-                "operation": "history",
             },
             "new_movies": {
                 "title": "Newest movies",
@@ -384,6 +316,9 @@ def test_media_library_tools_have_metadata(monkeypatch):
             assert tool.meta is not None
             assert tool.meta.get("category") == "media-library"
             assert tool.meta.get("operation") == details["operation"]
+
+        for attr in REMOVED_MEDIA_TOOL_NAMES:
+            assert not hasattr(module, attr)
     finally:
         asyncio.run(module.server.close())
 
@@ -461,33 +396,6 @@ def test_get_media_data_ignores_mismatched_cached_identifier(monkeypatch):
         assert data["plex"]["rating_key"] == "49915"
         assert call_count == 1
 
-
-def test_search_media_prefetches_external_ids(monkeypatch):
-    with _load_server(monkeypatch) as server:
-        imdb_id = "tt8367814"
-        tmdb_id = "522627"
-
-        results = asyncio.run(
-            server.search_media.fn(
-                query="Matthew McConaughey crime movie",
-                limit=1,
-            )
-        )
-        assert results["results"]
-
-        imdb_payload = server.server.cache.get_payload(imdb_id)
-        assert imdb_payload is not None
-
-        tmdb_payload = server.server.cache.get_payload(tmdb_id)
-        assert tmdb_payload is not None
-
-        async def _fail_find_records(*args, **kwargs):
-            raise AssertionError("_find_records should not be used for cached IDs")
-
-        monkeypatch.setattr(media_helpers, "_find_records", _fail_find_records)
-
-        cached = asyncio.run(server.get_media.fn(identifier=imdb_id))
-        assert cached and cached[0]["plex"]["rating_key"] == "49915"
 
 def test_new_media_tools(monkeypatch):
     with _load_server(monkeypatch) as server:
@@ -1346,14 +1254,9 @@ def test_rest_endpoints(monkeypatch):
         )
         assert "summarize_for_llm" not in get_media_schema["properties"]
 
-        search_media = spec["paths"]["/rest/search-media"]["post"]
-        assert "parameters" not in search_media or not search_media["parameters"]
-        search_schema = search_media["requestBody"]["content"]["application/json"][
-            "schema"
-        ]
-        search_schema = _resolve(search_schema)
-        assert "query" in search_schema["required"]
-        assert "summarize_for_llm" not in search_schema["properties"]
+        assert "/rest/search-media" not in spec["paths"]
+        assert "/rest/recommend-media" not in spec["paths"]
+        assert "/rest/recommend-media-like" not in spec["paths"]
         assert "/rest/prompt/media-info" in spec["paths"]
         assert "/rest/resource/media-ids/{identifier}" in spec["paths"]
 
@@ -1516,86 +1419,6 @@ def test_rest_resource_content_types(monkeypatch):
         resp = client.get("/rest/resource/media-ids/plain")
         assert resp.text == "plain"
 
-
-def test_search_media_without_reranker(monkeypatch):
-    with _load_server(monkeypatch) as module:
-        payload = {
-            "title": "Sample",
-            "summary": "Summary",
-            "plex": {"rating_key": "1", "title": "Sample"},
-        }
-        hits = [types.SimpleNamespace(payload=payload, score=0.2)]
-
-        async def fake_query_points(*args, **kwargs):
-            return types.SimpleNamespace(points=hits)
-
-        async def immediate_to_thread(fn, *args, **kwargs):
-            return fn(*args, **kwargs)
-
-        monkeypatch.setattr(
-            module.server.qdrant_client, "query_points", fake_query_points
-        )
-        monkeypatch.setattr(module.asyncio, "to_thread", immediate_to_thread)
-        monkeypatch.setattr(module.server, "_reranker", None)
-        monkeypatch.setattr(module.server, "_reranker_loaded", True)
-        monkeypatch.setattr(module.server.settings, "use_reranker", False)
-
-        results = asyncio.run(module.search_media.fn(query="test", limit=1))
-        assert results["results"][0]["identifiers"]["rating_key"] == "1"
-
-
-def test_search_media_with_reranker(monkeypatch):
-    with _load_server(monkeypatch) as module:
-        payload_one = {
-            "title": "First",
-            "summary": "Summary",
-            "plex": {
-                "rating_key": "1",
-                "title": "First",
-                "summary": "First summary",
-                "thumb": "thumb1",
-                "art": "art1",
-                "actors": [{"tag": "Actor Dict"}, "Actor String"],
-            },
-            "tmdb": {"overview": "Overview"},
-            "directors": [{"tag": "Director"}],
-            "writers": "Writer Name",
-            "actors": [{"name": "Actor Dict"}, "Actor Text"],
-            "tagline": ["Line one", "Line two"],
-            "reviews": ["Great", ""],
-        }
-        payload_two = {
-            "title": "Second",
-            "summary": "Another",
-            "plex": {"rating_key": "2", "title": "Second"},
-        }
-        hits = [
-            types.SimpleNamespace(payload=payload_one, score=0.1),
-            types.SimpleNamespace(payload=payload_two, score=0.2),
-        ]
-
-        async def fake_query_points(*args, **kwargs):
-            return types.SimpleNamespace(points=list(hits))
-
-        async def immediate_to_thread(fn, *args, **kwargs):
-            return fn(*args, **kwargs)
-
-        class DummyReranker:
-            def predict(self, pairs):
-                return [0.9, 0.1]
-
-        monkeypatch.setattr(
-            module.server.qdrant_client, "query_points", fake_query_points
-        )
-        monkeypatch.setattr(module.asyncio, "to_thread", immediate_to_thread)
-        monkeypatch.setattr(module.server, "_reranker", DummyReranker())
-        monkeypatch.setattr(module.server, "_reranker_loaded", True)
-        monkeypatch.setattr(module.server.settings, "use_reranker", True)
-
-        results = asyncio.run(module.search_media.fn(query="test", limit=2))
-        assert [
-            r["identifiers"]["rating_key"] for r in results["results"]
-        ] == ["1", "2"]
 
 
 def test_query_media_filters(monkeypatch):
