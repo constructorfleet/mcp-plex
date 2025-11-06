@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "mcp-plex"
-version = "2.1.12"
+version = "2.1.14"
 
 description = "Plex-Oriented Model Context Protocol Server"
 requires-python = ">=3.11,<3.13"
@@ -22,11 +22,7 @@ dependencies = [
 ]
 
 [project.optional-dependencies]
-dev = [
-  "ruff>=0.12.0",
-  "pytest>=8.4.1",
-  "coverage[toml]>=7.6.10",
-]
+dev = ["ruff>=0.12.0", "pytest>=8.4.1", "coverage[toml]>=7.6.10"]
 
 [project.scripts]
 load-data = "mcp_plex.loader.cli:main"
