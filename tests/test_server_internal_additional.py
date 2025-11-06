@@ -5,6 +5,7 @@ import importlib
 import importlib.metadata as metadata
 import json
 from types import SimpleNamespace
+from xml.etree import ElementTree
 
 import pytest
 from plexapi.exceptions import PlexApiException
@@ -194,10 +195,25 @@ def test_get_plex_players_uses_fixture_when_available(monkeypatch, tmp_path):
     monkeypatch.setattr(server_module, "_get_plex_client", _unexpected_call)
 
     created: list[SimpleNamespace] = []
+    load_calls: list[ElementTree.Element] = []
 
-    class StubPlexClient(SimpleNamespace):
+    class StubPlexClient:
         def __init__(self, **kwargs):
+            data = kwargs.pop("data", None)
             created.append(SimpleNamespace(**kwargs))
+            for key, value in kwargs.items():
+                setattr(self, key, value)
+            if data is not None:
+                self._loadData(data)
+
+        def _loadData(self, element: ElementTree.Element) -> None:
+            load_calls.append(element)
+            self.machineIdentifier = element.attrib.get("machineIdentifier")
+            self.clientIdentifier = element.attrib.get("clientIdentifier")
+            title_value = element.attrib.get("title") or element.attrib.get("name")
+            if title_value:
+                self.title = title_value
+                self.name = title_value
 
     monkeypatch.setattr(server_module, "PlexClient", StubPlexClient)
 
@@ -218,6 +234,15 @@ def test_get_plex_players_uses_fixture_when_available(monkeypatch, tmp_path):
     }
     assert created[0].baseurl == "http://10.0.12.122:32500"
     assert created[0].identifier == "243795C0-C395-4C64-AFD9-E12390C86595"
+    assert load_calls
+    first_loaded = load_calls[0]
+    assert first_loaded.tag == "Server"
+    assert first_loaded.attrib.get("protocolCapabilities") == (
+        "playback,playqueues,timeline,provider-playback"
+    )
+    assert [
+        alias.text for alias in first_loaded.findall("Alias")
+    ] == ["Movie Room TV", "Movie Room"]
 
 
 def test_collect_session_players_uses_configured_client_for_identifier(
@@ -245,8 +270,19 @@ def test_collect_session_players_uses_configured_client_for_identifier(
 
     class StubPlexClient(SimpleNamespace):
         def __init__(self, **kwargs):
+            data = kwargs.pop("data", None)
             created.append(SimpleNamespace(**kwargs))
             super().__init__(**kwargs)
+            if data is not None:
+                self._loadData(data)
+
+        def _loadData(self, element: ElementTree.Element) -> None:
+            self.machineIdentifier = element.attrib.get("machineIdentifier")
+            self.clientIdentifier = element.attrib.get("clientIdentifier")
+            title_value = element.attrib.get("title") or element.attrib.get("name")
+            if title_value:
+                self.title = title_value
+                self.name = title_value
 
     monkeypatch.setattr(server_module, "PlexClient", StubPlexClient)
 
@@ -286,8 +322,19 @@ def test_plex_session_player_returns_configured_client(monkeypatch, tmp_path):
 
     class StubPlexClient(SimpleNamespace):
         def __init__(self, **kwargs):
+            data = kwargs.pop("data", None)
             created.append(SimpleNamespace(**kwargs))
             super().__init__(**kwargs)
+            if data is not None:
+                self._loadData(data)
+
+        def _loadData(self, element: ElementTree.Element) -> None:
+            self.machineIdentifier = element.attrib.get("machineIdentifier")
+            self.clientIdentifier = element.attrib.get("clientIdentifier")
+            title_value = element.attrib.get("title") or element.attrib.get("name")
+            if title_value:
+                self.title = title_value
+                self.name = title_value
 
     monkeypatch.setattr(server_module, "PlexClient", StubPlexClient)
 

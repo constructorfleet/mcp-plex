@@ -596,79 +596,129 @@ def _normalize_configured_clients_data(
 def _build_configured_client(entry: Mapping[str, Any]) -> PlexClient:
     """Construct a Plex client instance from fixture data."""
 
-    def _normalize_value(key: str) -> str | None:
-        value = entry.get(key)
+    def _normalize_scalar(value: Any) -> str | None:
         if value is None:
             return None
+        if isinstance(value, bool):
+            return "1" if value else "0"
         value_str = str(value).strip()
         return value_str or None
 
-    machine_identifier = _normalize_value("machineIdentifier")
-    client_identifier = _normalize_value("clientIdentifier")
+    def _normalize_capabilities(raw: Any) -> str | None:
+        if raw is None:
+            return None
+        if isinstance(raw, str):
+            value = raw.strip()
+            return value or None
+        if isinstance(raw, Sequence) and not isinstance(raw, (str, bytes, bytearray)):
+            parts = [
+                str(item).strip()
+                for item in raw
+                if item is not None and str(item).strip()
+            ]
+            if parts:
+                return ",".join(parts)
+            return None
+        return _normalize_scalar(raw)
+
+    alias_values = _normalize_alias_values(
+        entry.get("aliases") or entry.get("Alias") or entry.get("alias")
+    )
+
+    xml_attributes: dict[str, str] = {}
+    for key, value in entry.items():
+        if key in {"aliases", "Alias", "alias"}:
+            continue
+        normalized = _normalize_scalar(value)
+        if normalized is not None:
+            xml_attributes[key] = normalized
+
+    capabilities = (
+        _normalize_capabilities(entry.get("protocolCapabilities"))
+        or _normalize_capabilities(entry.get("provides"))
+    )
+    if capabilities:
+        xml_attributes["protocolCapabilities"] = capabilities
+
+    machine_identifier = xml_attributes.get("machineIdentifier")
+    client_identifier = xml_attributes.get("clientIdentifier")
     identifier = (
-        _normalize_value("identifier")
+        xml_attributes.get("identifier")
         or client_identifier
         or machine_identifier
     )
-    host_value = _normalize_value("host")
-    address = _normalize_value("address") or host_value
-    scheme = _normalize_value("scheme") or "http"
-    port_value = entry.get("port") or entry.get("portNumber")
-    port: int | None
-    if isinstance(port_value, int):
-        port = port_value
+
+    host_value = xml_attributes.get("host")
+    address_value = xml_attributes.get("address") or host_value
+    scheme_value = xml_attributes.get("scheme") or "http"
+
+    port: int | None = None
+    raw_port = entry.get("port", entry.get("portNumber"))
+    if isinstance(raw_port, int):
+        port = raw_port
     else:
-        try:
-            port = int(str(port_value).strip()) if port_value is not None else None
-        except ValueError:
-            port = None
-    baseurl = _normalize_value("baseurl")
-    if not baseurl and address:
-        address_part = address
+        text_port = _normalize_scalar(raw_port)
+        if text_port:
+            try:
+                port = int(text_port)
+            except ValueError:
+                port = None
+            xml_attributes["port"] = text_port
+    if port is not None:
+        xml_attributes["port"] = str(port)
+
+    baseurl = xml_attributes.get("baseurl")
+    if not baseurl and address_value:
+        address_part = address_value
         if port is not None:
             address_part = f"{address_part}:{port}"
-        baseurl = f"{scheme}://{address_part}"
+        baseurl = f"{scheme_value}://{address_part}"
 
-    token = _normalize_value("token") or server.settings.plex_token
+    token = (
+        _normalize_scalar(entry.get("token"))
+        or _normalize_scalar(server.settings.plex_token)
+    )
+
+    element = ElementTree.Element("Server", attrib=xml_attributes)
+    for alias in alias_values:
+        alias_element = ElementTree.SubElement(element, "Alias")
+        alias_element.text = alias
+
     plex_client = PlexClient(
+        data=element,
         baseurl=baseurl,
         identifier=identifier,
         token=token,
         connect=False,
     )
 
-    def _assign(attr: str, value: Any) -> None:
-        if value is not None:
-            setattr(plex_client, attr, value)
+    if identifier:
+        setattr(plex_client, "identifier", identifier)
+    if client_identifier:
+        setattr(plex_client, "clientIdentifier", client_identifier)
+    if machine_identifier:
+        setattr(plex_client, "machineIdentifier", machine_identifier)
+    if host_value:
+        setattr(plex_client, "host", host_value)
+    if address_value:
+        setattr(plex_client, "address", address_value)
+    if port is not None:
+        setattr(plex_client, "port", port)
+    elif xml_attributes.get("port"):
+        setattr(plex_client, "port", xml_attributes["port"])
 
-    _assign("machineIdentifier", machine_identifier)
-    _assign("clientIdentifier", client_identifier)
-    _assign("address", address)
-    _assign("host", host_value)
-    _assign("port", port)
-    _assign("protocol", _normalize_value("protocol"))
-    _assign("protocolVersion", _normalize_value("protocolVersion"))
-    _assign("product", _normalize_value("product"))
-    _assign("deviceClass", _normalize_value("deviceClass"))
-    title = _normalize_value("title") or _normalize_value("name")
-    _assign("title", title)
-    _assign("name", title)
-    provides = entry.get("protocolCapabilities") or entry.get("provides")
-    if isinstance(provides, (list, tuple, set)):
-        provides_str = ",".join(
-            str(capability).strip()
-            for capability in provides
-            if str(capability).strip()
-        )
-    else:
-        provides_str = str(provides).strip() if provides else ""
-    _assign("provides", provides_str)
+    title_value = xml_attributes.get("title") or xml_attributes.get("name")
+    if title_value:
+        setattr(plex_client, "title", title_value)
+    name_value = xml_attributes.get("name") or title_value
+    if name_value:
+        setattr(plex_client, "name", name_value)
 
-    aliases = _normalize_alias_values(
-        entry.get("aliases") or entry.get("Alias") or entry.get("alias")
-    )
-    if aliases:
-        setattr(plex_client, "aliases", tuple(aliases))
+    if capabilities:
+        setattr(plex_client, "provides", capabilities)
+
+    if alias_values:
+        setattr(plex_client, "aliases", tuple(alias_values))
 
     return plex_client
 
