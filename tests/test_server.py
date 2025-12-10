@@ -73,6 +73,7 @@ def _load_server(monkeypatch):
     sample_dir = Path(__file__).resolve().parents[1] / "sample-data"
     asyncio.run(loader.run(None, None, None, sample_dir, None, None))
     module = importlib.reload(importlib.import_module("mcp_plex.server"))
+    module.server.settings.use_reranker = False
     try:
         yield module
     finally:
@@ -1521,6 +1522,100 @@ def test_query_media_filters_without_vectors(monkeypatch):
         keys = {condition.key for condition in query_filter.must}
         assert keys == {"type", "actors"}
         assert captured["prefetch"] is None
+
+
+def test_query_media_infers_show_title_for_episode_requests(monkeypatch):
+    with _load_server(monkeypatch) as module:
+        captured: dict[str, object] = {}
+
+        async def fake_find_records(server, identifier, limit=5):
+            payload = {
+                "show_title": "South Park",
+                "data": {
+                    "plex": {
+                        "rating_key": "show",
+                        "grandparent_title": "South Park",
+                    }
+                },
+            }
+            return [types.SimpleNamespace(payload=payload, id="show")]
+
+        async def fake_query_points(*args, **kwargs):
+            captured.update(kwargs)
+            payload = {"title": "Result", "plex": {"rating_key": "1"}}
+            return types.SimpleNamespace(
+                points=[types.SimpleNamespace(payload=payload, score=1.0)]
+            )
+
+        monkeypatch.setattr(media_helpers, "_find_records", fake_find_records)
+        monkeypatch.setattr(
+            module.server.qdrant_client, "query_points", fake_query_points
+        )
+
+        result = asyncio.run(
+            module.query_media.fn(
+                title="south park",
+                season_number=23,
+                episode_number=7,
+                limit=1,
+            )
+        )
+
+        assert result["results"], "expected at least one result"
+        query_filter = captured["query_filter"]
+        assert query_filter is not None
+        keys = {condition.key for condition in query_filter.must}
+        assert "show_title" in keys
+        assert "type" in keys
+        for condition in query_filter.must:
+            if condition.key == "show_title":
+                assert condition.match.value == "South Park"
+
+
+def test_query_media_applies_reranker_when_available(monkeypatch):
+    with _load_server(monkeypatch) as module:
+        module.server.settings.use_reranker = True
+        calls: list[list[tuple[str, str]]] = []
+
+        class DummyReranker:
+            def predict(self, pairs):
+                calls.append(pairs)
+                return [0.1, 0.9]
+
+        async def fake_ensure_reranker():
+            return DummyReranker()
+
+        async def fake_to_thread(fn, *args, **kwargs):  # type: ignore[no-untyped-def]
+            return fn(*args, **kwargs)
+
+        async def fake_query_points(*args, **kwargs):
+            payload_first = {"title": "First", "summary": "Alpha", "plex": {"rating_key": "1"}}
+            payload_second = {"title": "Second", "summary": "Beta", "plex": {"rating_key": "2"}}
+            return types.SimpleNamespace(
+                points=[
+                    types.SimpleNamespace(payload=payload_first, score=0.7),
+                    types.SimpleNamespace(payload=payload_second, score=0.6),
+                ]
+            )
+
+        monkeypatch.setattr(module.server, "ensure_reranker", fake_ensure_reranker)
+        monkeypatch.setattr(asyncio, "to_thread", fake_to_thread)
+        monkeypatch.setattr(
+            module.server.qdrant_client, "query_points", fake_query_points
+        )
+
+        result = asyncio.run(
+            module.query_media.fn(dense_query="buddy comedy", limit=2)
+        )
+
+        identifiers = [
+            item["identifiers"]["rating_key"]
+            for item in result["results"]
+            if isinstance(item.get("identifiers"), dict)
+        ]
+        assert identifiers == ["2", "1"], "expected reranker to reorder results"
+        assert calls, "expected reranker to receive scoring pairs"
+        assert calls[0][0][0] == "buddy comedy"
 
 
 def test_openapi_schema_tool_without_params(monkeypatch):
