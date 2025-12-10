@@ -2,7 +2,9 @@
 
 from __future__ import annotations
 
+import asyncio
 import json
+import logging
 from typing import Annotated, Any, Mapping, Sequence, TYPE_CHECKING, cast
 
 from fastmcp.prompts import Message
@@ -19,6 +21,9 @@ from ..models import (
 
 if TYPE_CHECKING:  # pragma: no cover - imported for type checking only
     from .. import PlexServer
+
+
+logger = logging.getLogger(__name__)
 
 
 def register_media_library_tools(server: "PlexServer") -> None:
@@ -48,6 +53,100 @@ def register_media_library_tools(server: "PlexServer") -> None:
 
         summary = media_helpers.summarize_media_items_for_llm(items)
         return MediaSummaryResponseModel.model_validate(summary)
+
+    def _build_rerank_document(media: AggregatedMediaItem) -> str:
+        plex_info = media_helpers._extract_plex_metadata(media)
+        segments: list[str] = []
+
+        def _append_text(*values: Any) -> None:
+            for value in values:
+                if isinstance(value, str):
+                    text = value.strip()
+                    if text:
+                        segments.append(text)
+                elif isinstance(value, Sequence) and not isinstance(
+                    value, (str, bytes, bytearray)
+                ):
+                    for entry in value:
+                        if isinstance(entry, str):
+                            text = entry.strip()
+                            if text:
+                                segments.append(text)
+
+        _append_text(
+            media.get("title"),
+            plex_info.get("title"),
+            media.get("show_title"),
+            plex_info.get("grandparent_title"),
+            plex_info.get("parent_title"),
+            media.get("summary"),
+            plex_info.get("summary"),
+            media.get("overview"),
+            media.get("plot"),
+            media.get("tagline"),
+            plex_info.get("tagline"),
+        )
+
+        def _append_sequence(values: Any) -> None:
+            for text in media_helpers._coerce_string_list(values):
+                if text:
+                    segments.append(text)
+
+        for field in ("genres", "collections", "actors", "directors", "writers"):
+            value = media.get(field)
+            _append_sequence(value)
+            if not value:
+                _append_sequence(plex_info.get(field))
+
+        deduped: list[str] = []
+        seen: set[str] = set()
+        for segment in segments:
+            normalized = segment.strip()
+            if normalized and normalized not in seen:
+                seen.add(normalized)
+                deduped.append(normalized)
+        return "\n".join(deduped)
+
+    async def _rerank_media_candidates(
+        query_text: str, items: list[AggregatedMediaItem]
+    ) -> list[AggregatedMediaItem]:
+        if len(items) <= 1 or not server.settings.use_reranker:
+            return items
+        reranker = await server.ensure_reranker()
+        if reranker is None:
+            return items
+        documents = [
+            _build_rerank_document(item) or str(item.get("title") or "")
+            for item in items
+        ]
+        try:
+            scores = await asyncio.to_thread(
+                reranker.predict,
+                [(query_text, document) for document in documents],
+            )
+        except Exception as exc:  # pragma: no cover - defensive logging
+            logger.warning("Failed to rerank media results: %s", exc, exc_info=exc)
+            return items
+        try:
+            score_list = list(scores)
+        except TypeError:
+            score_list = [scores]
+        if len(score_list) != len(items):
+            logger.warning(
+                "Reranker returned %d scores for %d items; skipping rerank",
+                len(score_list),
+                len(items),
+            )
+            return items
+        ranked: list[tuple[float, int, AggregatedMediaItem]] = []
+        for idx, (item, score) in enumerate(zip(items, score_list)):
+            try:
+                numeric_score = float(score)
+            except (TypeError, ValueError):
+                numeric_score = 0.0
+            ranked.append((numeric_score, idx, item))
+        ranked.sort(key=lambda entry: (-entry[0], entry[1]))
+        return [entry[2] for entry in ranked]
 
     @_media_tool("get-media", title="Get media details", operation="lookup")
     async def get_media(
@@ -247,6 +346,12 @@ def register_media_library_tools(server: "PlexServer") -> None:
     ) -> MediaSummaryResponseModel:
         """Run a structured query against indexed payload fields and optional vector searches."""
 
+        def _normalize_text(value: str | None) -> str | None:
+            if value is None:
+                return None
+            text = value.strip()
+            return text or None
+
         def _listify(
             value: Sequence[str | int] | str | int | None,
         ) -> list[str]:
@@ -286,6 +391,41 @@ def register_media_library_tools(server: "PlexServer") -> None:
                 models.FieldCondition(key=key, range=models.Range(**range_kwargs))
             )
 
+        original_title_query = title
+        title = _normalize_text(title)
+        show_title = _normalize_text(show_title)
+
+        has_episode_hint = (
+            season_number is not None or episode_number is not None
+        )
+        inferred_show_title: str | None = None
+        if has_episode_hint and title and not show_title:
+            records = await media_helpers._find_records(
+                server, title, limit=5
+            )
+            for record in records:
+                payload = cast(Mapping[str, JSONValue] | None, record.payload)
+                flattened = media_helpers._flatten_payload(payload)
+                show_candidate = flattened.get("show_title")
+                if isinstance(show_candidate, str) and show_candidate.strip():
+                    inferred_show_title = show_candidate
+                    break
+                plex_value = flattened.get("plex")
+                if isinstance(plex_value, Mapping):
+                    parent = plex_value.get("grandparent_title")
+                    if isinstance(parent, str) and parent.strip():
+                        inferred_show_title = parent
+                        break
+            if inferred_show_title:
+                show_title = inferred_show_title
+                title = None
+
+        media_type = type
+        if media_type is None and (
+            show_title is not None or has_episode_hint
+        ):
+            media_type = "episode"
+
         vector_queries: list[tuple[str, models.Document]] = []
         positive_point_ids: list[Any] = []
         similar_identifiers = _listify(similar_to)
@@ -319,6 +459,21 @@ def register_media_library_tools(server: "PlexServer") -> None:
                     )
                 )
 
+        rerank_query_text: str | None = None
+        if not positive_point_ids:
+            for candidate in (
+                dense_query,
+                sparse_query,
+                original_title_query,
+                summary,
+                overview,
+                plot,
+                tagline,
+            ):
+                rerank_query_text = _normalize_text(candidate)
+                if rerank_query_text:
+                    break
+
         must: list[models.FieldCondition] = []
         keyword_prefetch_conditions: list[models.FieldCondition] = []
 
@@ -326,7 +481,6 @@ def register_media_library_tools(server: "PlexServer") -> None:
             must.append(
                 models.FieldCondition(key="title", match=models.MatchText(text=title))
             )
-        media_type = type
         if media_type:
             condition = models.FieldCondition(
                 key="type", match=models.MatchValue(value=media_type)
@@ -508,6 +662,8 @@ def register_media_library_tools(server: "PlexServer") -> None:
             )
             for p in res.points
         ]
+        if rerank_query_text:
+            results = await _rerank_media_candidates(rerank_query_text, results)
         return _finalize(results)
 
     @_media_tool("new-movies", title="Newest movies", operation="recent-movies")
