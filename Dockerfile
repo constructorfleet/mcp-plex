@@ -14,7 +14,7 @@ COPY pyproject.toml uv.lock ./
 RUN --mount=type=cache,target=/root/.cache/uv \
     uv python install 3.12 && \
     uv venv "${UV_PROJECT_ENVIRONMENT}" && \
-    uv sync --locked --no-install-project --no-editable --link-mode=copy
+    uv sync --frozen --no-install-project --no-editable --link-mode=copy
 
 ADD . /app
 
