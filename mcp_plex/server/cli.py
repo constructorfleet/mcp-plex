@@ -6,10 +6,7 @@ import argparse
 import logging
 import os
 from dataclasses import dataclass
-from fastmcp.server.middleware.logging import (
-    LoggingMiddleware, 
-    StructuredLoggingMiddleware
-)
+from fastmcp.server.middleware.logging import StructuredLoggingMiddleware
 
 from . import PlexServer, server, settings
 
