@@ -6,6 +6,10 @@ import argparse
 import logging
 import os
 from dataclasses import dataclass
+from fastmcp.server.middleware.logging import (
+    LoggingMiddleware, 
+    StructuredLoggingMiddleware
+)
 
 from . import PlexServer, server, settings
 
@@ -146,8 +150,14 @@ def main(argv: list[str] | None = None) -> None:
     settings.recommend_history_limit = max(0, args.recommend_history_limit)
 
     log_level_name = _resolve_log_level(args.log_level)
-    logging.basicConfig(level=getattr(logging, log_level_name.upper(), logging.INFO))
-
+    log_level = getattr(logging, log_level_name.upper(), logging.INFO)
+    logging.basicConfig(level=log_level)
+    plex_server.add_middleware(
+        StructuredLoggingMiddleware(
+            include_payloads=True,
+            log_level=log_level
+        )
+    )
     plex_server.run(transport=transport, **run_config.to_kwargs())
 
 
