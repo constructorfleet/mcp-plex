@@ -10,6 +10,7 @@ from typing import Annotated, Any, Mapping, Sequence, TYPE_CHECKING, cast
 from fastmcp.prompts import Message
 from pydantic import Field
 from qdrant_client import models
+from rapidfuzz import fuzz
 
 from ...common.types import JSONValue
 from .. import media as media_helpers
@@ -108,43 +109,84 @@ def register_media_library_tools(server: "PlexServer") -> None:
         return "\n".join(deduped)
 
     async def _rerank_media_candidates(
-        query_text: str, items: list[AggregatedMediaItem]
+        query_text: str, items: list[AggregatedMediaItem], **filters: Any
     ) -> list[AggregatedMediaItem]:
-        if len(items) <= 1 or not server.settings.use_reranker:
+        if len(items) <= 1:
             return items
-        reranker = await server.ensure_reranker()
-        if reranker is None:
-            return items
-        documents = [
-            _build_rerank_document(item) or str(item.get("title") or "")
-            for item in items
-        ]
-        try:
-            scores = await asyncio.to_thread(
-                reranker.predict,
-                [(query_text, document) for document in documents],
-            )
-        except Exception as exc:  # pragma: no cover - defensive logging
-            logger.warning("Failed to rerank media results: %s", exc, exc_info=exc)
-            return items
-        try:
-            score_list = list(scores)
-        except TypeError:
-            score_list = [scores]
+
+        score_list: list[float] = [0.0] * len(items)
+        if server.settings.use_reranker:
+            reranker = await server.ensure_reranker()
+            if reranker is not None:
+                documents = [
+                    _build_rerank_document(item) or str(item.get("title") or "")
+                    for item in items
+                ]
+                try:
+                    scores = await asyncio.to_thread(
+                        reranker.predict,
+                        [(query_text, document) for document in documents],
+                    )
+                    try:
+                        score_list = [float(s) for s in list(scores)]
+                    except TypeError:
+                        score_list = [float(scores)]
+                except Exception as exc:  # pragma: no cover
+                    logger.warning("Failed to rerank media results with model: %s", exc)
+
         if len(score_list) != len(items):
-            logger.warning(
-                "Reranker returned %d scores for %d items; skipping rerank",
-                len(score_list),
-                len(items),
-            )
-            return items
+            score_list = [0.0] * len(items)
+
         ranked: list[tuple[float, int, AggregatedMediaItem]] = []
-        for idx, (item, score) in enumerate(zip(items, score_list)):
-            try:
-                numeric_score = float(score)
-            except (TypeError, ValueError):
-                numeric_score = 0.0
-            ranked.append((numeric_score, idx, item))
+        for idx, (item, model_score) in enumerate(zip(items, score_list)):
+            score = model_score
+
+            # Boost based on structured field matches if they were part of the query
+            boost = 0.0
+
+            # 1. Title matching (highest priority)
+            q_title = filters.get("title")
+            q_show_title = filters.get("show_title")
+
+            item_title = str(item.get("title") or "").strip().lower()
+            item_show_title = str(item.get("show_title") or "").strip().lower()
+
+            if q_title:
+                q_title_low = q_title.lower()
+                ratio = fuzz.ratio(q_title_low, item_title)
+                if ratio == 100:
+                    boost += 10.0  # Exact title match
+                elif ratio > 90:
+                    boost += 5.0
+                elif fuzz.token_set_ratio(q_title_low, item_title) == 100:
+                    boost += 5.0
+                elif fuzz.token_sort_ratio(q_title_low, item_title) > 95:
+                    boost += 4.0
+
+            if q_show_title:
+                q_show_low = q_show_title.lower()
+                if fuzz.ratio(q_show_low, item_show_title) == 100:
+                    boost += 8.0
+                elif fuzz.ratio(q_show_low, item_title) == 100:
+                    boost += 5.0
+
+            # 2. People matching
+            for field in ("directors", "actors", "writers"):
+                q_people = filters.get(field)
+                if not q_people:
+                    continue
+                item_people = [
+                    str(p).lower()
+                    for p in media_helpers._coerce_string_list(item.get(field))
+                ]
+                for q_p in q_people:
+                    q_p_low = str(q_p).lower()
+                    if any(fuzz.ratio(q_p_low, i_p) > 90 for i_p in item_people):
+                        boost += 3.0
+                        break
+
+            ranked.append((score + boost, idx, item))
+
         ranked.sort(key=lambda entry: (-entry[0], entry[1]))
         return [entry[2] for entry in ranked]
 
@@ -172,6 +214,12 @@ def register_media_library_tools(server: "PlexServer") -> None:
                 )
                 for r in records
             ]
+            if len(results) > 1 and not (
+                identifier.isdigit() or identifier.startswith("tt")
+            ):
+                results = await _rerank_media_candidates(
+                    identifier, results, title=identifier
+                )
         return _to_aggregated_models(results)
 
     @_media_tool("query-media", title="Query media library", operation="query")
@@ -663,7 +711,17 @@ def register_media_library_tools(server: "PlexServer") -> None:
             for p in res.points
         ]
         if rerank_query_text:
-            results = await _rerank_media_candidates(rerank_query_text, results)
+            results = await _rerank_media_candidates(
+                rerank_query_text,
+                results,
+                title=title,
+                show_title=show_title,
+                actors=actors,
+                directors=directors,
+                writers=writers,
+                collections=collections,
+                genres=genres,
+            )
         return _finalize(results)
 
     @_media_tool("new-movies", title="Newest movies", operation="recent-movies")
