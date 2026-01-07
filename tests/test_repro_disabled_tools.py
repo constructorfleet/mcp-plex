@@ -1,8 +1,6 @@
 from __future__ import annotations
 
-import pytest
 from mcp_plex.server.config import Settings
-from pydantic import ValidationError
 
 def test_disabled_tools_comma_separated(monkeypatch):
     monkeypatch.setenv("DISABLED_TOOLS", "tool1,tool2, tool3")
