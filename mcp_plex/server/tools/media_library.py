@@ -36,35 +36,24 @@ def _strip_leading_article(title: str | None) -> str | None:
     return re.sub(r"^(the|a|an)\s+", "", title, flags=re.IGNORECASE).strip() or title
 
 
-def register_media_library_tools(server: "PlexServer") -> None:
-    """Register media discovery tools and resources on the provided server."""
+def _listify(
+        value: Sequence[str | int] | str | int | None,
+    ) -> list[str]:
+        if value is None:
+            return []
+        if isinstance(value, (str, int)):
+            text = str(value).strip()
+            return [text] if text else []
+        items_list: list[str] = []
+        for entry in value:
+            if isinstance(entry, (str, int)):
+                text = str(entry).strip()
+                if text:
+                    items_list.append(text)
+        return items_list
 
-    def _media_tool(name: str, *, title: str, operation: str):
-        return server.tool(
-            name,
-            title=title,
-            meta={"category": "media-library", "operation": operation},
-        )
 
-    def _to_aggregated_models(
-        payloads: list[AggregatedMediaItem],
-    ) -> list[AggregatedMediaItemModel]:
-        return [
-            AggregatedMediaItemModel.model_validate(payload)
-            if not isinstance(payload, AggregatedMediaItemModel)
-            else payload
-            for payload in payloads
-        ]
-
-    def _summarize(
-        items: list[AggregatedMediaItem],
-    ) -> MediaSummaryResponseModel:
-        """Return the standard LLM summary for the provided media items."""
-
-        summary = media_helpers.summarize_media_items_for_llm(items)
-        return MediaSummaryResponseModel.model_validate(summary)
-
-    def _build_rerank_document(media: AggregatedMediaItem) -> str:
+def _build_rerank_document(media: AggregatedMediaItem) -> str:
         plex_info = media_helpers._extract_plex_metadata(media)
         segments: list[str] = []
 
@@ -117,23 +106,9 @@ def register_media_library_tools(server: "PlexServer") -> None:
                 deduped.append(normalized)
         return "\n".join(deduped)
 
-    def _listify(
-        value: Sequence[str | int] | str | int | None,
-    ) -> list[str]:
-        if value is None:
-            return []
-        if isinstance(value, (str, int)):
-            text = str(value).strip()
-            return [text] if text else []
-        items_list: list[str] = []
-        for entry in value:
-            if isinstance(entry, (str, int)):
-                text = str(entry).strip()
-                if text:
-                    items_list.append(text)
-        return items_list
 
-    async def _rerank_media_candidates(
+async def _rerank_media_candidates(
+        server: "PlexServer",
         query_text: str,
         items: list[AggregatedMediaItem],
         # Any is used here to accept arbitrary keyword arguments from tool callers
@@ -219,6 +194,35 @@ def register_media_library_tools(server: "PlexServer") -> None:
         ranked.sort(key=lambda entry: (-entry[0], entry[1]))
         return [entry[2] for entry in ranked]
 
+
+def register_media_library_tools(server: "PlexServer") -> None:
+    """Register media discovery tools and resources on the provided server."""
+
+    def _media_tool(name: str, *, title: str, operation: str):
+        return server.tool(
+            name,
+            title=title,
+            meta={"category": "media-library", "operation": operation},
+        )
+
+    def _to_aggregated_models(
+        payloads: list[AggregatedMediaItem],
+    ) -> list[AggregatedMediaItemModel]:
+        return [
+            AggregatedMediaItemModel.model_validate(payload)
+            if not isinstance(payload, AggregatedMediaItemModel)
+            else payload
+            for payload in payloads
+        ]
+
+    def _summarize(
+        items: list[AggregatedMediaItem],
+    ) -> MediaSummaryResponseModel:
+        """Return the standard LLM summary for the provided media items."""
+
+        summary = media_helpers.summarize_media_items_for_llm(items)
+        return MediaSummaryResponseModel.model_validate(summary)
+
     @_media_tool("get-media", title="Get media details", operation="lookup")
     async def get_media(
         identifier: Annotated[
@@ -250,7 +254,10 @@ def register_media_library_tools(server: "PlexServer") -> None:
             ):
                 # Use the original identifier for reranking
                 results = await _rerank_media_candidates(
-                    identifier, results, title=identifier
+                    server,
+                    identifier,
+                    results,
+                    title=identifier
                 )
         return _to_aggregated_models(results)
 
@@ -731,6 +738,7 @@ def register_media_library_tools(server: "PlexServer") -> None:
         if rerank_query_text:
             # Use the original title (with article) for reranking
             results = await _rerank_media_candidates(
+                server,
                 rerank_query_text,
                 results,
                 title=original_title_query,
