@@ -5,6 +5,7 @@ from __future__ import annotations
 import asyncio
 import json
 import logging
+import re
 from typing import Annotated, Any, Mapping, Sequence, TYPE_CHECKING, cast
 
 from fastmcp.prompts import Message
@@ -25,6 +26,14 @@ if TYPE_CHECKING:  # pragma: no cover - imported for type checking only
 
 
 logger = logging.getLogger(__name__)
+
+
+def _strip_leading_article(title: str | None) -> str | None:
+    """Remove leading articles (The, A, An, etc.) from a title for search purposes."""
+    if not title:
+        return title
+    # Regex for common English articles
+    return re.sub(r"^(the|a|an)\s+", "", title, flags=re.IGNORECASE).strip() or title
 
 
 def register_media_library_tools(server: "PlexServer") -> None:
@@ -227,7 +236,9 @@ def register_media_library_tools(server: "PlexServer") -> None:
         if cached_payload is not None:
             results = [cached_payload]
         else:
-            records = await media_helpers._find_records(server, identifier, limit=10)
+            # For Qdrant query, strip leading articles
+            qdrant_identifier = _strip_leading_article(identifier) if identifier else identifier
+            records = await media_helpers._find_records(server, qdrant_identifier, limit=10)
             results = [
                 media_helpers._flatten_payload(
                     cast(Mapping[str, JSONValue] | None, r.payload)
@@ -237,6 +248,7 @@ def register_media_library_tools(server: "PlexServer") -> None:
             if len(results) > 1 and not (
                 identifier.isdigit() or identifier.startswith("tt")
             ):
+                # Use the original identifier for reranking
                 results = await _rerank_media_candidates(
                     identifier, results, title=identifier
                 )
@@ -445,6 +457,8 @@ def register_media_library_tools(server: "PlexServer") -> None:
 
         original_title_query = title
         title = _normalize_text(title)
+        # For Qdrant query, strip leading articles
+        qdrant_title = _strip_leading_article(title) if title else None
         show_title = _normalize_text(show_title)
 
         has_episode_hint = (
@@ -529,9 +543,9 @@ def register_media_library_tools(server: "PlexServer") -> None:
         must: list[models.FieldCondition] = []
         keyword_prefetch_conditions: list[models.FieldCondition] = []
 
-        if title:
+        if qdrant_title:
             must.append(
-                models.FieldCondition(key="title", match=models.MatchText(text=title))
+                models.FieldCondition(key="title", match=models.MatchText(text=qdrant_title))
             )
         if media_type:
             condition = models.FieldCondition(
@@ -715,10 +729,11 @@ def register_media_library_tools(server: "PlexServer") -> None:
             for p in res.points
         ]
         if rerank_query_text:
+            # Use the original title (with article) for reranking
             results = await _rerank_media_candidates(
                 rerank_query_text,
                 results,
-                title=title,
+                title=original_title_query,
                 show_title=show_title,
                 actors=actors,
                 directors=directors,
