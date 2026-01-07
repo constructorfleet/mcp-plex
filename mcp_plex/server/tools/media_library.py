@@ -108,8 +108,28 @@ def register_media_library_tools(server: "PlexServer") -> None:
                 deduped.append(normalized)
         return "\n".join(deduped)
 
+    def _listify(
+        value: Sequence[str | int] | str | int | None,
+    ) -> list[str]:
+        if value is None:
+            return []
+        if isinstance(value, (str, int)):
+            text = str(value).strip()
+            return [text] if text else []
+        items_list: list[str] = []
+        for entry in value:
+            if isinstance(entry, (str, int)):
+                text = str(entry).strip()
+                if text:
+                    items_list.append(text)
+        return items_list
+
     async def _rerank_media_candidates(
-        query_text: str, items: list[AggregatedMediaItem], **filters: Any
+        query_text: str,
+        items: list[AggregatedMediaItem],
+        # Any is used here to accept arbitrary keyword arguments from tool callers
+        # (title, actors, etc.) without duplicating the complex search model schema.
+        **filters: Any,
     ) -> list[AggregatedMediaItem]:
         if len(items) <= 1:
             return items
@@ -172,7 +192,7 @@ def register_media_library_tools(server: "PlexServer") -> None:
 
             # 2. People matching
             for field in ("directors", "actors", "writers"):
-                q_people = filters.get(field)
+                q_people = _listify(filters.get(field))
                 if not q_people:
                     continue
                 item_people = [
@@ -180,7 +200,7 @@ def register_media_library_tools(server: "PlexServer") -> None:
                     for p in media_helpers._coerce_string_list(item.get(field))
                 ]
                 for q_p in q_people:
-                    q_p_low = str(q_p).lower()
+                    q_p_low = q_p.lower()
                     if any(fuzz.ratio(q_p_low, i_p) > 90 for i_p in item_people):
                         boost += 3.0
                         break
@@ -399,22 +419,6 @@ def register_media_library_tools(server: "PlexServer") -> None:
                 return None
             text = value.strip()
             return text or None
-
-        def _listify(
-            value: Sequence[str | int] | str | int | None,
-        ) -> list[str]:
-            if value is None:
-                return []
-            if isinstance(value, (str, int)):
-                text = str(value).strip()
-                return [text] if text else []
-            items: list[str] = []
-            for entry in value:
-                if isinstance(entry, (str, int)):
-                    text = str(entry).strip()
-                    if text:
-                        items.append(text)
-            return items
 
         def _finalize(
             items: list[AggregatedMediaItem],
