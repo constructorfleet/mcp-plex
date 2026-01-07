@@ -8,6 +8,3 @@ def test_disabled_tools_comma_separated(monkeypatch):
     # if Pydantic doesn't split it.
     settings = Settings()
     assert settings.disabled_tools == ["tool1", "tool2", "tool3"]
-
-if __name__ == "__main__":
-    pytest.main([__file__])

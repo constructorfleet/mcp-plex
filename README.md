@@ -11,6 +11,7 @@ tools through the [Model Context Protocol](https://github.com/modelcontextprotoc
 ## Features
 - Load Plex libraries into a Qdrant vector database.
 - Hybrid dense & sparse vector search for media items.
+- Title search automatically strips leading articles ("The", "A", "An", etc.) for Qdrant queries, but reranking uses the full original title for best match (e.g., searching for "The Predator" queries Qdrant with "Predator" but reranks "The Predator" higher than "Predator").
 - Recommend similar media from a reference item.
 - GPU-enabled data loading and embeddings.
 
