@@ -5,6 +5,7 @@ from __future__ import annotations
 import asyncio
 import json
 import logging
+import re
 from typing import Annotated, Any, Mapping, Sequence, TYPE_CHECKING, cast
 
 from fastmcp.prompts import Message
@@ -27,35 +28,32 @@ if TYPE_CHECKING:  # pragma: no cover - imported for type checking only
 logger = logging.getLogger(__name__)
 
 
-def register_media_library_tools(server: "PlexServer") -> None:
-    """Register media discovery tools and resources on the provided server."""
+def _strip_leading_article(title: str | None) -> str | None:
+    """Remove leading articles (The, A, An, etc.) from a title for search purposes."""
+    if not title:
+        return title
+    # Regex for common English articles
+    return re.sub(r"^(the|a|an)\s+", "", title, flags=re.IGNORECASE).strip() or title
 
-    def _media_tool(name: str, *, title: str, operation: str):
-        return server.tool(
-            name,
-            title=title,
-            meta={"category": "media-library", "operation": operation},
-        )
 
-    def _to_aggregated_models(
-        payloads: list[AggregatedMediaItem],
-    ) -> list[AggregatedMediaItemModel]:
-        return [
-            AggregatedMediaItemModel.model_validate(payload)
-            if not isinstance(payload, AggregatedMediaItemModel)
-            else payload
-            for payload in payloads
-        ]
+def _listify(
+        value: Sequence[str | int] | str | int | None,
+    ) -> list[str]:
+        if value is None:
+            return []
+        if isinstance(value, (str, int)):
+            text = str(value).strip()
+            return [text] if text else []
+        items_list: list[str] = []
+        for entry in value:
+            if isinstance(entry, (str, int)):
+                text = str(entry).strip()
+                if text:
+                    items_list.append(text)
+        return items_list
 
-    def _summarize(
-        items: list[AggregatedMediaItem],
-    ) -> MediaSummaryResponseModel:
-        """Return the standard LLM summary for the provided media items."""
 
-        summary = media_helpers.summarize_media_items_for_llm(items)
-        return MediaSummaryResponseModel.model_validate(summary)
-
-    def _build_rerank_document(media: AggregatedMediaItem) -> str:
+def _build_rerank_document(media: AggregatedMediaItem) -> str:
         plex_info = media_helpers._extract_plex_metadata(media)
         segments: list[str] = []
 
@@ -108,23 +106,9 @@ def register_media_library_tools(server: "PlexServer") -> None:
                 deduped.append(normalized)
         return "\n".join(deduped)
 
-    def _listify(
-        value: Sequence[str | int] | str | int | None,
-    ) -> list[str]:
-        if value is None:
-            return []
-        if isinstance(value, (str, int)):
-            text = str(value).strip()
-            return [text] if text else []
-        items_list: list[str] = []
-        for entry in value:
-            if isinstance(entry, (str, int)):
-                text = str(entry).strip()
-                if text:
-                    items_list.append(text)
-        return items_list
 
-    async def _rerank_media_candidates(
+async def _rerank_media_candidates(
+        server: "PlexServer",
         query_text: str,
         items: list[AggregatedMediaItem],
         # Any is used here to accept arbitrary keyword arguments from tool callers
@@ -210,6 +194,35 @@ def register_media_library_tools(server: "PlexServer") -> None:
         ranked.sort(key=lambda entry: (-entry[0], entry[1]))
         return [entry[2] for entry in ranked]
 
+
+def register_media_library_tools(server: "PlexServer") -> None:
+    """Register media discovery tools and resources on the provided server."""
+
+    def _media_tool(name: str, *, title: str, operation: str):
+        return server.tool(
+            name,
+            title=title,
+            meta={"category": "media-library", "operation": operation},
+        )
+
+    def _to_aggregated_models(
+        payloads: list[AggregatedMediaItem],
+    ) -> list[AggregatedMediaItemModel]:
+        return [
+            AggregatedMediaItemModel.model_validate(payload)
+            if not isinstance(payload, AggregatedMediaItemModel)
+            else payload
+            for payload in payloads
+        ]
+
+    def _summarize(
+        items: list[AggregatedMediaItem],
+    ) -> MediaSummaryResponseModel:
+        """Return the standard LLM summary for the provided media items."""
+
+        summary = media_helpers.summarize_media_items_for_llm(items)
+        return MediaSummaryResponseModel.model_validate(summary)
+
     @_media_tool("get-media", title="Get media details", operation="lookup")
     async def get_media(
         identifier: Annotated[
@@ -227,7 +240,9 @@ def register_media_library_tools(server: "PlexServer") -> None:
         if cached_payload is not None:
             results = [cached_payload]
         else:
-            records = await media_helpers._find_records(server, identifier, limit=10)
+            # For Qdrant query, strip leading articles
+            qdrant_identifier = _strip_leading_article(identifier) if identifier else identifier
+            records = await media_helpers._find_records(server, qdrant_identifier, limit=10)
             results = [
                 media_helpers._flatten_payload(
                     cast(Mapping[str, JSONValue] | None, r.payload)
@@ -237,8 +252,12 @@ def register_media_library_tools(server: "PlexServer") -> None:
             if len(results) > 1 and not (
                 identifier.isdigit() or identifier.startswith("tt")
             ):
+                # Use the original identifier for reranking
                 results = await _rerank_media_candidates(
-                    identifier, results, title=identifier
+                    server,
+                    identifier,
+                    results,
+                    title=identifier
                 )
         return _to_aggregated_models(results)
 
@@ -445,6 +464,8 @@ def register_media_library_tools(server: "PlexServer") -> None:
 
         original_title_query = title
         title = _normalize_text(title)
+        # For Qdrant query, strip leading articles
+        qdrant_title = _strip_leading_article(title) if title else None
         show_title = _normalize_text(show_title)
 
         has_episode_hint = (
@@ -529,9 +550,9 @@ def register_media_library_tools(server: "PlexServer") -> None:
         must: list[models.FieldCondition] = []
         keyword_prefetch_conditions: list[models.FieldCondition] = []
 
-        if title:
+        if qdrant_title:
             must.append(
-                models.FieldCondition(key="title", match=models.MatchText(text=title))
+                models.FieldCondition(key="title", match=models.MatchText(text=qdrant_title))
             )
         if media_type:
             condition = models.FieldCondition(
@@ -715,10 +736,12 @@ def register_media_library_tools(server: "PlexServer") -> None:
             for p in res.points
         ]
         if rerank_query_text:
+            # Use the original title (with article) for reranking
             results = await _rerank_media_candidates(
+                server,
                 rerank_query_text,
                 results,
-                title=title,
+                title=original_title_query,
                 show_title=show_title,
                 actors=actors,
                 directors=directors,

@@ -40,6 +40,19 @@ class Settings(BaseSettings):
         default="cross-encoder/ms-marco-MiniLM-L-6-v2",
         validation_alias="RERANKER_MODEL",
     )
+    disabled_tools: list[str] = Field(
+        default_factory=lambda: [
+            "actor-movies",
+            "pause-media",
+            "resume-media",
+            "next-media",
+            "previous-media",
+            "fastforward-media",
+            "rewind-media",
+            "set-subtitle",
+        ],
+        validation_alias="DISABLED_TOOLS",
+    )
     plex_url: AnyHttpUrl | None = Field(default=None, validation_alias="PLEX_URL")
     plex_token: str | None = Field(default=None, validation_alias="PLEX_TOKEN")
     plex_player_aliases: PlexPlayerAliasMap = Field(
@@ -54,6 +67,26 @@ class Settings(BaseSettings):
     recommend_history_limit: int = Field(
         default=500, validation_alias="PLEX_RECOMMEND_HISTORY_LIMIT"
     )
+
+    @field_validator("disabled_tools", mode="before")
+    @classmethod
+    def _parse_disabled_tools(cls, value: Any) -> list[str]:
+        if value is None:
+            return []
+        if isinstance(value, str):
+            if not value.strip():
+                return []
+            if value.startswith("[") and value.endswith("]"):
+                try:
+                    loaded = json.loads(value)
+                    if isinstance(loaded, list):
+                        return [str(v).strip() for v in loaded if str(v).strip()]
+                except json.JSONDecodeError:
+                    pass
+            return [v.strip() for v in value.split(",") if v.strip()]
+        if isinstance(value, (list, tuple)):
+            return [str(v).strip() for v in value if str(v).strip()]
+        return []
 
     @field_validator("plex_player_aliases", mode="before")
     @classmethod

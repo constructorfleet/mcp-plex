@@ -361,7 +361,8 @@ _MEDIA_RESOURCE_EXPORTS = {
 _MEDIA_PROMPT_EXPORTS = {"media_info": "media-info"}
 
 for attr_name, tool_name in _MEDIA_TOOL_EXPORTS.items():
-    globals()[attr_name] = server._tool_manager._tools[tool_name]
+    if tool_name in server._tool_manager._tools:
+        globals()[attr_name] = server._tool_manager._tools[tool_name]
 
 for attr_name, resource_uri in _MEDIA_RESOURCE_EXPORTS.items():
     globals()[attr_name] = server._resource_manager._templates[resource_uri]
@@ -1137,7 +1138,10 @@ async def play_media(
 ) -> PlayMediaResponseModel:
     """Play a media item on a specific Plex player."""
 
-    media = await media_helpers._get_media_data(server, identifier)
+    from mcp_plex.server.tools.media_library import _strip_leading_article
+    # Strip leading article for Qdrant/media lookup, but preserve original for reranking and response
+    qdrant_identifier = _strip_leading_article(identifier) if identifier else ""
+    media = await media_helpers._get_media_data(server, str(qdrant_identifier))
     rating_key_normalized, plex_info = _resolve_rating_key(media)
 
     players = await _get_plex_players()

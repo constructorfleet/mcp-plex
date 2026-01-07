@@ -58,10 +58,32 @@ async def _find_records(
     flt = models.Filter(should=should)
     points, _ = await server.qdrant_client.scroll(
         collection_name="media-items",
-        limit=limit,
         scroll_filter=flt,
+        limit=limit,
         with_payload=True,
     )
+    # Rerank results if more than one found
+    if len(points) > 1:
+        from mcp_plex.server.tools.media_library import _rerank_media_candidates
+        # Use identifier for rerank query text and title
+        flat_items = [
+            _flatten_payload(cast(Mapping[str, JSONValue] | None, p.payload)) for p in points
+        ]
+        reranked = await _rerank_media_candidates(
+            server,
+            identifier,
+            flat_items,
+            title=identifier
+        )
+        # Map reranked items back to their original point objects
+        # (Assume rating_key is unique)
+        key_map = {str(_extract_plex_metadata(item).get("rating_key")): p for item, p in zip(flat_items, points)}
+        result_points = []
+        for item in reranked:
+            rk = str(_extract_plex_metadata(item).get("rating_key"))
+            if rk in key_map:
+                result_points.append(key_map[rk])
+        return result_points
     return points
 
 
