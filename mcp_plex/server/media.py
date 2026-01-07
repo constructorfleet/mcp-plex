@@ -56,35 +56,34 @@ async def _find_records(
         models.FieldCondition(key="title", match=models.MatchText(text=identifier))
     )
     flt = models.Filter(should=should)
-        points, _ = await server.qdrant_client.scroll(
-            collection_name="media-items",
-            scroll_filter=flt,
-            limit=limit,
-            with_payload=True,
+    points, _ = await server.qdrant_client.scroll(
+        collection_name="media-items",
+        scroll_filter=flt,
+        limit=limit,
+        with_payload=True,
+    )
+    # Rerank results if more than one found
+    if len(points) > 1:
+        from mcp_plex.server.tools.media_library import _rerank_media_candidates
+        # Use identifier for rerank query text and title
+        flat_items = [
+            _flatten_payload(cast(Mapping[str, JSONValue] | None, p.payload)) for p in points
+        ]
+        reranked = await _rerank_media_candidates(
+            server,
+            identifier,
+            flat_items,
+            title=identifier
         )
-        # Rerank results if more than one found
-        if len(points) > 1:
-            from mcp_plex.server.tools.media_library import _rerank_media_candidates
-            # Use identifier for rerank query text and title
-            flat_items = [
-                _flatten_payload(cast(Mapping[str, JSONValue] | None, p.payload)) for p in points
-            ]
-            reranked = await _rerank_media_candidates(
-                server,
-                identifier,
-                flat_items,
-                title=identifier
-            )
-            # Map reranked items back to their original point objects
-            # (Assume rating_key is unique)
-            key_map = {str(_extract_plex_metadata(item).get("rating_key")): p for p in points}
-            result_points = []
-            for item in reranked:
-                rk = str(_extract_plex_metadata(item).get("rating_key"))
-                if rk in key_map:
-                    result_points.append(key_map[rk])
-            return result_points
-        return points
+        # Map reranked items back to their original point objects
+        # (Assume rating_key is unique)
+        key_map = {str(_extract_plex_metadata(item).get("rating_key")): p for p in points}
+        result_points = []
+        for item in reranked:
+            rk = str(_extract_plex_metadata(item).get("rating_key"))
+            if rk in key_map:
+                result_points.append(key_map[rk])
+        return result_points
     return points
 
 
