@@ -40,6 +40,19 @@ class Settings(BaseSettings):
         default="cross-encoder/ms-marco-MiniLM-L-6-v2",
         validation_alias="RERANKER_MODEL",
     )
+    disabled_tools: list[str] = Field(
+        default_factory=lambda: [
+            "actor-movies",
+            "pause-media",
+            "resume-media",
+            "next-media",
+            "previous-media",
+            "fastforward-media",
+            "rewind-media",
+            "set-subtitle",
+        ],
+        validation_alias="DISABLED_TOOLS",
+    )
     plex_url: AnyHttpUrl | None = Field(default=None, validation_alias="PLEX_URL")
     plex_token: str | None = Field(default=None, validation_alias="PLEX_TOKEN")
     plex_player_aliases: PlexPlayerAliasMap = Field(

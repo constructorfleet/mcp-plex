@@ -22,6 +22,7 @@ services:
       PLEX_TOKEN: ${PLEX_TOKEN}
       TMDB_API_KEY: ${TMDB_API_KEY}
       QDRANT_URL: http://qdrant:6333
+      DISABLED_TOOLS: ${DISABLED_TOOLS:-actor-movies,pause-media,resume-media,next-media,previous-media,fastforward-media,rewind-media,set-subtitle}
     depends_on:
       - qdrant
     command: mcp-server --transport sse --bind 0.0.0.0 --port 8000 --mount /mcp

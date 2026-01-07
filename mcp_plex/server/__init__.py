@@ -361,7 +361,8 @@ _MEDIA_RESOURCE_EXPORTS = {
 _MEDIA_PROMPT_EXPORTS = {"media_info": "media-info"}
 
 for attr_name, tool_name in _MEDIA_TOOL_EXPORTS.items():
-    globals()[attr_name] = server._tool_manager._tools[tool_name]
+    if tool_name in server._tool_manager._tools:
+        globals()[attr_name] = server._tool_manager._tools[tool_name]
 
 for attr_name, resource_uri in _MEDIA_RESOURCE_EXPORTS.items():
     globals()[attr_name] = server._resource_manager._templates[resource_uri]
