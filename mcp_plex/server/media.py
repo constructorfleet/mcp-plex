@@ -77,7 +77,7 @@ async def _find_records(
         )
         # Map reranked items back to their original point objects
         # (Assume rating_key is unique)
-        key_map = {str(_extract_plex_metadata(item).get("rating_key")): p for p in points}
+        key_map = {str(_extract_plex_metadata(item).get("rating_key")): p for item, p in zip(flat_items, points)}
         result_points = []
         for item in reranked:
             rk = str(_extract_plex_metadata(item).get("rating_key"))
