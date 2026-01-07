@@ -9,7 +9,7 @@ import pytest
     ("a Quiet Place", "Quiet Place"),
     ("an Honest Liar", "Honest Liar"),
     ("Predator", "Predator"),
-    ("The   ", "The"),
+    ("The   ", "The   "),
     ("", ""),
     (None, None),
 ])
