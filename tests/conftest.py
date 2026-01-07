@@ -12,4 +12,4 @@ def pytest_configure(config):
     import os
 
     if "DISABLED_TOOLS" not in os.environ:
-        os.environ["DISABLED_TOOLS"] = ""
+        os.environ["DISABLED_TOOLS"] = "[]"

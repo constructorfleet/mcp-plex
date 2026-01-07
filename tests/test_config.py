@@ -70,3 +70,21 @@ def test_settings_invalid_alias_sequence():
         Settings.model_validate(
             {"PLEX_PLAYER_ALIASES": [("machine-1", "Living Room", "Extra")]}
         )
+
+
+def test_settings_disabled_tools_env(monkeypatch):
+    monkeypatch.setenv("DISABLED_TOOLS", "tool1, tool2")
+    settings = Settings()
+    assert settings.disabled_tools == ["tool1", "tool2"]
+
+
+def test_settings_disabled_tools_json_env(monkeypatch):
+    monkeypatch.setenv("DISABLED_TOOLS", '["tool3", "tool4"]')
+    settings = Settings()
+    assert settings.disabled_tools == ["tool3", "tool4"]
+
+
+def test_settings_disabled_tools_empty_env(monkeypatch):
+    monkeypatch.setenv("DISABLED_TOOLS", "")
+    settings = Settings()
+    assert settings.disabled_tools == []
