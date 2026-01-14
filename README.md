@@ -11,9 +11,11 @@ tools through the [Model Context Protocol](https://github.com/modelcontextprotoc
 ## Features
 - Load Plex libraries into a Qdrant vector database.
 - Hybrid dense & sparse vector search for media items.
-- Title search automatically strips leading articles ("The", "A", "An", etc.) for Qdrant queries, but reranking uses the full original title for best match (e.g., searching for "The Predator" queries Qdrant with "Predator" but reranks "The Predator" higher than "Predator").
+- Title search automatically strips leading articles ("The", "A", "An", etc.) and now falls back to hybrid dense/sparse vector similarity so near-miss spellings still resolve (e.g., asking for "The Gentleman" returns "The Gentlemen").
 - Recommend similar media from a reference item.
 - GPU-enabled data loading and embeddings.
+
+> GPU dependencies are installed automatically on Linux x86_64 hosts. Arm64 (including Apple Silicon dev containers) falls back to the CPU-only embedding stack so setup succeeds everywhere.
 
 ## Installation
 1. Install [`uv`](https://github.com/astral-sh/uv).
@@ -291,6 +293,16 @@ Run linting and tests through `uv`:
 uv run ruff check .
 uv run pytest
 ```
+
+### VS Code Dev Container
+The `.devcontainer` setup builds on top of `mcr.microsoft.com/devcontainers/base:ubuntu-22.04`,
+copies the `uv` binaries from `ghcr.io/astral-sh/uv`, and runs `uv sync --extra dev` after the
+container is created so the local `.venv` matches `uv.lock`. Open the folder in VS Code and choose
+**Dev Containers: Reopen in Container** to use it. The definition mounts a persistent `uv-cache`
+volume at `/home/vscode/.cache/uv` so Python downloads and wheels survive rebuilds; remove the
+volume if you need a fully fresh install. Override the `UV_DISTRO_IMAGE` build argument inside
+`.devcontainer/devcontainer.json` to pin a specific uv release (for example,
+`ghcr.io/astral-sh/uv:0.9.25`) and run **Dev Containers: Rebuild Container** to apply the change.
 
 ## Contributing
 Please read [AGENTS.md](AGENTS.md) for commit message conventions and PR
