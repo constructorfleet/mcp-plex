@@ -5,14 +5,14 @@ from __future__ import annotations
 import asyncio
 import json
 import logging
-import re
-from typing import Annotated, Any, Mapping, Sequence, TYPE_CHECKING, cast
+from typing import TYPE_CHECKING, Annotated, Any, Mapping, Sequence, cast
 
-from fastmcp.prompts import Message
+from fastmcp.prompts import Message, PromptMessage
 from pydantic import Field
 from qdrant_client import models
 from rapidfuzz import fuzz
 
+from ...common import strip_leading_article as common_strip_leading_article
 from ...common.types import JSONValue
 from .. import media as media_helpers
 from ..models import (
@@ -30,10 +30,8 @@ logger = logging.getLogger(__name__)
 
 def _strip_leading_article(title: str | None) -> str | None:
     """Remove leading articles (The, A, An, etc.) from a title for search purposes."""
-    if not title:
-        return title
-    # Regex for common English articles
-    return re.sub(r"^(the|a|an)\s+", "", title, flags=re.IGNORECASE).strip() or title
+
+    return common_strip_leading_article(title)
 
 
 def _listify(
@@ -241,8 +239,14 @@ def register_media_library_tools(server: "PlexServer") -> None:
             results = [cached_payload]
         else:
             # For Qdrant query, strip leading articles
-            qdrant_identifier = _strip_leading_article(identifier) if identifier else identifier
-            records = await media_helpers._find_records(server, qdrant_identifier, limit=10)
+            qdrant_identifier = (
+                _strip_leading_article(identifier) if identifier else identifier
+            )
+            if not qdrant_identifier:
+                qdrant_identifier = identifier
+            records = await media_helpers._find_records(
+                server, qdrant_identifier, limit=10
+            )
             results = [
                 media_helpers._flatten_payload(
                     cast(Mapping[str, JSONValue] | None, r.payload)
@@ -462,19 +466,17 @@ def register_media_library_tools(server: "PlexServer") -> None:
                 models.FieldCondition(key=key, range=models.Range(**range_kwargs))
             )
 
-        original_title_query = title
-        title = _normalize_text(title)
-        # For Qdrant query, strip leading articles
-        qdrant_title = _strip_leading_article(title) if title else None
+        original_title_query = _normalize_text(title)
+        normalized_title = original_title_query
         show_title = _normalize_text(show_title)
 
         has_episode_hint = (
             season_number is not None or episode_number is not None
         )
         inferred_show_title: str | None = None
-        if has_episode_hint and title and not show_title:
+        if has_episode_hint and normalized_title and not show_title:
             records = await media_helpers._find_records(
-                server, title, limit=5
+                server, normalized_title, limit=5
             )
             for record in records:
                 payload = cast(Mapping[str, JSONValue] | None, record.payload)
@@ -491,7 +493,7 @@ def register_media_library_tools(server: "PlexServer") -> None:
                         break
             if inferred_show_title:
                 show_title = inferred_show_title
-                title = None
+                normalized_title = None
 
         media_type = type
         if media_type is None and (
@@ -499,13 +501,16 @@ def register_media_library_tools(server: "PlexServer") -> None:
         ):
             media_type = "episode"
 
+        dense_vector_text = dense_query or original_title_query
+        sparse_vector_text = sparse_query or original_title_query
+
         vector_queries: list[tuple[str, models.Document]] = []
         positive_point_ids: list[Any] = []
         similar_identifiers = _listify(similar_to)
         if similar_identifiers:
             for identifier in similar_identifiers:
                 records = await media_helpers._find_records(
-                    server, identifier, limit=1
+                    server, identifier, limit=1, allow_vector=False
                 )
                 for record in records:
                     if record.id is not None:
@@ -513,21 +518,21 @@ def register_media_library_tools(server: "PlexServer") -> None:
             if not positive_point_ids:
                 return _finalize([])
         if not positive_point_ids:
-            if dense_query:
+            if dense_vector_text:
                 vector_queries.append(
                     (
                         "dense",
                         models.Document(
-                            text=dense_query, model=server.settings.dense_model
+                            text=dense_vector_text, model=server.settings.dense_model
                         ),
                     )
                 )
-            if sparse_query:
+            if sparse_vector_text:
                 vector_queries.append(
                     (
                         "sparse",
                         models.Document(
-                            text=sparse_query, model=server.settings.sparse_model
+                            text=sparse_vector_text, model=server.settings.sparse_model
                         ),
                     )
                 )
@@ -535,9 +540,9 @@ def register_media_library_tools(server: "PlexServer") -> None:
         rerank_query_text: str | None = None
         if not positive_point_ids:
             for candidate in (
+                original_title_query,
                 dense_query,
                 sparse_query,
-                original_title_query,
                 summary,
                 overview,
                 plot,
@@ -547,102 +552,98 @@ def register_media_library_tools(server: "PlexServer") -> None:
                 if rerank_query_text:
                     break
 
-        must: list[models.FieldCondition] = []
+        must_conditions: list[models.FieldCondition] = []
         keyword_prefetch_conditions: list[models.FieldCondition] = []
 
-        if qdrant_title:
-            must.append(
-                models.FieldCondition(key="title", match=models.MatchText(text=qdrant_title))
-            )
         if media_type:
             condition = models.FieldCondition(
                 key="type", match=models.MatchValue(value=media_type)
             )
-            must.append(condition)
+            must_conditions.append(condition)
             keyword_prefetch_conditions.append(condition)
         if year is not None:
-            must.append(
+            must_conditions.append(
                 models.FieldCondition(key="year", match=models.MatchValue(value=year))
             )
-        _append_range_condition(must, "year", gte=year_from, lte=year_to)
+        _append_range_condition(must_conditions, "year", gte=year_from, lte=year_to)
         _append_range_condition(
-            must, "added_at", gte=added_after, lte=added_before
+            must_conditions, "added_at", gte=added_after, lte=added_before
         )
 
         for actor in _listify(actors):
             condition = models.FieldCondition(
                 key="actors", match=models.MatchValue(value=actor)
             )
-            must.append(condition)
+            must_conditions.append(condition)
             keyword_prefetch_conditions.append(condition)
         for director in _listify(directors):
             condition = models.FieldCondition(
                 key="directors", match=models.MatchValue(value=director)
             )
-            must.append(condition)
+            must_conditions.append(condition)
             keyword_prefetch_conditions.append(condition)
         for writer in _listify(writers):
             condition = models.FieldCondition(
                 key="writers", match=models.MatchValue(value=writer)
             )
-            must.append(condition)
+            must_conditions.append(condition)
             keyword_prefetch_conditions.append(condition)
         for genre in _listify(genres):
             condition = models.FieldCondition(
                 key="genres", match=models.MatchValue(value=genre)
             )
-            must.append(condition)
+            must_conditions.append(condition)
             keyword_prefetch_conditions.append(condition)
         for collection in _listify(collections):
             condition = models.FieldCondition(
                 key="collections", match=models.MatchValue(value=collection)
             )
-            must.append(condition)
+            must_conditions.append(condition)
             keyword_prefetch_conditions.append(condition)
 
         if show_title:
             condition = models.FieldCondition(
                 key="show_title", match=models.MatchValue(value=show_title)
             )
-            must.append(condition)
+            must_conditions.append(condition)
             keyword_prefetch_conditions.append(condition)
         if season_number is not None:
-            must.append(
+            must_conditions.append(
                 models.FieldCondition(
                     key="season_number", match=models.MatchValue(value=season_number)
                 )
             )
         if episode_number is not None:
-            must.append(
+            must_conditions.append(
                 models.FieldCondition(
                     key="episode_number", match=models.MatchValue(value=episode_number)
                 )
             )
 
         if summary:
-            must.append(
+            must_conditions.append(
                 models.FieldCondition(
                     key="summary", match=models.MatchText(text=summary)
                 )
             )
         if overview:
-            must.append(
+            must_conditions.append(
                 models.FieldCondition(
                     key="overview", match=models.MatchText(text=overview)
                 )
             )
         if plot:
-            must.append(
+            must_conditions.append(
                 models.FieldCondition(key="plot", match=models.MatchText(text=plot))
             )
         if tagline:
-            must.append(
+            must_conditions.append(
                 models.FieldCondition(
                     key="tagline", match=models.MatchText(text=tagline)
                 )
             )
         if reviews:
-            must.append(
+            must_conditions.append(
                 models.FieldCondition(
                     key="reviews", match=models.MatchText(text=reviews)
                 )
@@ -653,30 +654,36 @@ def register_media_library_tools(server: "PlexServer") -> None:
                 key="data.plex.rating_key",
                 match=models.MatchValue(value=plex_rating_key),
             )
-            must.append(condition)
+            must_conditions.append(condition)
             keyword_prefetch_conditions.append(condition)
         if imdb_id:
             condition = models.FieldCondition(
                 key="data.imdb.id", match=models.MatchValue(value=imdb_id)
             )
-            must.append(condition)
+            must_conditions.append(condition)
             keyword_prefetch_conditions.append(condition)
         if tmdb_id is not None:
-            must.append(
+            must_conditions.append(
                 models.FieldCondition(
                     key="data.tmdb.id", match=models.MatchValue(value=tmdb_id)
                 )
             )
 
         filter_obj: models.Filter | None = None
-        if must:
-            filter_obj = models.Filter(must=must)
+        if must_conditions:
+            filter_obj = models.Filter(
+                must=cast(list[models.Condition], must_conditions)
+            )
 
         prefetch_filter: models.Filter | None = None
         if keyword_prefetch_conditions:
-            prefetch_filter = models.Filter(must=keyword_prefetch_conditions)
+            prefetch_filter = models.Filter(
+                must=cast(list[models.Condition], keyword_prefetch_conditions)
+            )
             if filter_obj is None:
-                filter_obj = models.Filter(must=keyword_prefetch_conditions)
+                filter_obj = models.Filter(
+                    must=cast(list[models.Condition], keyword_prefetch_conditions)
+                )
 
         query_obj: models.Query | None = None
         using_param: str | None = None
@@ -713,7 +720,7 @@ def register_media_library_tools(server: "PlexServer") -> None:
                 prefetch_param = prefetch_entries
             else:
                 prefetch_entry = prefetch_entries[0]
-                query_obj = prefetch_entry.query
+                query_obj = cast(models.Query | None, prefetch_entry.query)
                 using_param = prefetch_entry.using
                 prefetch_param = None
 
@@ -873,7 +880,7 @@ def register_media_library_tools(server: "PlexServer") -> None:
             if year_to is not None:
                 rng["lte"] = year_to
             must.append(models.FieldCondition(key="year", range=models.Range(**rng)))
-        flt = models.Filter(must=must)
+        flt = models.Filter(must=cast(list[models.Condition], must))
         query = models.OrderByQuery(
             order_by=models.OrderBy(key="year", direction=models.Direction.DESC)
         )
@@ -994,7 +1001,7 @@ def register_media_library_tools(server: "PlexServer") -> None:
                 examples=["49915", "tt8367814", "The Gentlemen"],
             ),
         ],
-    ) -> list[Message]:
+    ) -> list[PromptMessage]:
         """Return a basic description for the given media identifier."""
 
         data = await media_helpers._get_media_data(server, identifier)

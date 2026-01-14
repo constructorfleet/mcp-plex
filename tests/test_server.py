@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import asyncio
+import builtins
 import importlib
 import json
 import logging
@@ -8,21 +9,18 @@ import sys
 import types
 from contextlib import contextmanager
 from pathlib import Path
-
-import builtins
 from typing import Any
 
 import pytest
+from plexapi.exceptions import PlexApiException
+from pydantic import ValidationError
 from qdrant_client import models
 from starlette.testclient import TestClient
-from plexapi.exceptions import PlexApiException
 
 from mcp_plex import loader
 from mcp_plex import server as server_module
 from mcp_plex.server import media as media_helpers
 from mcp_plex.server.tools import media_library as media_library_tools
-from pydantic import ValidationError
-
 
 REMOVED_MEDIA_TOOL_NAMES = (
     "search_media",
@@ -161,6 +159,18 @@ def test_server_tools(monkeypatch):
         )
         assert structured["results"][0]["identifiers"]["rating_key"] == movie_id
         assert "directors" in structured["results"][0]
+
+        fuzzy_structured = asyncio.run(
+            server.query_media.fn(
+                title="The Gentleman",
+                type="movie",
+                limit=1,
+            )
+        )
+        assert fuzzy_structured["results"], "expected fuzzy title query to return results"
+        assert (
+            fuzzy_structured["results"][0]["identifiers"]["rating_key"] == movie_id
+        )
 
         episode_structured = asyncio.run(
             server.query_media.fn(
@@ -345,10 +355,14 @@ def test_get_media_data_caches_external_ids(monkeypatch):
 
         original_find_records = media_helpers._find_records
 
-        async def _counting_find_records(plex_server, identifier: str, limit: int = 1):
+        async def _counting_find_records(
+            plex_server, identifier: str, limit: int = 1, allow_vector: bool = True
+        ):
             nonlocal call_count
             call_count += 1
-            return await original_find_records(plex_server, identifier, limit=limit)
+            return await original_find_records(
+                plex_server, identifier, limit=limit, allow_vector=allow_vector
+            )
 
         monkeypatch.setattr(media_helpers, "_find_records", _counting_find_records)
 
@@ -378,10 +392,14 @@ def test_get_media_data_ignores_mismatched_cached_identifier(monkeypatch):
 
         original_find_records = media_helpers._find_records
 
-        async def _counting_find_records(plex_server, identifier: str, limit: int = 1):
+        async def _counting_find_records(
+            plex_server, identifier: str, limit: int = 1, allow_vector: bool = True
+        ):
             nonlocal call_count
             call_count += 1
-            return await original_find_records(plex_server, identifier, limit=limit)
+            return await original_find_records(
+                plex_server, identifier, limit=limit, allow_vector=allow_vector
+            )
 
         monkeypatch.setattr(media_helpers, "_find_records", _counting_find_records)
 
@@ -523,6 +541,17 @@ def test_play_media_with_alias(monkeypatch):
         offset_call = play_requests[0]
         assert offset_call["kwargs"]["machineIdentifier"] == "server-001"
         assert offset_call["kwargs"]["offset"] == offset_seconds * 1000
+
+        play_requests.clear()
+        fetch_requests.clear()
+
+        fuzzy_play = asyncio.run(
+            server.play_media.fn(identifier="The Gentleman", player="Living Room")
+        )
+
+        assert fuzzy_play["rating_key"] == "49915"
+        assert fuzzy_play["player"] == "Living Room"
+        assert fetch_requests == ["/library/metadata/49915"]
 
 
 def test_queue_media_adds_to_queue(monkeypatch):
@@ -1348,6 +1377,48 @@ def test_find_records_handles_retrieve_error(monkeypatch):
         assert records and records[0].payload["data"]["plex"]["rating_key"] == "1"
 
 
+def test_find_records_uses_vector_for_titles(monkeypatch):
+    with _load_server(monkeypatch) as module:
+        captured: dict[str, object] = {}
+
+        async def fake_query_points(*args, **kwargs):
+            captured.update(kwargs)
+            payload = {
+                "title": "The Gentlemen",
+                "plex": {"rating_key": "49915"},
+            }
+            point = types.SimpleNamespace(payload=payload, id="49915")
+            return types.SimpleNamespace(points=[point])
+
+        async def fake_retrieve(*args, **kwargs):
+            return []
+
+        async def passthrough_rerank(server, query_text, items, **filters):
+            return items
+
+        monkeypatch.setattr(module.server.qdrant_client, "retrieve", fake_retrieve)
+        monkeypatch.setattr(
+            module.server.qdrant_client, "query_points", fake_query_points
+        )
+        monkeypatch.setattr(
+            media_library_tools, "_rerank_media_candidates", passthrough_rerank
+        )
+
+        records = asyncio.run(
+            media_helpers._find_records(module.server, "The Gentleman", limit=3)
+        )
+
+        assert records, "expected vector fallback to resolve fuzzy title"
+        prefetch_entries = captured.get("prefetch")
+        assert prefetch_entries, "expected hybrid vector prefetch entries"
+        texts = {
+            getattr(getattr(entry.query, "nearest", None), "text", None)
+            for entry in prefetch_entries
+        }
+        assert "The Gentleman" in texts
+        assert "Gentleman" in texts
+
+
 def test_media_resources_cache_hits(monkeypatch):
     with _load_server(monkeypatch) as module:
         rating_key = "49915"
@@ -1493,6 +1564,37 @@ def test_query_media_filters(monkeypatch):
             assert keys == expected_prefetch_keys
 
 
+def test_query_media_injects_title_vector_query(monkeypatch):
+    with _load_server(monkeypatch) as module:
+        captured: dict[str, object] = {}
+
+        async def fake_query_points(*args, **kwargs):
+            captured.update(kwargs)
+            payload = {"title": "Result", "plex": {"rating_key": "1"}}
+            return types.SimpleNamespace(
+                points=[types.SimpleNamespace(payload=payload, score=1.0)]
+            )
+
+        monkeypatch.setattr(
+            module.server.qdrant_client, "query_points", fake_query_points
+        )
+
+        asyncio.run(module.query_media.fn(title="Amelie", limit=1))
+
+        assert captured.get("query_filter") is None
+        vector_texts: set[str | None] = set()
+        prefetch_entries = captured.get("prefetch")
+        if prefetch_entries:
+            for entry in prefetch_entries:
+                nearest = getattr(getattr(entry.query, "nearest", None), "text", None)
+                vector_texts.add(nearest)
+        else:
+            query_obj = captured.get("query")
+            nearest = getattr(getattr(query_obj, "nearest", None), "text", None)
+            vector_texts.add(nearest)
+        assert "Amelie" in vector_texts
+
+
 def test_query_media_filters_without_vectors(monkeypatch):
     with _load_server(monkeypatch) as module:
         captured: dict[str, object] = {}
@@ -1519,7 +1621,11 @@ def test_query_media_filters_without_vectors(monkeypatch):
         assert result["results"][0]["identifiers"]["rating_key"] == "1"
         query_filter = captured["query_filter"]
         assert query_filter is not None
-        keys = {condition.key for condition in query_filter.must}
+        keys = {
+            condition.key
+            for condition in query_filter.must
+            if hasattr(condition, "key")
+        }
         assert keys == {"type", "actors"}
         assert captured["prefetch"] is None
 
@@ -1528,7 +1634,9 @@ def test_query_media_infers_show_title_for_episode_requests(monkeypatch):
     with _load_server(monkeypatch) as module:
         captured: dict[str, object] = {}
 
-        async def fake_find_records(server, identifier, limit=5):
+        async def fake_find_records(
+            server, identifier, limit=5, allow_vector: bool = True
+        ):
             payload = {
                 "show_title": "South Park",
                 "data": {
@@ -1568,7 +1676,7 @@ def test_query_media_infers_show_title_for_episode_requests(monkeypatch):
         assert "show_title" in keys
         assert "type" in keys
         for condition in query_filter.must:
-            if condition.key == "show_title":
+            if getattr(condition, "key", None) == "show_title":
                 assert condition.match.value == "South Park"
 
 

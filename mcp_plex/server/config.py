@@ -40,7 +40,7 @@ class Settings(BaseSettings):
         default="cross-encoder/ms-marco-MiniLM-L-6-v2",
         validation_alias="RERANKER_MODEL",
     )
-    disabled_tools: list[str] = Field(
+    disabled_tools: list[str] | str | None = Field(
         default_factory=lambda: [
             "actor-movies",
             "pause-media",
