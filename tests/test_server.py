@@ -9,7 +9,7 @@ import sys
 import types
 from contextlib import contextmanager
 from pathlib import Path
-from typing import Any
+from typing import Any, Mapping, cast
 
 import pytest
 from plexapi.exceptions import PlexApiException
@@ -19,6 +19,7 @@ from starlette.testclient import TestClient
 
 from mcp_plex import loader
 from mcp_plex import server as server_module
+from mcp_plex.common.types import JSONValue
 from mcp_plex.server import media as media_helpers
 from mcp_plex.server.tools import media_library as media_library_tools
 
@@ -215,6 +216,19 @@ def test_server_tools(monkeypatch):
             if isinstance(item.get("identifiers"), dict)
         } >= {"61960"}
 
+        similar_title_structured = asyncio.run(
+            server.query_media.fn(
+                similar_to="The Gentleman",
+                type="movie",
+                limit=1,
+            )
+        )
+        assert similar_title_structured["results"], "expected title-based similar_to"
+        assert (
+            similar_title_structured["results"][0]["identifiers"]["rating_key"]
+            == movie_id
+        )
+
         empty_structured = asyncio.run(
             server.query_media.fn(
                 similar_to="does-not-exist",
@@ -356,12 +370,20 @@ def test_get_media_data_caches_external_ids(monkeypatch):
         original_find_records = media_helpers._find_records
 
         async def _counting_find_records(
-            plex_server, identifier: str, limit: int = 1, allow_vector: bool = True
+            plex_server,
+            identifier: str,
+            limit: int = 1,
+            allow_vector: bool = True,
+            min_title_ratio: int | None = None,
         ):
             nonlocal call_count
             call_count += 1
             return await original_find_records(
-                plex_server, identifier, limit=limit, allow_vector=allow_vector
+                plex_server,
+                identifier,
+                limit=limit,
+                allow_vector=allow_vector,
+                min_title_ratio=min_title_ratio,
             )
 
         monkeypatch.setattr(media_helpers, "_find_records", _counting_find_records)
@@ -393,12 +415,20 @@ def test_get_media_data_ignores_mismatched_cached_identifier(monkeypatch):
         original_find_records = media_helpers._find_records
 
         async def _counting_find_records(
-            plex_server, identifier: str, limit: int = 1, allow_vector: bool = True
+            plex_server,
+            identifier: str,
+            limit: int = 1,
+            allow_vector: bool = True,
+            min_title_ratio: int | None = None,
         ):
             nonlocal call_count
             call_count += 1
             return await original_find_records(
-                plex_server, identifier, limit=limit, allow_vector=allow_vector
+                plex_server,
+                identifier,
+                limit=limit,
+                allow_vector=allow_vector,
+                min_title_ratio=min_title_ratio,
             )
 
         monkeypatch.setattr(media_helpers, "_find_records", _counting_find_records)
@@ -1419,6 +1449,41 @@ def test_find_records_uses_vector_for_titles(monkeypatch):
         assert "Gentleman" in texts
 
 
+def test_find_records_numeric_title_falls_back_to_vector(monkeypatch):
+    with _load_server(monkeypatch) as module:
+        async def fake_query_points(*args, **kwargs):
+            payload = {
+                "title": "1917",
+                "plex": {"rating_key": "700"},
+            }
+            point = types.SimpleNamespace(payload=payload, id="700")
+            return types.SimpleNamespace(points=[point])
+
+        async def fake_retrieve(*args, **kwargs):
+            return []
+
+        async def fake_scroll(*args, **kwargs):
+            return ([], None)
+
+        async def passthrough_rerank(server, query_text, items, **filters):
+            return items
+
+        monkeypatch.setattr(module.server.qdrant_client, "retrieve", fake_retrieve)
+        monkeypatch.setattr(module.server.qdrant_client, "scroll", fake_scroll)
+        monkeypatch.setattr(
+            module.server.qdrant_client, "query_points", fake_query_points
+        )
+        monkeypatch.setattr(
+            media_library_tools, "_rerank_media_candidates", passthrough_rerank
+        )
+
+        records = asyncio.run(media_helpers._find_records(module.server, "1917", limit=3))
+
+        assert records, "expected vector fallback for numeric titles"
+        payload = cast(Mapping[str, JSONValue], records[0].payload)
+        assert payload["plex"]["rating_key"] == "700"
+
+
 def test_media_resources_cache_hits(monkeypatch):
     with _load_server(monkeypatch) as module:
         rating_key = "49915"
@@ -1635,7 +1700,11 @@ def test_query_media_infers_show_title_for_episode_requests(monkeypatch):
         captured: dict[str, object] = {}
 
         async def fake_find_records(
-            server, identifier, limit=5, allow_vector: bool = True
+            server,
+            identifier,
+            limit=5,
+            allow_vector: bool = True,
+            min_title_ratio: int | None = None,
         ):
             payload = {
                 "show_title": "South Park",

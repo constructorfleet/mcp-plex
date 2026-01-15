@@ -27,6 +27,8 @@ if TYPE_CHECKING:  # pragma: no cover - imported for type checking only
 
 logger = logging.getLogger(__name__)
 
+SIMILAR_TO_MIN_TITLE_RATIO = 80
+
 
 def _strip_leading_article(title: str | None) -> str | None:
     """Remove leading articles (The, A, An, etc.) from a title for search purposes."""
@@ -501,56 +503,71 @@ def register_media_library_tools(server: "PlexServer") -> None:
         ):
             media_type = "episode"
 
-        dense_vector_text = dense_query or original_title_query
-        sparse_vector_text = sparse_query or original_title_query
-
         vector_queries: list[tuple[str, models.Document]] = []
         positive_point_ids: list[Any] = []
         similar_identifiers = _listify(similar_to)
+        similar_text_queries: list[str] = []
         if similar_identifiers:
             for identifier in similar_identifiers:
+                identifier_text = identifier.strip()
+                if not identifier_text:
+                    continue
                 records = await media_helpers._find_records(
-                    server, identifier, limit=1, allow_vector=False
+                    server,
+                    identifier_text,
+                    limit=1,
+                    min_title_ratio=SIMILAR_TO_MIN_TITLE_RATIO,
                 )
+                if not records:
+                    continue
+                normalized_identifier_text = _normalize_text(identifier_text)
+                if (
+                    normalized_identifier_text
+                    and not media_helpers._should_use_identifier_filter(identifier_text)
+                    and normalized_identifier_text not in similar_text_queries
+                ):
+                    similar_text_queries.append(normalized_identifier_text)
                 for record in records:
                     if record.id is not None:
                         positive_point_ids.append(record.id)
-            if not positive_point_ids:
+            if not positive_point_ids and not similar_text_queries:
                 return _finalize([])
-        if not positive_point_ids:
-            if dense_vector_text:
-                vector_queries.append(
-                    (
-                        "dense",
-                        models.Document(
-                            text=dense_vector_text, model=server.settings.dense_model
-                        ),
-                    )
+        similar_query_text = similar_text_queries[0] if similar_text_queries else None
+        dense_vector_text = dense_query or original_title_query or similar_query_text
+        sparse_vector_text = sparse_query or original_title_query or similar_query_text
+        if dense_vector_text:
+            vector_queries.append(
+                (
+                    "dense",
+                    models.Document(
+                        text=dense_vector_text, model=server.settings.dense_model
+                    ),
                 )
-            if sparse_vector_text:
-                vector_queries.append(
-                    (
-                        "sparse",
-                        models.Document(
-                            text=sparse_vector_text, model=server.settings.sparse_model
-                        ),
-                    )
+            )
+        if sparse_vector_text:
+            vector_queries.append(
+                (
+                    "sparse",
+                    models.Document(
+                        text=sparse_vector_text, model=server.settings.sparse_model
+                    ),
                 )
+            )
 
         rerank_query_text: str | None = None
-        if not positive_point_ids:
-            for candidate in (
-                original_title_query,
-                dense_query,
-                sparse_query,
-                summary,
-                overview,
-                plot,
-                tagline,
-            ):
-                rerank_query_text = _normalize_text(candidate)
-                if rerank_query_text:
-                    break
+        for candidate in (
+            original_title_query,
+            dense_query,
+            sparse_query,
+            similar_query_text,
+            summary,
+            overview,
+            plot,
+            tagline,
+        ):
+            rerank_query_text = _normalize_text(candidate)
+            if rerank_query_text:
+                break
 
         must_conditions: list[models.FieldCondition] = []
         keyword_prefetch_conditions: list[models.FieldCondition] = []
@@ -701,17 +718,19 @@ def register_media_library_tools(server: "PlexServer") -> None:
                     filter=prefetch_filter,
                 )
             )
-        if not positive_point_ids and vector_queries:
+        if vector_queries:
             candidate_limit = limit * 3 if len(vector_queries) > 1 else limit
-            prefetch_entries = [
-                models.Prefetch(
-                    query=models.NearestQuery(nearest=doc),
-                    using=name,
-                    limit=candidate_limit,
-                    filter=prefetch_filter,
-                )
-                for name, doc in vector_queries
-            ]
+            prefetch_entries.extend(
+                [
+                    models.Prefetch(
+                        query=models.NearestQuery(nearest=doc),
+                        using=name,
+                        limit=candidate_limit,
+                        filter=prefetch_filter,
+                    )
+                    for name, doc in vector_queries
+                ]
+            )
 
         if prefetch_entries:
             if len(prefetch_entries) > 1:

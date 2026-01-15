@@ -7,6 +7,7 @@ from datetime import datetime, timezone
 from typing import TYPE_CHECKING, Any, cast
 
 from qdrant_client import models
+from rapidfuzz import fuzz
 
 from ..common import strip_leading_article
 from ..common.types import JSONValue
@@ -85,7 +86,12 @@ async def _rerank_records(
 
 
 async def _find_records(
-    server: "PlexServer", identifier: str, limit: int = 5, *, allow_vector: bool = True
+    server: "PlexServer",
+    identifier: str,
+    limit: int = 5,
+    *,
+    allow_vector: bool = True,
+    min_title_ratio: int | None = None,
 ) -> list[models.Record | models.ScoredPoint]:
     """Locate records matching an identifier or title."""
 
@@ -125,9 +131,7 @@ async def _find_records(
                     match=models.MatchValue(value=int(normalized_identifier)),
                 )
             )
-        scroll_filter = models.Filter(
-            should=cast(list[models.Condition], should)
-        )
+        scroll_filter = models.Filter(should=cast(list[models.Condition], should))
         raw_points, _ = await server.qdrant_client.scroll(
             collection_name="media-items",
             scroll_filter=scroll_filter,
@@ -137,14 +141,18 @@ async def _find_records(
         scroll_points: list[models.Record | models.ScoredPoint] = cast(
             list[models.Record | models.ScoredPoint], raw_points
         )
-        if len(scroll_points) > 1:
-            scroll_points = await _rerank_records(
-                server,
-                normalized_identifier,
-                scroll_points,
-                title=normalized_identifier,
-            )
-        return scroll_points
+        if scroll_points:
+            if len(scroll_points) > 1:
+                scroll_points = await _rerank_records(
+                    server,
+                    normalized_identifier,
+                    scroll_points,
+                    title=normalized_identifier,
+                )
+            return scroll_points
+        if not allow_vector:
+            return []
+
 
     if not allow_vector:
         return []
@@ -209,6 +217,25 @@ async def _find_records(
         points = await _rerank_records(
             server, normalized_identifier, points, title=normalized_identifier
         )
+
+    if min_title_ratio is not None and points:
+        filtered_points: list[models.Record | models.ScoredPoint] = []
+        for point in points:
+            payload = cast(Mapping[str, JSONValue] | None, point.payload)
+            flat = _flatten_payload(payload)
+            candidate_title = _first_text(
+                flat.get("title"),
+                _extract_plex_metadata(flat).get("title"),
+            )
+            if not candidate_title:
+                continue
+            ratio = fuzz.ratio(
+                normalized_identifier.lower(), candidate_title.lower()
+            )
+            if ratio >= min_title_ratio:
+                filtered_points.append(point)
+        points = filtered_points
+
     return points
 
 
@@ -520,13 +547,18 @@ def _get_cached_payload(
     return None
 
 
-async def _get_media_data(server: "PlexServer", identifier: str) -> AggregatedMediaItem:
+async def _get_media_data(
+    server: "PlexServer", identifier: str, *, allow_vector: bool = False
+) -> AggregatedMediaItem:
     """Return the first matching media record's payload."""
 
     cached_payload = _get_cached_payload(server.cache, identifier)
     if cached_payload is not None:
         return cached_payload
-    records = await _find_records(server, identifier, limit=1)
+
+    records = await _find_records(server, identifier, limit=1, allow_vector=False)
+    if not records and allow_vector:
+        records = await _find_records(server, identifier, limit=1, allow_vector=True)
     if not records:
         raise ValueError("Media item not found")
     payload = _flatten_payload(cast(Mapping[str, JSONValue] | None, records[0].payload))

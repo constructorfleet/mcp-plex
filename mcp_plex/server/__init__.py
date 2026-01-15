@@ -1141,7 +1141,9 @@ async def play_media(
     from mcp_plex.server.tools.media_library import _strip_leading_article
     # Strip leading article for Qdrant/media lookup, but preserve original for reranking and response
     qdrant_identifier = _strip_leading_article(identifier) if identifier else ""
-    media = await media_helpers._get_media_data(server, str(qdrant_identifier))
+    media = await media_helpers._get_media_data(
+        server, str(qdrant_identifier), allow_vector=True
+    )
     rating_key_normalized, plex_info = _resolve_rating_key(media)
 
     players = await _get_plex_players()
