@@ -104,6 +104,8 @@ async def _find_records(
     if not normalized_identifier:
         return []
 
+    limit = max(limit, 0)
+
     try:
         record_id: Any = (
             int(normalized_identifier)
@@ -251,6 +253,12 @@ async def _find_records(
             if ratio >= min_title_ratio:
                 filtered_points.append(point)
         points = filtered_points
+
+    if limit == 0:
+        return []
+
+    if len(points) > limit:
+        points = points[:limit]
 
     return points
 
