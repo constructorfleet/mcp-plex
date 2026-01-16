@@ -2,12 +2,14 @@
 
 from __future__ import annotations
 
-from datetime import datetime, timezone
 from collections.abc import Collection, Iterable, Mapping, MutableMapping, Sequence
-from typing import Any, TYPE_CHECKING, cast
+from datetime import datetime, timezone
+from typing import TYPE_CHECKING, Any, cast
 
 from qdrant_client import models
+from rapidfuzz import fuzz
 
+from ..common import strip_leading_article
 from ..common.types import JSONValue
 from .models import (
     AggregatedMediaItem,
@@ -23,67 +25,217 @@ if TYPE_CHECKING:  # pragma: no cover - imported for type checking only
     from . import PlexServer
 
 
+def _is_imdb_identifier(identifier: str) -> bool:
+    text = identifier.strip().lower()
+    return bool(text.startswith("tt") and text[2:].isdigit())
+
+
+def _should_use_identifier_filter(identifier: str) -> bool:
+    return identifier.isdigit() or _is_imdb_identifier(identifier)
+
+
+async def _rerank_records(
+    server: "PlexServer",
+    query_text: str,
+    points: Sequence[models.Record | models.ScoredPoint],
+    *,
+    title: str | None = None,
+) -> list[models.Record | models.ScoredPoint]:
+    from mcp_plex.server.tools.media_library import _rerank_media_candidates
+
+    flat_items = [
+        _flatten_payload(cast(Mapping[str, JSONValue] | None, point.payload))
+        for point in points
+    ]
+    reranked_items = await _rerank_media_candidates(
+        server,
+        query_text,
+        flat_items,
+        title=title or query_text,
+    )
+    rating_key_to_index: dict[str, int] = {}
+    for idx, item in enumerate(flat_items):
+        rating_key = _normalize_identifier(
+            _extract_plex_metadata(item).get("rating_key")
+        )
+        if rating_key and rating_key not in rating_key_to_index:
+            rating_key_to_index[rating_key] = idx
+
+    ordered: list[models.Record | models.ScoredPoint] = []
+    used_indexes: set[int] = set()
+    for item in reranked_items:
+        rating_key = _normalize_identifier(
+            _extract_plex_metadata(item).get("rating_key")
+        )
+        if rating_key is None:
+            continue
+        idx = rating_key_to_index.get(rating_key)
+        if idx is None or idx in used_indexes:
+            continue
+        ordered.append(points[idx])
+        used_indexes.add(idx)
+
+    if len(ordered) == len(points):
+        return ordered
+
+    for idx, point in enumerate(points):
+        if idx in used_indexes:
+            continue
+        ordered.append(point)
+    return ordered
+
+
 async def _find_records(
-    server: "PlexServer", identifier: str, limit: int = 5
-) -> list[models.Record]:
+    server: "PlexServer",
+    identifier: str,
+    limit: int = 5,
+    *,
+    allow_vector: bool = True,
+    min_title_ratio: int | None = None,
+) -> list[models.Record | models.ScoredPoint]:
     """Locate records matching an identifier or title."""
 
+    normalized_identifier = identifier.strip()
+    if not normalized_identifier:
+        return []
+
     try:
-        record_id: Any = int(identifier) if identifier.isdigit() else identifier
+        record_id: Any = (
+            int(normalized_identifier)
+            if normalized_identifier.isdigit()
+            else normalized_identifier
+        )
         recs = await server.qdrant_client.retrieve(
             "media-items", ids=[record_id], with_payload=True
         )
         if recs:
-            return recs
+            return cast(list[models.Record | models.ScoredPoint], recs)
     except Exception:
         pass
 
-    should = [
-        models.FieldCondition(
-            key="data.plex.rating_key", match=models.MatchValue(value=identifier)
-        ),
-        models.FieldCondition(
-            key="data.imdb.id", match=models.MatchValue(value=identifier)
-        ),
-    ]
-    if identifier.isdigit():
-        should.append(
+    if _should_use_identifier_filter(normalized_identifier):
+        should: list[models.FieldCondition] = [
             models.FieldCondition(
-                key="data.tmdb.id", match=models.MatchValue(value=int(identifier))
+                key="data.plex.rating_key",
+                match=models.MatchValue(value=normalized_identifier),
+            ),
+            models.FieldCondition(
+                key="data.imdb.id",
+                match=models.MatchValue(value=normalized_identifier),
+            ),
+        ]
+        if normalized_identifier.isdigit():
+            should.append(
+                models.FieldCondition(
+                    key="data.tmdb.id",
+                    match=models.MatchValue(value=int(normalized_identifier)),
+                )
             )
+        scroll_filter = models.Filter(should=cast(list[models.Condition], should))
+        raw_points, _ = await server.qdrant_client.scroll(
+            collection_name="media-items",
+            scroll_filter=scroll_filter,
+            limit=limit,
+            with_payload=True,
         )
-    should.append(
-        models.FieldCondition(key="title", match=models.MatchText(text=identifier))
-    )
-    flt = models.Filter(should=should)
-    points, _ = await server.qdrant_client.scroll(
+        scroll_points: list[models.Record | models.ScoredPoint] = cast(
+            list[models.Record | models.ScoredPoint], raw_points
+        )
+        if scroll_points:
+            if len(scroll_points) > 1:
+                scroll_points = await _rerank_records(
+                    server,
+                    normalized_identifier,
+                    scroll_points,
+                    title=normalized_identifier,
+                )
+            return scroll_points
+        if not allow_vector:
+            return []
+
+
+    if not allow_vector:
+        return []
+
+    search_variants: list[str] = []
+    slug_source = strip_leading_article(normalized_identifier) or normalized_identifier
+    for candidate in (normalized_identifier, slug_source):
+        if candidate and candidate not in search_variants:
+            search_variants.append(candidate)
+
+    vector_queries: list[tuple[str, models.Document]] = []
+    dense_model = getattr(server.settings, "dense_model", None)
+    sparse_model = getattr(server.settings, "sparse_model", None)
+    for text_value in search_variants:
+        if dense_model:
+            vector_queries.append(
+                (
+                    "dense",
+                    models.Document(text=text_value, model=dense_model),
+                )
+            )
+        if sparse_model:
+            vector_queries.append(
+                (
+                    "sparse",
+                    models.Document(text=text_value, model=sparse_model),
+                )
+            )
+
+    if not vector_queries:
+        return []
+
+    candidate_limit = max(limit * 3, limit)
+    prefetch_entries = [
+        models.Prefetch(
+            query=models.NearestQuery(nearest=document),
+            using=name,
+            limit=candidate_limit,
+        )
+        for name, document in vector_queries
+    ]
+
+    if len(prefetch_entries) == 1:
+        query_obj = cast(models.Query, prefetch_entries[0].query)
+        using_param: str | None = prefetch_entries[0].using
+        prefetch_param: Sequence[models.Prefetch] | None = None
+    else:
+        query_obj = models.FusionQuery(fusion=models.Fusion.RRF)
+        using_param = None
+        prefetch_param = prefetch_entries
+
+    res = await server.qdrant_client.query_points(
         collection_name="media-items",
-        scroll_filter=flt,
+        query=query_obj,
+        using=using_param,
+        prefetch=prefetch_param,
         limit=limit,
         with_payload=True,
     )
-    # Rerank results if more than one found
+    points: list[models.Record | models.ScoredPoint] = list(res.points or [])
     if len(points) > 1:
-        from mcp_plex.server.tools.media_library import _rerank_media_candidates
-        # Use identifier for rerank query text and title
-        flat_items = [
-            _flatten_payload(cast(Mapping[str, JSONValue] | None, p.payload)) for p in points
-        ]
-        reranked = await _rerank_media_candidates(
-            server,
-            identifier,
-            flat_items,
-            title=identifier
+        points = await _rerank_records(
+            server, normalized_identifier, points, title=normalized_identifier
         )
-        # Map reranked items back to their original point objects
-        # (Assume rating_key is unique)
-        key_map = {str(_extract_plex_metadata(item).get("rating_key")): p for item, p in zip(flat_items, points)}
-        result_points = []
-        for item in reranked:
-            rk = str(_extract_plex_metadata(item).get("rating_key"))
-            if rk in key_map:
-                result_points.append(key_map[rk])
-        return result_points
+
+    if min_title_ratio is not None and points:
+        filtered_points: list[models.Record | models.ScoredPoint] = []
+        for point in points:
+            payload = cast(Mapping[str, JSONValue] | None, point.payload)
+            flat = _flatten_payload(payload)
+            candidate_title = _first_text(
+                flat.get("title"),
+                _extract_plex_metadata(flat).get("title"),
+            )
+            if not candidate_title:
+                continue
+            ratio = fuzz.ratio(
+                normalized_identifier.lower(), candidate_title.lower()
+            )
+            if ratio >= min_title_ratio:
+                filtered_points.append(point)
+        points = filtered_points
+
     return points
 
 
@@ -96,11 +248,11 @@ def _flatten_payload(payload: Mapping[str, JSONValue] | None) -> AggregatedMedia
     payload_dict = cast(QdrantMediaPayload, payload)
     base = payload_dict.get("data")
     if isinstance(base, dict):
-        data.update(base)
+        data.update(cast(Mapping[str, JSONValue], base))
     for key, value in payload_dict.items():
         if key == "data":
             continue
-        data[key] = value
+        data[key] = cast(JSONValue, value)
     _ensure_epoch_added_at(data)
     return cast(AggregatedMediaItem, data)
 
@@ -395,13 +547,25 @@ def _get_cached_payload(
     return None
 
 
-async def _get_media_data(server: "PlexServer", identifier: str) -> AggregatedMediaItem:
+async def _get_media_data(
+    server: "PlexServer", identifier: str, *, allow_vector: bool | None = None
+) -> AggregatedMediaItem:
     """Return the first matching media record's payload."""
 
     cached_payload = _get_cached_payload(server.cache, identifier)
     if cached_payload is not None:
         return cached_payload
-    records = await _find_records(server, identifier, limit=1)
+
+    identifier_text = identifier.strip()
+    allow_vector_lookup = allow_vector
+    if allow_vector_lookup is None:
+        allow_vector_lookup = not (
+            identifier_text and _should_use_identifier_filter(identifier_text)
+        )
+
+    records = await _find_records(server, identifier, limit=1, allow_vector=False)
+    if not records and allow_vector_lookup:
+        records = await _find_records(server, identifier, limit=1, allow_vector=True)
     if not records:
         raise ValueError("Media item not found")
     payload = _flatten_payload(cast(Mapping[str, JSONValue] | None, records[0].payload))

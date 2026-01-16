@@ -503,9 +503,31 @@ def test_build_point_includes_metadata():
     assert point.payload["title"] == "Sample"
     assert point.payload["collections"] == ["Favorites"]
     assert point.payload["plot"] == "Plot"
+    assert point.payload["title_slug"] == "sample"
     assert "Directed by" in point.vector["dense"].text
     assert point.vector["dense"].model == "BAAI/bge-small-en-v1.5"
     assert point.vector["sparse"].model == "Qdrant/bm42-all-minilm-l6-v2-attentions"
+
+
+def test_build_point_includes_show_slug():
+    plex_item = PlexItem(
+        rating_key="2",
+        guid="episode-guid",
+        type="episode",
+        title="The Pilot",
+        show_title="Best Show",
+        season_number=1,
+        episode_number=1,
+    )
+    point = build_point(
+        AggregatedItem(plex=plex_item),
+        dense_model_name="BAAI/bge-small-en-v1.5",
+        sparse_model_name="Qdrant/bm42-all-minilm-l6-v2-attentions",
+    )
+
+    assert point.payload["title_slug"] == "pilot"
+    assert point.payload["show_title"] == "Best Show"
+    assert point.payload["show_title_slug"] == "best-show"
 
 
 def test_loader_pipeline_processes_sample_batches(monkeypatch):
