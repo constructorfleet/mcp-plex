@@ -14,6 +14,7 @@ from qdrant_client import models
 from qdrant_client.async_qdrant_client import AsyncQdrantClient
 from qdrant_client.http.models import WriteOrdering
 
+from ..common.text import slugify, strip_leading_article
 from ..common.types import AggregatedItem, JSONValue
 
 if TYPE_CHECKING:  # pragma: no cover - imported for typing only
@@ -107,6 +108,7 @@ async def _ensure_collection(
         lowercase=True,
     )
     await _create_index("title", text_index)
+    await _create_index("title_slug", models.PayloadSchemaType.KEYWORD)
     await _create_index("type", models.PayloadSchemaType.KEYWORD)
     await _create_index("year", models.PayloadSchemaType.INTEGER)
     await _create_index("added_at", models.PayloadSchemaType.INTEGER)
@@ -115,6 +117,7 @@ async def _ensure_collection(
     await _create_index("writers", models.PayloadSchemaType.KEYWORD)
     await _create_index("genres", models.PayloadSchemaType.KEYWORD)
     await _create_index("show_title", models.PayloadSchemaType.KEYWORD)
+    await _create_index("show_title_slug", models.PayloadSchemaType.KEYWORD)
     await _create_index("season_number", models.PayloadSchemaType.INTEGER)
     await _create_index("episode_number", models.PayloadSchemaType.INTEGER)
     await _create_index("collections", models.PayloadSchemaType.KEYWORD)
@@ -186,7 +189,9 @@ class _BaseQdrantPayload(TypedDict):
 
 
 class QdrantPayload(_BaseQdrantPayload, total=False):
+    title_slug: str
     show_title: str
+    show_title_slug: str
     season_title: str
     season_number: int
     episode_number: int
@@ -212,9 +217,15 @@ def _build_point_payload(item: AggregatedItem) -> QdrantPayload:
         "title": item.plex.title,
         "type": item.plex.type,
     }
+    title_slug = slugify(strip_leading_article(item.plex.title))
+    if title_slug:
+        payload["title_slug"] = title_slug
     if item.plex.type == "episode":
         if item.plex.show_title:
             payload["show_title"] = item.plex.show_title
+            show_slug = slugify(strip_leading_article(item.plex.show_title))
+            if show_slug:
+                payload["show_title_slug"] = show_slug
         if item.plex.season_title:
             payload["season_title"] = item.plex.season_title
         if item.plex.season_number is not None:
