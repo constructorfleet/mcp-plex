@@ -244,6 +244,68 @@ class _FakeEpisode:
         self.collections: list[Any] = []
 
 
+def test_enrichment_skips_when_rating_key_mismatch(monkeypatch: pytest.MonkeyPatch) -> None:
+    async def fake_fetch_imdb_batch(*args, **kwargs):
+        raise AssertionError("IMDb fetch should not be called for reused payloads.")
+
+    async def fake_fetch_tmdb_movie(*args, **kwargs):
+        raise AssertionError("TMDb fetch should not be called for reused payloads.")
+
+    monkeypatch.setattr(
+        "mcp_plex.loader.pipeline.enrichment._fetch_imdb_batch",
+        fake_fetch_imdb_batch,
+    )
+    monkeypatch.setattr(
+        "mcp_plex.loader.pipeline.enrichment._fetch_tmdb_movie",
+        fake_fetch_tmdb_movie,
+    )
+
+    legacy_item = AggregatedItem(
+        plex=PlexItem(
+            rating_key="old-key",
+            guid="plex://old-key",
+            type="movie",
+            title="Legacy Movie",
+        ),
+        imdb=IMDbTitle(
+            id="tt9999999",
+            type="movie",
+            primaryTitle="Legacy Movie",
+        ),
+        tmdb=TMDBMovie.model_validate({"id": 456, "title": "Legacy Movie"}),
+    )
+    legacy_payload = {"data": legacy_item.model_dump(mode="json")}
+
+    async def lookup_payload(external_ids, plex_guid):
+        return legacy_payload
+
+    async def scenario() -> list[AggregatedItem]:
+        ingest_queue: asyncio.Queue = asyncio.Queue()
+        persistence_queue: asyncio.Queue = asyncio.Queue()
+        stage = EnrichmentStage(
+            http_client_factory=lambda: _StubHTTPClient(),
+            tmdb_api_key="token",
+            ingest_queue=ingest_queue,
+            persistence_queue=persistence_queue,
+            imdb_retry_queue=IMDbRetryQueue(),
+            movie_batch_size=5,
+            episode_batch_size=5,
+            existing_payload_lookup=lookup_payload,
+        )
+        movie = _FakeMovie("new-key", imdb_id="tt9999999", tmdb_id="456")
+        await stage._handle_movie_batch(MovieBatch([movie]))
+        return await persistence_queue.get()
+
+    result = asyncio.run(scenario())
+
+    assert len(result) == 1
+    reused_item = result[0]
+    assert reused_item.plex.rating_key == "new-key"
+    assert reused_item.plex.title == "Legacy Movie"
+    assert reused_item.imdb is not None
+    assert reused_item.imdb.id == "tt9999999"
+
+
 class _FakeClient(_StubHTTPClient):
     def __init__(self, log: list[str]) -> None:
         super().__init__()

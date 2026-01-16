@@ -3,10 +3,10 @@ from __future__ import annotations
 import json
 from collections.abc import Mapping, Sequence
 from pathlib import Path
-from typing import Any
+from typing import Annotated, Any
 
 from pydantic import AnyHttpUrl, Field, field_validator
-from pydantic_settings import BaseSettings, SettingsConfigDict
+from pydantic_settings import BaseSettings, NoDecode, SettingsConfigDict
 
 PlexPlayerAliasMap = dict[str, tuple[str, ...]]
 RawAliasValue = str | Sequence[Any]
@@ -40,7 +40,7 @@ class Settings(BaseSettings):
         default="cross-encoder/ms-marco-MiniLM-L-6-v2",
         validation_alias="RERANKER_MODEL",
     )
-    disabled_tools: list[str] = Field(
+    disabled_tools: Annotated[list[str], NoDecode] = Field(
         default_factory=lambda: [
             "actor-movies",
             "pause-media",
