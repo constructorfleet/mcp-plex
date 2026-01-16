@@ -26,6 +26,7 @@ from mcp_plex.loader import (
 from mcp_plex.loader.qdrant import (
     _ensure_collection,
     _existing_point_ids,
+    _is_embedding_model_failure,
     _process_qdrant_retry_queue,
     _resolve_dense_model_params,
     build_point,
@@ -417,6 +418,13 @@ def test_resolve_dense_model_params_known_model():
 def test_resolve_dense_model_params_unknown_model():
     with pytest.raises(ValueError, match="Unknown dense embedding model"):
         _resolve_dense_model_params("not-a-real/model")
+
+
+def test_is_embedding_model_failure_handles_missing_config() -> None:
+    assert _is_embedding_model_failure(
+        ValueError("Could not find config.json in /tmp/fastembed_cache")
+    )
+    assert not _is_embedding_model_failure(RuntimeError("Some other failure"))
 
 
 def test_imdb_retry_queue_desync_errors():

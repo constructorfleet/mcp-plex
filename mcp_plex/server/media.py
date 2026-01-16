@@ -34,6 +34,11 @@ def _should_use_identifier_filter(identifier: str) -> bool:
     return identifier.isdigit() or _is_imdb_identifier(identifier)
 
 
+def _is_embedding_model_failure(error: Exception) -> bool:
+    message = str(error)
+    return "Could not load model" in message or "Could not find config.json" in message
+
+
 async def _rerank_records(
     server: "PlexServer",
     query_text: str,
@@ -206,15 +211,26 @@ async def _find_records(
         using_param = None
         prefetch_param = prefetch_entries
 
-    res = await server.qdrant_client.query_points(
-        collection_name="media-items",
-        query=query_obj,
-        using=using_param,
-        prefetch=prefetch_param,
-        limit=limit,
-        with_payload=True,
-    )
-    points: list[models.Record | models.ScoredPoint] = list(res.points or [])
+    try:
+        res = await server.qdrant_client.query_points(
+            collection_name="media-items",
+            query=query_obj,
+            using=using_param,
+            prefetch=prefetch_param,
+            limit=limit,
+            with_payload=True,
+        )
+        points: list[models.Record | models.ScoredPoint] = list(res.points or [])
+    except ValueError as exc:
+        if not _is_embedding_model_failure(exc):
+            raise
+        fallback_limit = max(limit * 5, 25)
+        fallback_records, _ = await server.qdrant_client.scroll(
+            collection_name="media-items",
+            limit=fallback_limit,
+            with_payload=True,
+        )
+        points = list(fallback_records or [])
     if len(points) > 1:
         points = await _rerank_records(
             server, normalized_identifier, points, title=normalized_identifier

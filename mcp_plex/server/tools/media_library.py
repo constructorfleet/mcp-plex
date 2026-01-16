@@ -30,6 +30,11 @@ logger = logging.getLogger(__name__)
 SIMILAR_TO_MIN_TITLE_RATIO = 80
 
 
+def _is_embedding_model_failure(error: Exception) -> bool:
+    message = str(error)
+    return "Could not load model" in message or "Could not find config.json" in message
+
+
 def _strip_leading_article(title: str | None) -> str | None:
     """Remove leading articles (The, A, An, etc.) from a title for search purposes."""
 
@@ -757,7 +762,7 @@ def register_media_library_tools(server: "PlexServer") -> None:
                 with_payload=True,
             )
         except ValueError as exc:
-            if "Could not load model" not in str(exc):
+            if not _is_embedding_model_failure(exc):
                 raise
             fallback_query = models.SampleQuery(sample=models.Sample.RANDOM)
             res = await server.qdrant_client.query_points(
