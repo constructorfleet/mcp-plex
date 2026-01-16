@@ -42,6 +42,7 @@ from ...common.types import (
     AggregatedItem,
     ExternalIDs,
     IMDbTitle,
+    JSONValue,
     PlexGuid,
     PlexItem,
     PlexPerson,
@@ -51,6 +52,7 @@ from ...common.types import (
     TMDBShow,
 )
 from ..imdb_cache import IMDbCache
+from ..qdrant import rehydrate_aggregated_item
 
 from plexapi.base import PlexPartialObject
 
@@ -79,6 +81,9 @@ HTTPClientResource = (
 )
 
 HTTPClientFactory = Callable[[], HTTPClientResource | Awaitable[HTTPClientResource]]
+ExistingPayloadLookup = Callable[
+    [ExternalIDs, str | None], Awaitable[Mapping[str, JSONValue] | None]
+]
 
 
 def _extract_external_ids(item: PlexPartialObject) -> ExternalIDs:
@@ -339,6 +344,7 @@ class EnrichmentStage:
         imdb_requests_per_window: int | None = None,
         imdb_window_seconds: float = 1.0,
         idle_retry_delay: float = 0.05,
+        existing_payload_lookup: ExistingPayloadLookup | None = None,
         logger: logging.Logger | None = None,
     ) -> None:
         self._http_client_factory: HTTPClientFactory = http_client_factory
@@ -367,6 +373,7 @@ class EnrichmentStage:
         if idle_retry_delay < 0:
             raise ValueError("idle_retry_delay must be non-negative")
         self._idle_retry_delay = float(idle_retry_delay)
+        self._existing_payload_lookup = existing_payload_lookup
         requested_movie_batch_size = require_positive(
             int(movie_batch_size), name="movie_batch_size"
         )
@@ -482,7 +489,12 @@ class EnrichmentStage:
 
         async with self._acquire_http_client() as client:
             for movies in movie_chunks:
-                aggregated = await self._enrich_movies(client, movies)
+                reused_items, remaining_movies = await self._split_reused_items(movies)
+                if reused_items:
+                    await self._emit_persistence_batch(reused_items)
+                if not remaining_movies:
+                    continue
+                aggregated = await self._enrich_movies(client, remaining_movies)
                 await self._emit_persistence_batch(aggregated)
                 self._logger.info(
                     "Processed movie batch with %d items (queue size=%d)",
@@ -504,7 +516,16 @@ class EnrichmentStage:
         show_title = getattr(batch.show, "title", str(batch.show))
         async with self._acquire_http_client() as client:
             for episodes in episode_chunks:
-                aggregated = await self._enrich_episodes(client, batch.show, episodes)
+                reused_items, remaining_episodes = await self._split_reused_items(
+                    episodes
+                )
+                if reused_items:
+                    await self._emit_persistence_batch(reused_items)
+                if not remaining_episodes:
+                    continue
+                aggregated = await self._enrich_episodes(
+                    client, batch.show, remaining_episodes
+                )
                 await self._emit_persistence_batch(aggregated)
                 self._logger.info(
                     "Processed episode batch for %s with %d items (queue size=%d)",
@@ -570,6 +591,67 @@ class EnrichmentStage:
             len(payload),
             self._persistence_queue.qsize(),
         )
+
+    async def _split_reused_items(
+        self, items: Sequence[PlexPartialObject]
+    ) -> tuple[list[AggregatedItem], list[PlexPartialObject]]:
+        """Return reused payloads and remaining Plex items to enrich."""
+
+        if not items:
+            return [], []
+
+        lookup = self._existing_payload_lookup
+        if lookup is None:
+            return [], list(items)
+
+        reused: list[AggregatedItem] = []
+        remaining: list[PlexPartialObject] = []
+        for item in items:
+            reused_item = await self._reuse_payload_if_mismatch(lookup, item)
+            if reused_item is None:
+                remaining.append(item)
+            else:
+                reused.append(reused_item)
+        return reused, remaining
+
+    async def _reuse_payload_if_mismatch(
+        self,
+        lookup: ExistingPayloadLookup,
+        item: PlexPartialObject,
+    ) -> AggregatedItem | None:
+        external_ids = _extract_external_ids(item)
+        plex_guid = str(getattr(item, "guid", "")) or None
+        if not (external_ids.imdb or external_ids.tmdb or plex_guid):
+            return None
+
+        payload = await lookup(external_ids, plex_guid)
+        if payload is None:
+            return None
+
+        try:
+            aggregated = rehydrate_aggregated_item(payload)
+        except (ValueError, ValidationError) as exc:
+            self._logger.debug(
+                "Failed to rehydrate Qdrant payload for Plex item %s.",
+                getattr(item, "ratingKey", ""),
+                exc_info=exc,
+            )
+            return None
+
+        current_rating_key = str(getattr(item, "ratingKey", ""))
+        if not current_rating_key:
+            return None
+        if aggregated.plex.rating_key == current_rating_key:
+            return None
+
+        updated_plex = aggregated.plex.model_copy(
+            update={"rating_key": current_rating_key}
+        )
+        self._logger.info(
+            "Detected rating key mismatch for %s; reusing existing payload.",
+            current_rating_key,
+        )
+        return aggregated.model_copy(update={"plex": updated_plex})
 
     async def _enrich_movies(
         self, client: AsyncHTTPClient, movies: Sequence[PlexPartialObject]

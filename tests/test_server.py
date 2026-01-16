@@ -1484,6 +1484,43 @@ def test_find_records_numeric_title_falls_back_to_vector(monkeypatch):
         assert payload["plex"]["rating_key"] == "700"
 
 
+def test_find_records_respects_result_limit(monkeypatch):
+    with _load_server(monkeypatch) as module:
+        async def fake_query_points(*args, **kwargs):
+            points = []
+            for idx in range(6):
+                payload = {
+                    "title": f"The Gentlemen {idx}",
+                    "plex": {"rating_key": str(idx)},
+                }
+                points.append(
+                    types.SimpleNamespace(payload=payload, id=str(idx))
+                )
+            return types.SimpleNamespace(points=points)
+
+        async def fake_retrieve(*args, **kwargs):
+            return []
+
+        async def passthrough_rerank(server, query_text, items, **filters):
+            return items
+
+        monkeypatch.setattr(module.server.qdrant_client, "retrieve", fake_retrieve)
+        monkeypatch.setattr(
+            module.server.qdrant_client, "query_points", fake_query_points
+        )
+        monkeypatch.setattr(
+            media_library_tools, "_rerank_media_candidates", passthrough_rerank
+        )
+
+        records = asyncio.run(
+            media_helpers._find_records(module.server, "The Gentlemen", limit=2)
+        )
+
+        assert len(records) == 2
+        rating_keys = [rec.payload["plex"]["rating_key"] for rec in records]
+        assert rating_keys == ["0", "1"]
+
+
 def test_media_resources_cache_hits(monkeypatch):
     with _load_server(monkeypatch) as module:
         rating_key = "49915"

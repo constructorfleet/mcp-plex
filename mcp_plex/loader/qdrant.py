@@ -8,6 +8,7 @@ import random
 import time
 import logging
 import warnings
+from collections.abc import Mapping
 from typing import TYPE_CHECKING, Iterable, List, Optional, Sequence, TypedDict
 
 from qdrant_client import models
@@ -389,6 +390,104 @@ async def _existing_point_ids(
     return existing
 
 
+def _is_embedding_model_failure(error: Exception) -> bool:
+    return "Could not load model" in str(error)
+
+
+def _materialize_points(points: Sequence[models.PointStruct]) -> list[models.PointStruct]:
+    materialized: list[models.PointStruct] = []
+    for point in points:
+        vector = point.vector or {}
+        dense = vector.get("dense")
+        sparse = vector.get("sparse")
+        if isinstance(dense, models.Document):
+            size, _ = _resolve_dense_model_params(dense.model)
+            dense_vector: list[float] | models.Vector = [0.0] * size
+        else:
+            dense_vector = dense
+        if isinstance(sparse, models.Document):
+            sparse_vector: models.SparseVector | None = models.SparseVector(
+                indices=[], values=[]
+            )
+        else:
+            sparse_vector = sparse
+        materialized.append(
+            models.PointStruct(
+                id=point.id,
+                vector={"dense": dense_vector, "sparse": sparse_vector},
+                payload=point.payload,
+            )
+        )
+    return materialized
+
+
+def _coerce_tmdb_match_value(tmdb_id: str | None) -> int | str | None:
+    if tmdb_id is None:
+        return None
+    tmdb_id_str = str(tmdb_id)
+    if tmdb_id_str.isdigit():
+        return int(tmdb_id_str)
+    return tmdb_id_str
+
+
+async def _find_record_by_external_ids(
+    client: AsyncQdrantClient,
+    collection_name: str,
+    *,
+    imdb_id: str | None,
+    tmdb_id: str | None,
+    plex_guid: str | None,
+) -> models.Record | None:
+    """Return the first Qdrant record matching the provided external IDs."""
+
+    conditions: list[models.FieldCondition] = []
+    if imdb_id:
+        conditions.append(
+            models.FieldCondition(
+                key="data.imdb.id",
+                match=models.MatchValue(value=imdb_id),
+            )
+        )
+    tmdb_value = _coerce_tmdb_match_value(tmdb_id)
+    if tmdb_value is not None:
+        conditions.append(
+            models.FieldCondition(
+                key="data.tmdb.id",
+                match=models.MatchValue(value=tmdb_value),
+            )
+        )
+    if plex_guid:
+        conditions.append(
+            models.FieldCondition(
+                key="data.plex.guid",
+                match=models.MatchValue(value=plex_guid),
+            )
+        )
+
+    if not conditions:
+        return None
+
+    records, _ = await client.scroll(
+        collection_name=collection_name,
+        scroll_filter=models.Filter(should=conditions),
+        limit=1,
+        with_payload=True,
+        with_vectors=False,
+    )
+    if not records:
+        return None
+    return records[0]
+
+
+def rehydrate_aggregated_item(payload: Mapping[str, JSONValue]) -> AggregatedItem:
+    """Rehydrate an AggregatedItem from a Qdrant payload."""
+
+    data = payload.get("data")
+    if not isinstance(data, Mapping):
+        raise ValueError("Qdrant payload missing expected data payload.")
+    return AggregatedItem.model_validate(data)
+
+
 def _chunk(seq: Sequence[models.PointStruct], size: int) -> Iterable[Sequence[models.PointStruct]]:
     for i in range(0, len(seq), size):
         yield seq[i : i + size]
@@ -419,6 +518,34 @@ async def _upsert_batch(
             )
             return len(batch)
         except Exception as e:
+            if _is_embedding_model_failure(e):
+                inner = getattr(client, "_client", None)
+                if inner is not None and hasattr(inner, "upsert"):
+                    try:
+                        await inner.upsert(
+                            collection_name=collection,
+                            points=_materialize_points(batch_list),
+                        )
+                    except Exception:
+                        logger.exception(
+                            "Fallback upsert failed for Qdrant batch %d/%d after embedding model error.",
+                            batch_idx,
+                            total_batches,
+                        )
+                        return 0
+                    logger.warning(
+                        "Upserted Qdrant batch %d/%d with placeholder vectors due to missing embedding model.",
+                        batch_idx,
+                        total_batches,
+                    )
+                    return len(batch_list)
+                logger.error(
+                    "Skipping Qdrant batch %d/%d due to missing embedding model: %s",
+                    batch_idx,
+                    total_batches,
+                    e,
+                )
+                return 0
             attempt += 1
             if attempt > max_retries:
                 # Shove it to the retry queue and move on
@@ -614,6 +741,8 @@ __all__ = [
     "_point_id_from_rating_key",
     "_normalise_point_id",
     "_existing_point_ids",
+    "_find_record_by_external_ids",
+    "rehydrate_aggregated_item",
     "QdrantPayload",
     "build_point",
     "_upsert_in_batches",

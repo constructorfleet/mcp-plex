@@ -10,7 +10,7 @@ import time
 import warnings
 from dataclasses import dataclass, field
 from pathlib import Path
-from typing import TYPE_CHECKING, Sequence
+from typing import TYPE_CHECKING, Sequence, cast
 
 import httpx
 from qdrant_client import models
@@ -32,7 +32,9 @@ from .pipeline.orchestrator import LoaderOrchestrator
 from .pipeline.persistence import PersistenceStage as _PersistenceStage
 from ..common.types import (
     AggregatedItem,
+    ExternalIDs,
     IMDbTitle,
+    JSONValue,
 )
 from . import qdrant as _qdrant
 from . import samples as samples
@@ -51,6 +53,8 @@ _process_qdrant_retry_queue = _qdrant._process_qdrant_retry_queue
 _point_id_from_rating_key = _qdrant._point_id_from_rating_key
 _normalise_point_id = _qdrant._normalise_point_id
 _existing_point_ids = _qdrant._existing_point_ids
+_find_record_by_external_ids = _qdrant._find_record_by_external_ids
+rehydrate_aggregated_item = _qdrant.rehydrate_aggregated_item
 
 PlexPartialObject = _PlexPartialObject
 
@@ -250,9 +254,20 @@ def _build_loader_orchestrator(
         return new_items, skipped
 
     async def _upsert_aggregated(
-        batch: Sequence[AggregatedItem],
+        batch: Sequence[AggregatedItem | models.PointStruct],
     ) -> None:
         if not batch:
+            return
+        if isinstance(batch[0], models.PointStruct):
+            points = [point for point in batch if isinstance(point, models.PointStruct)]
+            for point_chunk in chunk_sequence(points, upsert_buffer_size):
+                await _upsert_in_batches(
+                    client,
+                    collection_name,
+                    point_chunk,
+                    batch_size=qdrant_config.batch_size,
+                    retry_queue=qdrant_retry_queue,
+                )
             return
 
         filtered_items, skipped = await _filter_new_items(batch)
@@ -300,6 +315,24 @@ def _build_loader_orchestrator(
             queue_size,
         )
 
+    async def _lookup_existing_payload(
+        external_ids: ExternalIDs,
+        plex_guid: str | None,
+    ) -> dict[str, JSONValue] | None:
+        record = await _find_record_by_external_ids(
+            client,
+            collection_name,
+            imdb_id=external_ids.imdb,
+            tmdb_id=external_ids.tmdb,
+            plex_guid=plex_guid,
+        )
+        if record is None:
+            return None
+        payload = record.payload
+        if isinstance(payload, dict):
+            return cast(dict[str, JSONValue], payload)
+        return None
+
     ingestion_stage = IngestionStage(
         plex_server=plex_server,
         sample_items=sample_items,
@@ -324,6 +357,7 @@ def _build_loader_orchestrator(
         imdb_batch_limit=IMDB_BATCH_LIMIT,
         imdb_requests_per_window=imdb_config.requests_per_window,
         imdb_window_seconds=imdb_config.window_seconds,
+        existing_payload_lookup=_lookup_existing_payload,
     )
 
     persistence_stage = _PersistenceStage(

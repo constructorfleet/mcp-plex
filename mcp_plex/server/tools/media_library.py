@@ -746,15 +746,27 @@ def register_media_library_tools(server: "PlexServer") -> None:
         if query_obj is None:
             query_obj = models.SampleQuery(sample=models.Sample.RANDOM)
 
-        res = await server.qdrant_client.query_points(
-            collection_name="media-items",
-            query=query_obj,
-            using=using_param,
-            prefetch=prefetch_param,
-            query_filter=filter_obj,
-            limit=limit,
-            with_payload=True,
-        )
+        try:
+            res = await server.qdrant_client.query_points(
+                collection_name="media-items",
+                query=query_obj,
+                using=using_param,
+                prefetch=prefetch_param,
+                query_filter=filter_obj,
+                limit=limit,
+                with_payload=True,
+            )
+        except ValueError as exc:
+            if "Could not load model" not in str(exc):
+                raise
+            fallback_query = models.SampleQuery(sample=models.Sample.RANDOM)
+            res = await server.qdrant_client.query_points(
+                collection_name="media-items",
+                query=fallback_query,
+                query_filter=filter_obj,
+                limit=limit,
+                with_payload=True,
+            )
         results = [
             media_helpers._flatten_payload(
                 cast(Mapping[str, JSONValue] | None, p.payload)
