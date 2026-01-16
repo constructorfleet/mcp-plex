@@ -548,7 +548,7 @@ def _get_cached_payload(
 
 
 async def _get_media_data(
-    server: "PlexServer", identifier: str, *, allow_vector: bool = False
+    server: "PlexServer", identifier: str, *, allow_vector: bool | None = None
 ) -> AggregatedMediaItem:
     """Return the first matching media record's payload."""
 
@@ -556,8 +556,15 @@ async def _get_media_data(
     if cached_payload is not None:
         return cached_payload
 
+    identifier_text = identifier.strip()
+    allow_vector_lookup = allow_vector
+    if allow_vector_lookup is None:
+        allow_vector_lookup = not (
+            identifier_text and _should_use_identifier_filter(identifier_text)
+        )
+
     records = await _find_records(server, identifier, limit=1, allow_vector=False)
-    if not records and allow_vector:
+    if not records and allow_vector_lookup:
         records = await _find_records(server, identifier, limit=1, allow_vector=True)
     if not records:
         raise ValueError("Media item not found")

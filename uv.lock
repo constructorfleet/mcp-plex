@@ -756,7 +756,7 @@ wheels = [
 
 [[package]]
 name = "mcp-plex"
-version = "2.2.9"
+version = "2.2.13"
 source = { editable = "." }
 dependencies = [
     { name = "fastapi" },

@@ -7,11 +7,13 @@ import importlib.metadata
 import inspect
 import json
 import logging
-from pathlib import Path
 import uuid
 from functools import wraps
-from typing import Annotated, Any, Callable, Mapping, Sequence, TYPE_CHECKING, cast
+from pathlib import Path
+from typing import TYPE_CHECKING, Annotated, Any, Callable, Mapping, Sequence, cast
+from xml.etree import ElementTree
 
+import yaml
 from fastapi import FastAPI
 from fastapi.openapi.docs import get_swagger_ui_html
 from fastapi.openapi.utils import get_openapi
@@ -19,37 +21,35 @@ from fastmcp.prompts import Message
 from fastmcp.server import FastMCP
 from fastmcp.server.context import Context as FastMCPContext
 from plexapi import base as plex_base
-from plexapi.exceptions import PlexApiException
-from plexapi.server import PlexServer as PlexServerClient
 from plexapi.client import PlexClient
-from plexapi.playqueue import PlayQueue
+from plexapi.exceptions import PlexApiException
 from plexapi.media import (
     AudioStream,
     MediaPartStream,
-    Session as PlexSession,
     SubtitleStream,
 )
+from plexapi.media import (
+    Session as PlexSession,
+)
+from plexapi.playqueue import PlayQueue
+from plexapi.server import PlexServer as PlexServerClient
 from pydantic import BaseModel, Field, create_model
 from qdrant_client.async_qdrant_client import AsyncQdrantClient
+from rapidfuzz import fuzz, process
 from starlette.requests import Request
 from starlette.responses import JSONResponse, PlainTextResponse, Response
-from xml.etree import ElementTree
-
-from rapidfuzz import fuzz, process
-import yaml
 
 from ..common.cache import MediaCache
 from ..common.types import JSONValue
 from . import media as media_helpers
 from .config import PlexPlayerAliasMap, Settings
 from .models import (
-    PlexPlayerMetadata,
-    PlayMediaResponseModel,
     PlayerCommandResponseModel,
+    PlayMediaResponseModel,
+    PlexPlayerMetadata,
     QueueMediaResponseModel,
 )
 from .tools.media_library import register_media_library_tools
-
 
 logger = logging.getLogger(__name__)
 
