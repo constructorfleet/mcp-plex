@@ -391,7 +391,8 @@ async def _existing_point_ids(
 
 
 def _is_embedding_model_failure(error: Exception) -> bool:
-    return "Could not load model" in str(error)
+    message = str(error)
+    return "Could not load model" in message or "Could not find config.json" in message
 
 
 def _materialize_points(points: Sequence[models.PointStruct]) -> list[models.PointStruct]:
@@ -469,7 +470,7 @@ async def _find_record_by_external_ids(
 
     records, _ = await client.scroll(
         collection_name=collection_name,
-        scroll_filter=models.Filter(should=conditions),
+        scroll_filter=models.Filter(must=conditions),
         limit=1,
         with_payload=True,
         with_vectors=False,
