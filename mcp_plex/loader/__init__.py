@@ -52,6 +52,7 @@ _upsert_in_batches = _qdrant._upsert_in_batches
 _process_qdrant_retry_queue = _qdrant._process_qdrant_retry_queue
 _point_id_from_rating_key = _qdrant._point_id_from_rating_key
 _normalise_point_id = _qdrant._normalise_point_id
+_delete_missing_rating_keys = _qdrant._delete_missing_rating_keys
 _existing_point_ids = _qdrant._existing_point_ids
 _find_record_by_external_ids = _qdrant._find_record_by_external_ids
 rehydrate_aggregated_item = _qdrant.rehydrate_aggregated_item
@@ -201,12 +202,16 @@ def _build_loader_orchestrator(
     imdb_config: IMDbRuntimeConfig,
     qdrant_config: QdrantRuntimeConfig,
 ) -> tuple[
-    LoaderOrchestrator, list[AggregatedItem], asyncio.Queue[list[models.PointStruct]]
+    LoaderOrchestrator,
+    list[AggregatedItem],
+    asyncio.Queue[list[models.PointStruct]],
+    set[str],
 ]:
     """Wire the staged loader pipeline and return the orchestrator helpers."""
-
     from .pipeline.ingestion import IngestionStage
     from .pipeline.enrichment import EnrichmentStage
+
+    rating_keys_seen: set[str] = set()
 
     ingest_queue_capacity = _queue_capacity(
         enrichment_workers, INGEST_QUEUE_MULTIPLIER
@@ -233,9 +238,13 @@ def _build_loader_orchestrator(
         if not batch:
             return [], 0
 
-        point_pairs = [
-            (item, _point_id_from_rating_key(item.plex.rating_key)) for item in batch
-        ]
+        point_pairs: list[tuple[AggregatedItem, int | str]] = []
+        for item in batch:
+            rating_key = str(getattr(item.plex, "rating_key", ""))
+            if rating_key:
+                rating_keys_seen.add(rating_key)
+            point_pairs.append((item, _point_id_from_rating_key(item.plex.rating_key)))
+
         existing_ids = await _existing_point_ids(
             client, collection_name, [point_id for _, point_id in point_pairs]
         )
@@ -383,7 +392,7 @@ def _build_loader_orchestrator(
         persistence_worker_count=max_concurrent_upserts,
     )
 
-    return orchestrator, items, persistence_stage.retry_queue
+    return orchestrator, items, persistence_stage.retry_queue, rating_keys_seen
 
 
 async def run(
@@ -476,11 +485,19 @@ async def run(
             dense_distance=dense_distance,
         )
 
+        cleanup_enabled = sample_dir is None
+        observed_rating_keys: set[str] = set()
+
         items: list[AggregatedItem]
         if sample_dir is not None:
             logger.info("Loading sample data from %s", sample_dir)
             sample_items = samples._load_from_sample(sample_dir)
-            orchestrator, items, qdrant_retry_queue = _build_loader_orchestrator(
+            (
+                orchestrator,
+                items,
+                qdrant_retry_queue,
+                observed_rating_keys,
+            ) = _build_loader_orchestrator(
                 client=client,
                 collection_name=collection_name,
                 dense_model_name=dense_model_name,
@@ -514,7 +531,12 @@ async def run(
                 raise RuntimeError("TMDB_API_KEY must be provided")
             logger.info("Loading data from Plex server %s", plex_url)
             server = PlexServer(plex_url, plex_token)
-            orchestrator, items, qdrant_retry_queue = _build_loader_orchestrator(
+            (
+                orchestrator,
+                items,
+                qdrant_retry_queue,
+                observed_rating_keys,
+            ) = _build_loader_orchestrator(
                 client=client,
                 collection_name=collection_name,
                 dense_model_name=dense_model_name,
@@ -553,6 +575,25 @@ async def run(
             failed_points,
             extra=retry_summary,
         )
+
+        if cleanup_enabled:
+            if observed_rating_keys:
+                deleted_points, scanned_points = await _delete_missing_rating_keys(
+                    client,
+                    collection_name,
+                    observed_rating_keys,
+                )
+                logger.info(
+                    "Qdrant cleanup removed %d stale point(s) after scanning %d total.",
+                    deleted_points,
+                    scanned_points,
+                )
+            else:
+                logger.info(
+                    "Skipping Qdrant cleanup because no Plex rating keys were observed.",
+                )
+        else:
+            logger.info("Skipping Qdrant cleanup in sample mode.")
 
         if imdb_queue_path:
             _persist_imdb_retry_queue(imdb_queue_path, imdb_config.retry_queue)

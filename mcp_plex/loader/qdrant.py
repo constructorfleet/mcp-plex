@@ -8,8 +8,16 @@ import random
 import time
 import logging
 import warnings
-from collections.abc import Mapping
-from typing import TYPE_CHECKING, Iterable, List, Optional, Sequence, TypedDict
+from typing import (
+    TYPE_CHECKING,
+    Collection,
+    Iterable,
+    List,
+    Mapping,
+    Optional,
+    Sequence,
+    TypedDict,
+)
 
 from qdrant_client import models
 from qdrant_client.async_qdrant_client import AsyncQdrantClient
@@ -285,6 +293,24 @@ def _normalise_point_id(point_id: int | str) -> str:
     return str(point_id)
 
 
+def _payload_rating_key(payload: Mapping[str, JSONValue] | None) -> str | None:
+    """Extract the rating key from a Qdrant payload if present."""
+
+    if not isinstance(payload, Mapping):
+        return None
+    data = payload.get("data")
+    if not isinstance(data, Mapping):
+        return None
+    plex = data.get("plex")
+    if not isinstance(plex, Mapping):
+        return None
+    rating_key = plex.get("rating_key")
+    if rating_key is None:
+        return None
+    rating_key_str = str(rating_key).strip()
+    return rating_key_str or None
+
+
 def build_point(
     item: AggregatedItem,
     dense_model_name: str,
@@ -489,6 +515,78 @@ def rehydrate_aggregated_item(payload: Mapping[str, JSONValue]) -> AggregatedIte
     return AggregatedItem.model_validate(data)
 
 
+async def _delete_missing_rating_keys(
+    client: AsyncQdrantClient,
+    collection_name: str,
+    active_rating_keys: Collection[str],
+    *,
+    scroll_limit: int = 256,
+) -> tuple[int, int]:
+    """Delete Qdrant points whose rating key is absent from *active_rating_keys*."""
+
+    normalised_keys = {
+        key.strip()
+        for key in (str(value) for value in active_rating_keys)
+        if key.strip()
+    }
+    if not normalised_keys:
+        logger.info(
+            "Skipping Qdrant cleanup because no Plex rating keys were observed; "
+            "collection=%s",
+            collection_name,
+        )
+        return 0, 0
+
+    deleted = 0
+    scanned = 0
+    offset = None
+
+    while True:
+        records, offset = await client.scroll(
+            collection_name=collection_name,
+            offset=offset,
+            limit=scroll_limit,
+            with_payload=True,
+            with_vectors=False,
+        )
+        if not records:
+            break
+
+        stale_ids: list[int | str] = []
+        for record in records:
+            scanned += 1
+            rating_key = _payload_rating_key(getattr(record, "payload", None))
+            if rating_key and rating_key in normalised_keys:
+                continue
+            record_id = getattr(record, "id", None)
+            if record_id is None:
+                continue
+            stale_ids.append(record_id)
+
+        if not stale_ids:
+            continue
+
+        await client.delete(
+            collection_name=collection_name,
+            points_selector=models.PointIdsList(points=stale_ids),
+            wait=True,
+        )
+        deleted += len(stale_ids)
+        logger.debug(
+            "Deleted %d stale Qdrant point(s) missing from Plex (collection=%s).",
+            len(stale_ids),
+            collection_name,
+        )
+
+    logger.info(
+        "Removed %d stale Qdrant point(s) after scanning %d record(s) in %s.",
+        deleted,
+        scanned,
+        collection_name,
+    )
+    return deleted, scanned
+
+
 def _chunk(seq: Sequence[models.PointStruct], size: int) -> Iterable[Sequence[models.PointStruct]]:
     for i in range(0, len(seq), size):
         yield seq[i : i + size]
@@ -547,6 +645,7 @@ async def _upsert_batch(
                     e,
                 )
                 return 0
+
             attempt += 1
             if attempt > max_retries:
                 # Shove it to the retry queue and move on
@@ -741,8 +840,10 @@ __all__ = [
     "_build_point_payload",
     "_point_id_from_rating_key",
     "_normalise_point_id",
+    "_payload_rating_key",
     "_existing_point_ids",
     "_find_record_by_external_ids",
+    "_delete_missing_rating_keys",
     "rehydrate_aggregated_item",
     "QdrantPayload",
     "build_point",

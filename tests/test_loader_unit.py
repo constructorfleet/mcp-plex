@@ -553,7 +553,7 @@ def test_loader_pipeline_processes_sample_batches(monkeypatch):
     imdb_config = make_imdb_config()
     qdrant_config = QdrantRuntimeConfig(batch_size=1)
 
-    orchestrator, processed_items, _ = _build_loader_orchestrator(
+    orchestrator, processed_items, _, rating_keys = _build_loader_orchestrator(
         client=object(),
         collection_name="media-items",
         dense_model_name="BAAI/bge-small-en-v1.5",
@@ -574,6 +574,7 @@ def test_loader_pipeline_processes_sample_batches(monkeypatch):
 
     assert len(processed_items) == len(sample_items)
     assert recorded_batches, "expected pipeline to emit upsert batches"
+    assert rating_keys, "expected sample items to record rating keys"
     payload = recorded_batches[0][0].payload
     assert payload["title"]
     assert payload["type"] in {"movie", "episode"}
@@ -586,7 +587,7 @@ def test_build_loader_orchestrator_limits_queue_sizes():
     imdb_config = make_imdb_config()
     qdrant_config = QdrantRuntimeConfig(batch_size=1)
 
-    orchestrator, _, retry_queue = _build_loader_orchestrator(
+    orchestrator, _, retry_queue, rating_keys = _build_loader_orchestrator(
         client=object(),
         collection_name="media-items",
         dense_model_name="BAAI/bge-small-en-v1.5",
@@ -608,3 +609,4 @@ def test_build_loader_orchestrator_limits_queue_sizes():
     assert (
         retry_queue.maxsize == 0
     ), "Qdrant retry queue should remain unbounded to avoid deadlocks"
+    assert rating_keys == set()
