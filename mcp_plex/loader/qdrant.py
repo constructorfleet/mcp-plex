@@ -539,12 +539,12 @@ async def _delete_missing_rating_keys(
 
     deleted = 0
     scanned = 0
-    offset = None
+    cursor = None
 
     while True:
-        records, offset = await client.scroll(
+        records, next_offset = await client.scroll(
             collection_name=collection_name,
-            offset=offset,
+            offset=cursor,
             limit=scroll_limit,
             with_payload=True,
             with_vectors=False,
@@ -563,20 +563,22 @@ async def _delete_missing_rating_keys(
                 continue
             stale_ids.append(record_id)
 
-        if not stale_ids:
-            continue
+        if stale_ids:
+            await client.delete(
+                collection_name=collection_name,
+                points_selector=models.PointIdsList(points=stale_ids),
+                wait=True,
+            )
+            deleted += len(stale_ids)
+            logger.debug(
+                "Deleted %d stale Qdrant point(s) missing from Plex (collection=%s).",
+                len(stale_ids),
+                collection_name,
+            )
 
-        await client.delete(
-            collection_name=collection_name,
-            points_selector=models.PointIdsList(points=stale_ids),
-            wait=True,
-        )
-        deleted += len(stale_ids)
-        logger.debug(
-            "Deleted %d stale Qdrant point(s) missing from Plex (collection=%s).",
-            len(stale_ids),
-            collection_name,
-        )
+        cursor = next_offset
+        if cursor is None:
+            break
 
     logger.info(
         "Removed %d stale Qdrant point(s) after scanning %d record(s) in %s.",
