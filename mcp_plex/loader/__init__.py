@@ -555,7 +555,6 @@ async def run(
             )
             logger.info("Starting staged loader (Plex mode)")
             await orchestrator.run()
-
         logger.info("Loaded %d items", len(items))
         if not items:
             logger.info("No points to upsert")
