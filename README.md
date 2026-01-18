@@ -13,6 +13,7 @@ tools through the [Model Context Protocol](https://github.com/modelcontextprotoc
 - Hybrid dense & sparse vector search for media items.
 - Title search automatically strips leading articles ("The", "A", "An", etc.) and now falls back to hybrid dense/sparse vector similarity so near-miss spellings still resolve (e.g., asking for "The Gentleman" returns "The Gentlemen").
 - Recommend similar media from a reference item.
+- Automatically prune stale Qdrant points whenever Plex removes or renumbers media so the collection stays in sync.
 - GPU-enabled data loading and embeddings.
 
 > GPU dependencies are installed automatically on Linux x86_64 hosts. Arm64 (including Apple Silicon dev containers) falls back to the CPU-only embedding stack so setup succeeds everywhere.
@@ -35,6 +36,13 @@ Run continuously with a delay between runs:
 ```bash
 uv run load-data --continuous --delay 600
 ```
+
+### Qdrant Cleanup
+Each non-sample loader run now records the Plex rating keys it processed and
+purges Qdrant points whose rating keys are missing from that set. This keeps
+the collection aligned with your current Plex library after deletions or
+metadata changes. Cleanup is skipped automatically when `--sample-dir` is
+supplied so bundled fixtures remain untouched.
 
 ### IMDb Retry Configuration
 The loader exposes CLI flags (and mirrored environment variables) that control
