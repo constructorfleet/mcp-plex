@@ -10,7 +10,9 @@ class CleanupClient:
         self.scroll_calls = 0
         self.deleted: list[list[int | str]] = []
 
-    async def scroll(self, **_: object) -> tuple[list[SimpleNamespace], None | dict[str, int]]:
+    async def scroll(
+        self, *, offset: None | dict[str, int] = None, **_: object
+    ) -> tuple[list[SimpleNamespace], None | dict[str, int]]:
         if self.scroll_calls >= len(self._batches):
             return [], None
         batch = self._batches[self.scroll_calls]
@@ -65,3 +67,42 @@ def test_delete_missing_rating_keys_skips_when_no_keys():
     assert scanned == 0
     assert client.scroll_calls == 0
     assert client.deleted == []
+
+
+class LoopingCleanupClient:
+    """Simulate Qdrant returning the same page whenever the offset is ``None``."""
+
+    def __init__(self, batch: list[SimpleNamespace]) -> None:
+        self.batch = batch
+        self.scroll_calls = 0
+        self.deleted: list[list[int | str]] = []
+
+    async def scroll(
+        self, *, offset: None | dict[str, int] = None, **_: object
+    ) -> tuple[list[SimpleNamespace], None | dict[str, int]]:
+        self.scroll_calls += 1
+        # Always return the same data with a null offset to mimic the Qdrant behavior
+        # described in the bug report.
+        return self.batch, None
+
+    async def delete(self, *, points_selector, **_: object) -> None:
+        self.deleted.append(list(points_selector.points))
+
+
+def test_delete_missing_rating_keys_breaks_when_offset_none():
+    client = LoopingCleanupClient([_record("1", "stale"), _record("2", "2")])
+
+    deleted, scanned = asyncio.run(
+        qdrant_module._delete_missing_rating_keys(
+            client,
+            collection_name="media-items",
+            active_rating_keys={"2"},
+            scroll_limit=10,
+        )
+    )
+
+    assert deleted == 1
+    assert scanned == 2
+    assert client.deleted == [["1"]]
+    # Ensures we only read the looping page once instead of spinning forever.
+    assert client.scroll_calls == 1
