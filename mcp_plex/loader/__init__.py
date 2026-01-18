@@ -213,7 +213,6 @@ def _build_loader_orchestrator(
 
     rating_keys_seen: set[str] = set()
 
-
     ingest_queue_capacity = _queue_capacity(
         enrichment_workers, INGEST_QUEUE_MULTIPLIER
     )
