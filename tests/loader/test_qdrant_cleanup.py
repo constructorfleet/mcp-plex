@@ -77,7 +77,9 @@ class LoopingCleanupClient:
         self.scroll_calls = 0
         self.deleted: list[list[int | str]] = []
 
-    async def scroll(self, **_: object) -> tuple[list[SimpleNamespace], None]:
+    async def scroll(
+        self, *, offset: None | dict[str, int] = None, **_: object
+    ) -> tuple[list[SimpleNamespace], None | dict[str, int]]:
         self.scroll_calls += 1
         # Always return the same data with a null offset to mimic the Qdrant behavior
         # described in the bug report.
