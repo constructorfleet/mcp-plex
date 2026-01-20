@@ -690,16 +690,77 @@ async def load_media(
 
 
 class DataSource(ABC):
-    """Abstract base class for data sources."""
+    """Abstract base class for external metadata data sources.
+
+    This class defines the interface for fetching and validating metadata
+    from external sources such as Plex, TMDb, and IMDb. Implementations
+    should provide concrete methods for retrieving metadata and ensuring
+    its structural validity before processing.
+
+    The data source architecture supports the aggregation pipeline by
+    providing a standardized way to fetch metadata that will be combined
+    into ``AggregatedItem`` instances for persistence in Qdrant.
+
+    Implementations should handle authentication, rate limiting, error
+    handling, and any source-specific concerns internally.
+    """
 
     @abstractmethod
     async def fetch_data(self) -> dict:
-        """Fetch data from the source."""
+        """Fetch metadata from the external data source.
+
+        This method should retrieve metadata from the external source and
+        return it as a dictionary that can be validated and transformed
+        into one of the typed models (e.g., ``IMDbTitle``, ``TMDBMovie``,
+        ``TMDBShow``, ``PlexItem``).
+
+        Returns:
+            dict: A dictionary containing the raw metadata from the source.
+                The structure should match the expectations of the corresponding
+                Pydantic model for the data source. For example:
+                - Plex sources should return data compatible with ``PlexItem``
+                - TMDb sources should return data compatible with ``TMDBMovie``
+                  or ``TMDBShow``
+                - IMDb sources should return data compatible with ``IMDbTitle``
+
+        Raises:
+            Exception: Implementation-specific exceptions may be raised for
+                network errors, authentication failures, or rate limiting.
+
+        Note:
+            Implementations should handle retries and backoff internally
+            when appropriate for the external service's rate limits.
+        """
         pass
 
     @abstractmethod
     def validate(self, data: dict) -> bool:
-        """Validate the fetched data."""
+        """Validate the structure and content of fetched metadata.
+
+        This method checks whether the provided data dictionary contains
+        the minimum required fields and has valid values for the source type.
+        Validation ensures that the data can be successfully transformed into
+        the corresponding Pydantic model without raising validation errors.
+
+        Args:
+            data: The metadata dictionary returned by ``fetch_data()`` that
+                needs to be validated.
+
+        Returns:
+            bool: ``True`` if the data contains all required fields and has
+                valid values that can be processed by the aggregation pipeline.
+                ``False`` if the data is incomplete, malformed, or missing
+                critical fields.
+
+        Note:
+            This method performs structural validation only. It does not
+            verify the semantic correctness of the metadata (e.g., whether
+            an IMDb ID actually exists). The validation should check:
+            - Required fields are present
+            - Field types are compatible with expected values
+            - Nested structures are properly formed
+            - Critical identifiers (IDs, titles, etc.) are non-empty
+        """
         pass
 
 
