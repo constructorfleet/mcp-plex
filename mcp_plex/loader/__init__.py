@@ -8,9 +8,10 @@ import logging
 import sys
 import time
 import warnings
+from abc import ABC, abstractmethod
 from dataclasses import dataclass, field
 from pathlib import Path
-from typing import TYPE_CHECKING, Sequence, cast
+from typing import TYPE_CHECKING, Sequence, TypedDict, cast
 
 import httpx
 from qdrant_client import models
@@ -233,13 +234,16 @@ def _build_loader_orchestrator(
     upsert_start = time.perf_counter()
 
     async def _filter_new_items(
-        batch: Sequence[AggregatedItem],
+        batch: Sequence[AggregatedItem | models.PointStruct],
     ) -> tuple[list[AggregatedItem], int]:
         if not batch:
             return [], 0
 
+        # Filter out PointStruct instances
+        filtered_batch = [item for item in batch if isinstance(item, AggregatedItem)]
+
         point_pairs: list[tuple[AggregatedItem, int | str]] = []
-        for item in batch:
+        for item in filtered_batch:
             rating_key = str(getattr(item.plex, "rating_key", ""))
             if rating_key:
                 rating_keys_seen.add(rating_key)
@@ -683,3 +687,85 @@ async def load_media(
                 sleep_interval,
             )
         await asyncio.sleep(sleep_interval)
+
+
+class DataSourcePayload(TypedDict):
+    """Structured data returned by :class:`DataSource` implementations."""
+
+    source: str
+    items: list[dict[str, JSONValue]]
+
+
+def _validate_source_payload(data: DataSourcePayload, source: str) -> bool:
+    if data.get("source") != source:
+        return False
+    items = data.get("items")
+    if not isinstance(items, list):
+        return False
+    return all(isinstance(item, dict) for item in items)
+
+
+class DataSource(ABC):
+    """Abstract base class for loader data sources.
+
+    Implementations standardize how external metadata systems return raw payloads.
+    Each source must return a dictionary containing a ``source`` label and a list
+    of item payloads so downstream stages can reason about provenance and shape.
+    """
+
+    @abstractmethod
+    async def fetch_data(self) -> DataSourcePayload:
+        """Fetch data from the source.
+
+        Returns:
+            A mapping with ``source`` set to the source identifier and ``items``
+            containing a list of payload dictionaries for each fetched item.
+        """
+
+    @abstractmethod
+    def validate(self, data: DataSourcePayload) -> bool:
+        """Validate the fetched data.
+
+        Args:
+            data: The payload returned from :meth:`fetch_data`.
+
+        Returns:
+            ``True`` when the payload matches the expected structure for the
+            source; otherwise ``False``.
+        """
+
+
+class PlexSource(DataSource):
+    async def fetch_data(self) -> DataSourcePayload:
+        """Fetch Plex metadata payloads."""
+
+        return {"source": "plex", "items": []}
+
+    def validate(self, data: DataSourcePayload) -> bool:
+        """Validate Plex payload structure."""
+
+        return _validate_source_payload(data, "plex")
+
+
+class TMDBSource(DataSource):
+    async def fetch_data(self) -> DataSourcePayload:
+        """Fetch TMDb metadata payloads."""
+
+        return {"source": "tmdb", "items": []}
+
+    def validate(self, data: DataSourcePayload) -> bool:
+        """Validate TMDb payload structure."""
+
+        return _validate_source_payload(data, "tmdb")
+
+
+class IMDbSource(DataSource):
+    async def fetch_data(self) -> DataSourcePayload:
+        """Fetch IMDb metadata payloads."""
+
+        return {"source": "imdb", "items": []}
+
+    def validate(self, data: DataSourcePayload) -> bool:
+        """Validate IMDb payload structure."""
+
+        return _validate_source_payload(data, "imdb")

@@ -17,10 +17,12 @@ from typing import (
     Optional,
     Sequence,
     TypedDict,
+    Any,
 )
 
 from qdrant_client import models
 from qdrant_client.async_qdrant_client import AsyncQdrantClient
+from qdrant_client.http.exceptions import UnexpectedResponse
 from qdrant_client.http.models import WriteOrdering
 
 from ..common.text import slugify, strip_leading_article
@@ -111,7 +113,7 @@ async def _ensure_collection(
             )
 
     text_index = models.TextIndexParams(
-        type=models.PayloadSchemaType.TEXT,
+        type=models.TextIndexType.TEXT,
         tokenizer=models.TokenizerType.WORD,
         min_token_len=2,
         lowercase=True,
@@ -218,10 +220,10 @@ class QdrantPayload(_BaseQdrantPayload, total=False):
     added_at: int
 
 
-def _build_point_payload(item: AggregatedItem) -> QdrantPayload:
+def _build_point_payload(item: AggregatedItem) -> dict[str, Any]:
     """Construct the Qdrant payload for ``item``."""
 
-    payload: QdrantPayload = {
+    payload: dict[str, Any] = {
         "data": item.model_dump(mode="json"),
         "title": item.plex.title,
         "type": item.plex.type,
@@ -833,6 +835,35 @@ async def _process_qdrant_retry_queue(
 
     return succeeded_points, failed_points
 
+
+class QdrantManager:
+    """Encapsulates all Qdrant-related operations."""
+
+    def __init__(self, client: AsyncQdrantClient, collection_name: str):
+        self.client = client
+        self.collection_name = collection_name
+
+    async def ensure_collection(self, vector_size: int, distance: models.Distance):
+        """Ensure the Qdrant collection exists."""
+        try:
+            await self.client.get_collection(self.collection_name)
+        except UnexpectedResponse as exc:
+            if exc.status_code != 404:
+                raise
+            await self.client.create_collection(
+                collection_name=self.collection_name,
+                vectors_config=models.VectorParams(size=vector_size, distance=distance),
+            )
+
+    async def upsert_points(self, points: list[models.PointStruct]):
+        """Upsert points into the Qdrant collection."""
+        await self.client.upsert(collection_name=self.collection_name, points=points)
+
+    async def delete_collection(self):
+        """Delete the Qdrant collection."""
+        await self.client.delete_collection(self.collection_name)
+
+
 __all__ = [
     "_DENSE_MODEL_PARAMS",
     "_resolve_dense_model_params",
@@ -851,4 +882,5 @@ __all__ = [
     "build_point",
     "_upsert_in_batches",
     "_process_qdrant_retry_queue",
+    "QdrantManager",
 ]
