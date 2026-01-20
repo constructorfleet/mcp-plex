@@ -1,8 +1,11 @@
 """Tests for shared validation helpers."""
 
+import asyncio
+import functools
+
 import pytest
 
-from mcp_plex.common.validation import coerce_plex_tag_id, require_positive
+from mcp_plex.common.validation import coerce_plex_tag_id, require_positive, retry
 
 
 def test_require_positive_accepts_positive_int() -> None:
@@ -42,3 +45,40 @@ def test_coerce_plex_tag_id_normalizes_values(raw, expected) -> None:
 @pytest.mark.parametrize("raw", [None, "", "not-a-number"])
 def test_coerce_plex_tag_id_handles_invalid_values(raw) -> None:
     assert coerce_plex_tag_id(raw) == 0
+
+
+def test_retry_retries_transient_errors() -> None:
+    calls = 0
+
+    def flaky() -> str:
+        nonlocal calls
+        calls += 1
+        if calls < 2:
+            raise ConnectionError("temporary")
+        return "ok"
+
+    wrapped = retry(retries=2, delay=0.0)(flaky)
+    assert asyncio.run(wrapped()) == "ok"
+    assert calls == 2
+
+
+def test_retry_does_not_retry_non_transient_errors() -> None:
+    calls = 0
+
+    def boom() -> str:
+        nonlocal calls
+        calls += 1
+        raise ValueError("permanent")
+
+    wrapped = retry(retries=3, delay=0.0)(boom)
+    with pytest.raises(ValueError, match="permanent"):
+        asyncio.run(wrapped())
+    assert calls == 1
+
+
+def test_retry_awaits_awaitable_results() -> None:
+    async def get_value() -> str:
+        return "ready"
+
+    wrapped = retry(retries=1, delay=0.0)(functools.partial(get_value))
+    assert asyncio.run(wrapped()) == "ready"
