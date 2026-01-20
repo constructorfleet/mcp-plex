@@ -1200,11 +1200,24 @@ async def queue_media(
 
     plex_server = await _get_plex_client()
 
+    def _log_queue_state(queue, action):
+        logger.info(
+            f"PlayQueue {action}: ID={queue.playQueueID}, TotalCount={queue.playQueueTotalCount}, Version={queue.playQueueVersion}"
+        )
+
     def _enqueue() -> tuple[int, int]:
         queue = PlayQueue.get(plex_server, play_queue_id, own=True)
+        _log_queue_state(queue, "before adding item")
+
         media_item = plex_server.fetchItem(f"/library/metadata/{rating_key_normalized}")
-        updated = queue.addItem(media_item, playNext=play_next)
-        return updated.playQueueTotalCount, updated.playQueueVersion
+        if not queue.items:
+            logger.warning("PlayQueue 'Up Next' section is empty before adding item to queue.")
+
+        updated = queue.addItem(media_item, playNext=False, refresh=True)
+        if play_next:
+            # Move the item to the front of the queue so it will play next.
+            updated = updated.moveItem(media_item, 0, refresh=True)
+        return int(updated.playQueueTotalCount), int(updated.playQueueVersion)
 
     queue_size, queue_version = await asyncio.to_thread(_enqueue)
 
