@@ -707,7 +707,7 @@ class DataSource(ABC):
 
     @abstractmethod
     async def fetch_data(self) -> dict:
-        """Fetch metadata from the external data source.
+        """Fetch metadata from the external source.
 
         This method should retrieve metadata from the external source and
         return it as a dictionary that can be validated and transformed
@@ -724,8 +724,9 @@ class DataSource(ABC):
                 - IMDb sources should return data compatible with ``IMDbTitle``
 
         Raises:
-            Exception: Implementation-specific exceptions may be raised for
-                network errors, authentication failures, or rate limiting.
+            httpx.HTTPError: For network-related errors when fetching metadata.
+            ValueError: For malformed responses or invalid data.
+            RuntimeError: For authentication failures or authorization issues.
 
         Note:
             Implementations should handle retries and backoff internally
@@ -753,7 +754,8 @@ class DataSource(ABC):
                 critical fields.
 
         Note:
-            This method performs structural validation only. It does not
+            This method performs structural validation only, which verifies
+            the data format and required fields are present. It does not
             verify the semantic correctness of the metadata (e.g., whether
             an IMDb ID actually exists). The validation should check:
             - Required fields are present
