@@ -11,7 +11,7 @@ import warnings
 from abc import ABC, abstractmethod
 from dataclasses import dataclass, field
 from pathlib import Path
-from typing import TYPE_CHECKING, Sequence, cast
+from typing import TYPE_CHECKING, Sequence, TypedDict, cast
 
 import httpx
 from qdrant_client import models
@@ -689,6 +689,22 @@ async def load_media(
         await asyncio.sleep(sleep_interval)
 
 
+class DataSourcePayload(TypedDict):
+    """Structured data returned by :class:`DataSource` implementations."""
+
+    source: str
+    items: list[dict[str, JSONValue]]
+
+
+def _validate_source_payload(data: DataSourcePayload, source: str) -> bool:
+    if data.get("source") != source:
+        return False
+    items = data.get("items")
+    if not isinstance(items, list):
+        return False
+    return all(isinstance(item, dict) for item in items)
+
+
 class DataSource(ABC):
     """Abstract base class for external metadata data sources.
 
@@ -767,30 +783,36 @@ class DataSource(ABC):
 
 
 class PlexSource(DataSource):
-    async def fetch_data(self) -> dict:
-        # Placeholder implementation for fetching data from Plex
-        return {}
+    async def fetch_data(self) -> DataSourcePayload:
+        """Fetch Plex metadata payloads."""
 
-    def validate(self, data: dict) -> bool:
-        # Placeholder implementation for validating Plex data
-        return True
+        return {"source": "plex", "items": []}
+
+    def validate(self, data: DataSourcePayload) -> bool:
+        """Validate Plex payload structure."""
+
+        return _validate_source_payload(data, "plex")
 
 
 class TMDBSource(DataSource):
-    async def fetch_data(self) -> dict:
-        # Placeholder implementation for fetching data from TMDB
-        return {}
+    async def fetch_data(self) -> DataSourcePayload:
+        """Fetch TMDb metadata payloads."""
 
-    def validate(self, data: dict) -> bool:
-        # Placeholder implementation for validating TMDB data
-        return True
+        return {"source": "tmdb", "items": []}
+
+    def validate(self, data: DataSourcePayload) -> bool:
+        """Validate TMDb payload structure."""
+
+        return _validate_source_payload(data, "tmdb")
 
 
 class IMDbSource(DataSource):
-    async def fetch_data(self) -> dict:
-        # Placeholder implementation for fetching data from IMDb
-        return {}
+    async def fetch_data(self) -> DataSourcePayload:
+        """Fetch IMDb metadata payloads."""
 
-    def validate(self, data: dict) -> bool:
-        # Placeholder implementation for validating IMDb data
-        return True
+        return {"source": "imdb", "items": []}
+
+    def validate(self, data: DataSourcePayload) -> bool:
+        """Validate IMDb payload structure."""
+
+        return _validate_source_payload(data, "imdb")

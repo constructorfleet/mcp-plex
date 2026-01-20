@@ -22,6 +22,7 @@ from typing import (
 
 from qdrant_client import models
 from qdrant_client.async_qdrant_client import AsyncQdrantClient
+from qdrant_client.http.exceptions import UnexpectedResponse
 from qdrant_client.http.models import WriteOrdering
 
 from ..common.text import slugify, strip_leading_article
@@ -846,7 +847,9 @@ class QdrantManager:
         """Ensure the Qdrant collection exists."""
         try:
             await self.client.get_collection(self.collection_name)
-        except Exception:
+        except UnexpectedResponse as exc:
+            if exc.status_code != 404:
+                raise
             await self.client.create_collection(
                 collection_name=self.collection_name,
                 vectors_config=models.VectorParams(size=vector_size, distance=distance),
