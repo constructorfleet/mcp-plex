@@ -15,7 +15,7 @@ from .channels import (
 from ...common.validation import require_positive
 
 try:  # pragma: no cover - allow import to fail when qdrant_client is absent
-    from qdrant_client import AsyncQdrantClient, models
+    from qdrant_client import AsyncQdrantClient, models # type: ignore
 except ModuleNotFoundError:  # pragma: no cover - tooling without qdrant installed
 
     class AsyncQdrantClient:  # type: ignore[too-few-public-methods]
@@ -30,7 +30,7 @@ except ModuleNotFoundError:  # pragma: no cover - tooling without qdrant install
     models = _ModelsStub()  # type: ignore[assignment]
 
 
-PersistencePayload: TypeAlias = list["models.PointStruct"]
+PersistencePayload: TypeAlias = Sequence["models.PointStruct"]
 
 
 class PersistenceStage:
