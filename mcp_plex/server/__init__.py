@@ -136,9 +136,9 @@ class PlexServer(FastMCP):
 
         super().__init__(name=SERVER_NAME, lifespan=_lifespan)
         # FastMCP >=2.12 expects this flag when using the low-level lifespan directly.
-        if not getattr(self, "_lifespan_result_set", False):
-            self._lifespan_result_set = True
+        self._lifespan_result_set = True
         self._reranker: CrossEncoder | None = None
+        self._reranker_loaded = False
         self._reranker_loaded = False
         self._reranker_lock = asyncio.Lock()
         self._ensure_reranker_task: asyncio.Task[CrossEncoder | None] | None = None
