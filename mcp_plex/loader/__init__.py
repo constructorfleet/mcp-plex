@@ -706,80 +706,33 @@ def _validate_source_payload(data: DataSourcePayload, source: str) -> bool:
 
 
 class DataSource(ABC):
-    """Abstract base class for external metadata data sources.
+    """Abstract base class for loader data sources.
 
-    This class defines the interface for fetching and validating metadata
-    from external sources such as Plex, TMDb, and IMDb. Implementations
-    should provide concrete methods for retrieving metadata and ensuring
-    its structural validity before processing.
-
-    The data source architecture supports the aggregation pipeline by
-    providing a standardized way to fetch metadata that will be combined
-    into ``AggregatedItem`` instances for persistence in Qdrant.
-
-    Implementations should handle authentication, rate limiting, error
-    handling, and any source-specific concerns internally.
+    Implementations standardize how external metadata systems return raw payloads.
+    Each source must return a dictionary containing a ``source`` label and a list
+    of item payloads so downstream stages can reason about provenance and shape.
     """
 
     @abstractmethod
-    async def fetch_data(self) -> dict:
-        """Fetch metadata from the external source.
-
-        This method should retrieve metadata from the external source and
-        return it as a dictionary that can be validated and transformed
-        into one of the typed models (e.g., ``IMDbTitle``, ``TMDBMovie``,
-        ``TMDBShow``, ``PlexItem``).
+    async def fetch_data(self) -> DataSourcePayload:
+        """Fetch data from the source.
 
         Returns:
-            dict: A dictionary containing the raw metadata from the source.
-                The structure should match the expectations of the corresponding
-                Pydantic model for the data source. For example:
-                - Plex sources should return data compatible with ``PlexItem``
-                - TMDb sources should return data compatible with ``TMDBMovie``
-                  or ``TMDBShow``
-                - IMDb sources should return data compatible with ``IMDbTitle``
-
-        Raises:
-            httpx.HTTPError: For network-related errors when fetching metadata.
-            ValueError: For malformed responses or invalid data.
-            RuntimeError: For authentication failures or authorization issues.
-
-        Note:
-            Implementations should handle retries and backoff internally
-            when appropriate for the external service's rate limits.
+            A mapping with ``source`` set to the source identifier and ``items``
+            containing a list of payload dictionaries for each fetched item.
         """
-        pass
 
     @abstractmethod
-    def validate(self, data: dict) -> bool:
-        """Validate the structure and content of fetched metadata.
-
-        This method checks whether the provided data dictionary contains
-        the minimum required fields and has valid values for the source type.
-        Validation ensures that the data can be successfully transformed into
-        the corresponding Pydantic model without raising validation errors.
+    def validate(self, data: DataSourcePayload) -> bool:
+        """Validate the fetched data.
 
         Args:
-            data: The metadata dictionary returned by ``fetch_data()`` that
-                needs to be validated.
+            data: The payload returned from :meth:`fetch_data`.
 
         Returns:
-            bool: ``True`` if the data contains all required fields and has
-                valid values that can be processed by the aggregation pipeline.
-                ``False`` if the data is incomplete, malformed, or missing
-                critical fields.
-
-        Note:
-            This method performs structural validation only, which verifies
-            the data format and required fields are present. It does not
-            verify the semantic correctness of the metadata (e.g., whether
-            an IMDb ID actually exists). The validation should check:
-            - Required fields are present
-            - Field types are compatible with expected values
-            - Nested structures are properly formed
-            - Critical identifiers (IDs, titles, etc.) are non-empty
+            ``True`` when the payload matches the expected structure for the
+            source; otherwise ``False``.
         """
-        pass
 
 
 class PlexSource(DataSource):
