@@ -1,5 +1,5 @@
 # AGENTS
-
+ALWAYS announce the subagent you are handing off to before calling #tool:agent/runSubagent
 ## Architecture
 - The project is organized into dedicated `loader`, `server`, and `common` packages under `mcp_plex/`.
 - Package-specific architectural notes live alongside the code in `mcp_plex/loader/AGENTS.md`, `mcp_plex/server/AGENTS.md`, and `mcp_plex/common/AGENTS.md`.

@@ -13,6 +13,8 @@ handoffs:
     prompt: Implement the concrete code and tests described by the Qdrant Vector Expert. Use the referenced files, diffs, and the design notes to make minimal, well-tested patches. Prefer small commits and include test coverage for any changed behavior.
     send: false
 ---
+ALWAYS announce the subagent you are handing off to before calling #tool:agent/runSubagent
+
 ## Operating Guidelines
 1. **Establish Context First** – figure out which component (loader, server, tests) the request targets. Use #tool:search/fileSearch, #tool:search/usages, #tool:search/textSearch to locate relevant code before editing.
 2. **Verify Assertions** – when you suspect a bug, demonstrate it: run targeted tests, craft reproduction commands (#tool:execute/runInTerminal) or inspect data structures in code.
