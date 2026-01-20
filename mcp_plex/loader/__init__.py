@@ -8,6 +8,7 @@ import logging
 import sys
 import time
 import warnings
+from abc import ABC, abstractmethod
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import TYPE_CHECKING, Sequence, cast
@@ -233,13 +234,16 @@ def _build_loader_orchestrator(
     upsert_start = time.perf_counter()
 
     async def _filter_new_items(
-        batch: Sequence[AggregatedItem],
+        batch: Sequence[AggregatedItem | models.PointStruct],
     ) -> tuple[list[AggregatedItem], int]:
         if not batch:
             return [], 0
 
+        # Filter out PointStruct instances
+        filtered_batch = [item for item in batch if isinstance(item, AggregatedItem)]
+
         point_pairs: list[tuple[AggregatedItem, int | str]] = []
-        for item in batch:
+        for item in filtered_batch:
             rating_key = str(getattr(item.plex, "rating_key", ""))
             if rating_key:
                 rating_keys_seen.add(rating_key)
@@ -683,3 +687,47 @@ async def load_media(
                 sleep_interval,
             )
         await asyncio.sleep(sleep_interval)
+
+
+class DataSource(ABC):
+    """Abstract base class for data sources."""
+
+    @abstractmethod
+    async def fetch_data(self) -> dict:
+        """Fetch data from the source."""
+        pass
+
+    @abstractmethod
+    def validate(self, data: dict) -> bool:
+        """Validate the fetched data."""
+        pass
+
+
+class PlexSource(DataSource):
+    async def fetch_data(self) -> dict:
+        # Placeholder implementation for fetching data from Plex
+        return {}
+
+    def validate(self, data: dict) -> bool:
+        # Placeholder implementation for validating Plex data
+        return True
+
+
+class TMDBSource(DataSource):
+    async def fetch_data(self) -> dict:
+        # Placeholder implementation for fetching data from TMDB
+        return {}
+
+    def validate(self, data: dict) -> bool:
+        # Placeholder implementation for validating TMDB data
+        return True
+
+
+class IMDbSource(DataSource):
+    async def fetch_data(self) -> dict:
+        # Placeholder implementation for fetching data from IMDb
+        return {}
+
+    def validate(self, data: dict) -> bool:
+        # Placeholder implementation for validating IMDb data
+        return True
