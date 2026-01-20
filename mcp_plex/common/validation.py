@@ -56,7 +56,7 @@ def retry(
                     if asyncio.iscoroutinefunction(func):
                         return await func(*args, **kwargs)  # type: ignore
                     return func(*args, **kwargs)  # type: ignore
-                except Exception as e:
+                except Exception:
                     attempt += 1
                     if attempt >= retries:
                         raise
