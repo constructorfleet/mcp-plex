@@ -1,5 +1,5 @@
 version = 1
-revision = 2
+revision = 3
 requires-python = ">=3.11, <3.13"
 resolution-markers = [
     "python_full_version >= '3.12' and platform_machine == 'x86_64'",
@@ -921,7 +921,7 @@ wheels = [
 
 [[package]]
 name = "mcp-plex"
-version = "2.2.19"
+version = "2.2.20"
 source = { editable = "." }
 dependencies = [
     { name = "fastapi" },
