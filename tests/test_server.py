@@ -708,7 +708,6 @@ def test_queue_media_adds_to_queue(monkeypatch):
         # Validate moveItem call
         assert queue_calls[-1]["method"] == "moveItem"
         assert queue_calls[-1]["refresh"] is True
-
         assert server.server._plex_client.fetch_requests == ["/library/metadata/49915"]
         assert get_calls[-1][0] == 42
         assert get_calls[-1][1]["own"] is True
@@ -1241,7 +1240,7 @@ def test_reranker_init_failure(monkeypatch, caplog):
         def __init__(self, *args, **kwargs):
             raise RuntimeError("boom")
 
-    setattr(st_module, "CrossEncoder", Broken)
+    st_module.CrossEncoder = Broken
     monkeypatch.setitem(sys.modules, "sentence_transformers", st_module)
     module = importlib.reload(importlib.import_module("mcp_plex.server"))
     with caplog.at_level(logging.WARNING, logger="mcp_plex.server"):
@@ -1675,11 +1674,7 @@ def test_query_media_filters(monkeypatch):
         assert result_entry["identifiers"]["rating_key"] == "1"
         query_filter = captured["query_filter"]
         assert query_filter is not None
-        # Ensure query_filter has 'must' attribute before accessing
-        if hasattr(query_filter, "must") and isinstance(query_filter.must, list):
-            assert len(query_filter.must) >= 10
-            for condition in query_filter.must:
-                pass
+        assert len(query_filter.must) >= 10
         assert isinstance(captured["query"], models.FusionQuery)
         prefetch = captured["prefetch"]
         assert prefetch is not None
@@ -1694,16 +1689,10 @@ def test_query_media_filters(monkeypatch):
             "data.plex.rating_key",
             "data.imdb.id",
         }
-        # Ensure prefetch is iterable before iterating
-        if isinstance(prefetch, list):
-            for entry in prefetch:
-                assert entry.filter is not None
-                keys = {condition.key for condition in entry.filter.must}
-                assert keys == expected_prefetch_keys
-        # Ensure prefetch_entries is iterable before iterating
-        if isinstance(prefetch_entries, list):
-            for entry in prefetch_entries:
-                pass
+        for entry in prefetch:
+            assert entry.filter is not None
+            keys = {condition.key for condition in entry.filter.must}
+            assert keys == expected_prefetch_keys
 
 
 def test_query_media_injects_title_vector_query(monkeypatch):
