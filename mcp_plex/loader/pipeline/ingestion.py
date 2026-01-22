@@ -376,8 +376,9 @@ class IngestionStage:
 
             seasons = [season for season in (show.seasons() or []) if isinstance(season, Season)]
 
-            # Ensure only valid episodes are processed
+            # Ensure only valid episodes are processed and track seasons for batching
             for season in seasons:
+                pending_seasons.append(season)
                 season_page = [ep for ep in (season.episodes() or []) if isinstance(ep, Episode)]
                 pending_episodes.extend(season_page)
 
