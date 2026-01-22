@@ -29,8 +29,8 @@ except ModuleNotFoundError:  # pragma: no cover - tooling without qdrant install
 
     models = _ModelsStub()  # type: ignore[assignment]
 
-
-PersistencePayload: TypeAlias = Sequence["models.PointStruct"]
+PointStruct = models.PointStruct
+PersistencePayload: TypeAlias = Sequence["PointStruct"]
 
 
 class PersistenceStage:
@@ -167,7 +167,7 @@ class PersistenceStage:
 
         return drained
 
-    async def enqueue_points(self, points: Sequence["models.PointStruct"]) -> None:
+    async def enqueue_points(self, points: Sequence["PointStruct"]) -> None:
         """Chunk *points* and place them on the persistence queue."""
 
         if not points:

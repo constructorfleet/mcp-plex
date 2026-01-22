@@ -374,15 +374,15 @@ def _build_loader_orchestrator(
     )
 
     persistence_stage = _PersistenceStage(
-        client=client,
+        client=client, # type: ignore
         collection_name=collection_name,
         dense_vector_name=dense_model_name,
         sparse_vector_name=sparse_model_name,
         persistence_queue=persistence_queue,
-        retry_queue=qdrant_retry_queue,
+        retry_queue=qdrant_retry_queue, # type: ignore
         upsert_semaphore=upsert_capacity,
         upsert_buffer_size=upsert_buffer_size,
-        upsert_fn=_upsert_aggregated,
+        upsert_fn=_upsert_aggregated, # type: ignore
         on_batch_complete=_record_upsert,
         worker_count=max_concurrent_upserts,
     )
@@ -396,7 +396,7 @@ def _build_loader_orchestrator(
         persistence_worker_count=max_concurrent_upserts,
     )
 
-    return orchestrator, items, persistence_stage.retry_queue, rating_keys_seen
+    return orchestrator, items, persistence_stage.retry_queue, rating_keys_seen # type: ignore
 
 
 async def run(

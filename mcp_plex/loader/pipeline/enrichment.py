@@ -149,7 +149,7 @@ def _build_plex_item(item: PlexPartialObject) -> PlexItem:
     return PlexItem(
         rating_key=str(getattr(item, "ratingKey", "")),
         guid=str(getattr(item, "guid", "")),
-        type=str(getattr(item, "type", "")),
+        type=str(getattr(item, "type", "")), # type: ignore
         title=str(getattr(item, "title", "")),
         show_title=getattr(item, "grandparentTitle", None),
         season_title=getattr(item, "parentTitle", None),
@@ -1053,7 +1053,7 @@ async def _fetch_imdb_batch(
             if throttle is not None:
                 await throttle.acquire()
             try:
-                response = await client.get(url, params=params)
+                response = await client.get(url, params=params) # type: ignore
             except httpx.HTTPError:
                 LOGGER.exception("HTTP error fetching IMDb IDs %s", ",".join(chunk))
                 for imdb_id in chunk:

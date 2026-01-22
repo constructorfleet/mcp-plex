@@ -188,7 +188,7 @@ class PlexPerson(BaseModel):
 class PlexItem(BaseModel):
     rating_key: str
     guid: str
-    type: Literal["movie", "episode"]
+    type: Literal["movie", "episode", "show", "season"]
     title: str
     show_title: Optional[str] = None
     season_title: Optional[str] = None

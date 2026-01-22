@@ -25,7 +25,7 @@ from typing import (
 from ...common.types import AggregatedItem
 from ...common.validation import require_positive
 
-from plexapi.video import Episode, Movie, Show
+from plexapi.video import Episode, Movie, Season, Show
 
 T = TypeVar("T")
 
@@ -34,7 +34,7 @@ if TYPE_CHECKING:
 
 
 INGEST_DONE: Final = object()
-IngestSentinel: TypeAlias = Literal[INGEST_DONE]
+IngestSentinel: TypeAlias = Literal[INGEST_DONE] # type: ignore
 """Sentinel object signaling that ingestion has completed.
 
 The loader currently places ``None`` on ingestion queues in addition to this
@@ -42,11 +42,8 @@ sentinel so legacy listeners that only check for ``None`` continue to work.
 """
 
 PERSIST_DONE: Final = object()
-PersistenceSentinel: TypeAlias = Literal[PERSIST_DONE]
+PersistenceSentinel: TypeAlias = Literal[PERSIST_DONE] # type: ignore
 """Sentinel object signaling that persistence has completed."""
-
-if TYPE_CHECKING:
-    PersistencePayload: TypeAlias = list[models.PointStruct]
 
 PersistencePayload: TypeAlias = list["models.PointStruct"]
 
@@ -55,7 +52,7 @@ PersistencePayload: TypeAlias = list["models.PointStruct"]
 class MovieBatch:
     """Batch of Plex movie items pending metadata enrichment."""
 
-    movies: list["Movie"]
+    movies: Sequence["Movie"]
 
 
 @dataclass(slots=True)
@@ -67,13 +64,21 @@ class EpisodeBatch:
 
 
 @dataclass(slots=True)
+class SeasonBatch:
+    """Batch of Plex seasons along with their parent show."""
+
+    show: "Show"
+    seasons: list["Season"]
+
+
+@dataclass(slots=True)
 class SampleBatch:
     """Batch of pre-enriched items used by sample mode."""
 
     items: list[AggregatedItem]
 
 
-IngestBatch = MovieBatch | EpisodeBatch | SampleBatch
+IngestBatch = MovieBatch | EpisodeBatch | SeasonBatch | SampleBatch
 
 IngestQueueItem: TypeAlias = IngestBatch | None | IngestSentinel
 PersistenceQueueItem: TypeAlias = PersistencePayload | None | PersistenceSentinel
@@ -142,6 +147,7 @@ async def enqueue_nowait(queue: asyncio.Queue[T], item: T) -> None:
 __all__ = [
     "MovieBatch",
     "EpisodeBatch",
+    "SeasonBatch",
     "SampleBatch",
     "IngestBatch",
     "INGEST_DONE",
