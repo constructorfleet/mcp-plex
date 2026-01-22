@@ -34,7 +34,7 @@ ALWAYS announce the subagent you are handing off to before calling #tool:agent/r
 - If no issues are found, state that explicitly and outline residual risks or monitoring ideas.
 
 ## Handoff (runSubagent) Template
-When code or tests must be changed, call #tool:agent/runSubagent with the agent `principal-architect`. Provide a structured, minimal prompt that includes:
+When code or tests must be changed, ALWAYS call #tool:agent/runSubagent with the custom agent id `principal-architect`. Provide a structured, minimal prompt that includes: 
 
 - **Files to edit**: if there are specific, targeted changes necessary, list file paths and short rationale per file.
 - **Design summary**: collection schema, payload examples, batching/ingestion plan, and test cases to add.
