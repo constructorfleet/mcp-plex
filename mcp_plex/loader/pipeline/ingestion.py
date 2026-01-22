@@ -372,6 +372,9 @@ class IngestionStage:
                 continue
 
             show_title = getattr(show, "title", str(show))
+            # Initialize variables to avoid unbound errors
+            pending_episodes: list[Episode] = []
+            show_batch_index = 0
             pending_seasons: list[Season] = []
 
             seasons = [season for season in (show.seasons() or []) if isinstance(season, Season)]
