@@ -351,6 +351,8 @@ def _build_loader_orchestrator(
         sample_items=sample_items,
         movie_batch_size=plex_chunk_size,
         episode_batch_size=plex_chunk_size,
+        season_batch_size=plex_chunk_size,
+        show_batch_size=plex_chunk_size,
         sample_batch_size=enrichment_batch_size,
         output_queue=ingest_queue,
         completion_sentinel=INGEST_DONE,

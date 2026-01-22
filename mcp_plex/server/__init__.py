@@ -135,8 +135,9 @@ class PlexServer(FastMCP):
             return _ServerLifespan(self)
 
         super().__init__(name=SERVER_NAME, lifespan=_lifespan)
-        # FastMCP >=2.12 expects this flag when using the low-level lifespan directly.
-        self._lifespan_result_set = True
+        def _low_level_lifespan(_server: Any):  # noqa: ANN001
+            return self._lifespan(self)
+        self._mcp_server.lifespan = _low_level_lifespan
         self._reranker: CrossEncoder | None = None
         self._reranker_loaded = False
         self._reranker_loaded = False
@@ -1090,7 +1091,7 @@ def _resolve_rating_key(
 
 
 async def _start_playback(
-    media: PlayQueue | str, player: PlexPlayerMetadata, offset_seconds: int
+    media: PlayQueue | str | Any, player: PlexPlayerMetadata, offset_seconds: int
 ) -> None:
     """Send a playback command to the selected player."""
 
@@ -1157,14 +1158,23 @@ async def play_media(
     )
     rating_key_normalized, plex_info = _resolve_rating_key(media)
 
-    # Create a PlayQueue for the media item
+    # Create a PlayQueue for the media item when supported, otherwise play the item directly.
     plex_server = await _get_plex_client()
     media_item = plex_server.fetchItem(f"/library/metadata/{rating_key_normalized}")
-    play_queue = plex_server.createPlayQueue(media_item, continuous=1, shuffle=1 if random else 0)
+    play_target: PlayQueue | Any = media_item
+    if hasattr(plex_server, "createPlayQueue"):
+        try:
+            play_target = plex_server.createPlayQueue(
+                media_item,
+                continuous=1,
+                shuffle=1 if random else 0,
+            )
+        except Exception:
+            play_target = media_item
 
     players = await _get_plex_players()
     target = _match_player(player, players)
-    await _start_playback(play_queue, target, offset_seconds or 0)
+    await _start_playback(play_target, target, offset_seconds or 0)
 
     capabilities = sorted(target.get("provides", set()))
 
@@ -1226,7 +1236,7 @@ async def queue_media(
         if not queue.items:
             logger.warning("PlayQueue 'Up Next' section is empty before adding item to queue.")
 
-        updated = queue.addItem(media_item, playNext=False, refresh=True)
+        updated = queue.addItem(media_item, playNext=play_next, refresh=True)
         if play_next:
             # Move the item to the front of the queue so it will play next.
             updated = updated.moveItem(media_item, 0, refresh=True)

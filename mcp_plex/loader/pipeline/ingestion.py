@@ -367,14 +367,14 @@ class IngestionStage:
         season_total = 0
 
         # Refine seasons handling to ensure correct types
-        for show in shows_section.all():
+        shows_for_seasons = shows_section.all()
+        if not isinstance(shows_for_seasons, Iterable):
+            shows_for_seasons = []
+        for show in shows_for_seasons:
             if not isinstance(show, Show):
                 continue
 
             show_title = getattr(show, "title", str(show))
-            # Initialize variables to avoid unbound errors
-            pending_episodes: list[Episode] = []
-            show_batch_index = 0
             pending_seasons: list[Season] = []
 
             seasons = [season for season in (show.seasons() or []) if isinstance(season, Season)]
@@ -382,27 +382,23 @@ class IngestionStage:
             # Ensure only valid episodes are processed and track seasons for batching
             for season in seasons:
                 pending_seasons.append(season)
-                season_page = [ep for ep in (season.episodes() or []) if isinstance(ep, Episode)]
-                pending_episodes.extend(season_page)
 
-                while len(pending_episodes) >= episode_batch_size:
-                    batch_episodes = pending_episodes[:episode_batch_size]
-                    pending_episodes = pending_episodes[episode_batch_size:]
-                    show_batch_index += 1
-                    batch = EpisodeBatch(
+                while len(pending_seasons) >= season_batch_size:
+                    batch_seasons = pending_seasons[:season_batch_size]
+                    pending_seasons = pending_seasons[season_batch_size:]
+                    batch = SeasonBatch(
                         show=show,
-                        episodes=list(batch_episodes),
+                        seasons=list(batch_seasons),
                     )
                     await enqueue_nowait(output_queue, batch)
-                    self._items_ingested += len(batch_episodes)
+                    self._items_ingested += len(batch_seasons)
                     self._batches_ingested += 1
-                    episode_batches += 1
-                    episode_total += len(batch_episodes)
+                    season_batches += 1
+                    season_total += len(batch_seasons)
                     logger.info(
-                        "Queued Plex episode batch %d for %s with %d episodes (total items=%d).",
-                        show_batch_index,
+                        "Queued Plex season batch for %s with %d seasons (total items=%d).",
                         show_title,
-                        len(batch_episodes),
+                        len(batch_seasons),
                         self._items_ingested,
                     )
 
