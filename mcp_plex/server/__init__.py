@@ -1090,7 +1090,7 @@ def _resolve_rating_key(
 
 
 async def _start_playback(
-    rating_key: str, player: PlexPlayerMetadata, offset_seconds: int
+    media: PlayQueue | str, player: PlexPlayerMetadata, offset_seconds: int
 ) -> None:
     """Send a playback command to the selected player."""
 
@@ -1106,8 +1106,9 @@ async def _start_playback(
     offset_ms = max(offset_seconds, 0) * 1000
     plex_client_any = cast(Any, plex_client)
 
-    def _play() -> None:
-        media = plex_server.fetchItem(f"/library/metadata/{rating_key}")
+    def _play(media: PlayQueue | str) -> None:
+        if isinstance(media, str):
+            media = plex_server.fetchItem(f"/library/metadata/{media}") # type: ignore
         plex_client_any.playMedia(
             media,
             offset=offset_ms,
@@ -1115,7 +1116,7 @@ async def _start_playback(
         )
 
     try:
-        await asyncio.to_thread(_play)
+        await asyncio.to_thread(_play, media)
     except PlexApiException as exc:
         raise RuntimeError("Failed to start playback via plexapi") from exc
 
@@ -1138,6 +1139,13 @@ async def play_media(
             examples=[0],
         ),
     ] = 0,
+    random: Annotated[
+        bool,
+        Field(
+            description="Play media in random order when true",
+            examples=[False],
+        )
+    ] = False
 ) -> PlayMediaResponseModel:
     """Play a media item on a specific Plex player."""
 
@@ -1149,9 +1157,14 @@ async def play_media(
     )
     rating_key_normalized, plex_info = _resolve_rating_key(media)
 
+    # Create a PlayQueue for the media item
+    plex_server = await _get_plex_client()
+    media_item = plex_server.fetchItem(f"/library/metadata/{rating_key_normalized}")
+    play_queue = plex_server.createPlayQueue(media_item, continuous=True, shuffle=random)
+
     players = await _get_plex_players()
     target = _match_player(player, players)
-    await _start_playback(rating_key_normalized, target, offset_seconds or 0)
+    await _start_playback(play_queue, target, offset_seconds or 0)
 
     capabilities = sorted(target.get("provides", set()))
 
