@@ -427,23 +427,23 @@ def _materialize_points(points: Sequence[models.PointStruct]) -> list[models.Poi
     materialized: list[models.PointStruct] = []
     for point in points:
         vector = point.vector or {}
-        dense = vector.get("dense")
-        sparse = vector.get("sparse")
+        dense = vector.get("dense") # type: ignore
+        sparse = vector.get("sparse") # type: ignore
         if isinstance(dense, models.Document):
             size, _ = _resolve_dense_model_params(dense.model)
             dense_vector: list[float] | models.Vector = [0.0] * size
         else:
-            dense_vector = dense
+            dense_vector = dense # type: ignore
         if isinstance(sparse, models.Document):
             sparse_vector: models.SparseVector | None = models.SparseVector(
                 indices=[], values=[]
             )
         else:
-            sparse_vector = sparse
+            sparse_vector = sparse # type: ignore
         materialized.append(
             models.PointStruct(
                 id=point.id,
-                vector={"dense": dense_vector, "sparse": sparse_vector},
+                vector={"dense": dense_vector, "sparse": sparse_vector}, # type: ignore
                 payload=point.payload,
             )
         )
@@ -498,7 +498,7 @@ async def _find_record_by_external_ids(
 
     records, _ = await client.scroll(
         collection_name=collection_name,
-        scroll_filter=models.Filter(must=conditions),
+        scroll_filter=models.Filter(must=conditions), # type: ignore
         limit=1,
         with_payload=True,
         with_vectors=False,

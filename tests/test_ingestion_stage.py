@@ -12,6 +12,7 @@ from mcp_plex.loader.pipeline.channels import (
     EpisodeBatch,
     IngestSentinel,
     MovieBatch,
+    SeasonBatch,
     SampleBatch,
 )
 from mcp_plex.loader.pipeline.ingestion import IngestionStage
@@ -36,6 +37,8 @@ def test_ingestion_stage_logger_name() -> None:
             sample_items=None,
             movie_batch_size=50,
             episode_batch_size=25,
+            season_batch_size=25,
+            show_batch_size=25,
             sample_batch_size=10,
             output_queue=queue,
             completion_sentinel=INGEST_DONE,
@@ -56,6 +59,8 @@ def test_ingestion_stage_sample_empty_batches() -> None:
             sample_items=[],
             movie_batch_size=1,
             episode_batch_size=1,
+            season_batch_size=1,
+            show_batch_size=1,
             sample_batch_size=2,
             output_queue=queue,
             completion_sentinel=INGEST_DONE,
@@ -101,6 +106,8 @@ def test_ingestion_stage_sample_partial_batches() -> None:
             sample_items=sample_items,
             movie_batch_size=1,
             episode_batch_size=1,
+            season_batch_size=1,
+            show_batch_size=1,
             sample_batch_size=2,
             output_queue=queue,
             completion_sentinel=INGEST_DONE,
@@ -150,6 +157,8 @@ def test_ingestion_stage_ingest_plex_requires_positive_batch_sizes(
             sample_items=None,
             movie_batch_size=1,
             episode_batch_size=1,
+            season_batch_size=1,
+            show_batch_size=1,
             sample_batch_size=1,
             output_queue=queue,
             completion_sentinel=INGEST_DONE,
@@ -162,6 +171,8 @@ def test_ingestion_stage_ingest_plex_requires_positive_batch_sizes(
                 plex_server=plex_server,
                 movie_batch_size=movie_batch_size,
                 episode_batch_size=episode_batch_size,
+                season_batch_size=1,
+                show_batch_size=1,
                 output_queue=queue,
                 logger=stage.logger,
             )
@@ -191,6 +202,8 @@ def test_ingestion_stage_queues_sample_batches_with_completion_tokens() -> None:
             sample_items=sample_items,
             movie_batch_size=1,
             episode_batch_size=1,
+            season_batch_size=1,
+            show_batch_size=1,
             sample_batch_size=1,
             output_queue=queue,
             completion_sentinel=INGEST_DONE,
@@ -323,6 +336,8 @@ def test_ingestion_stage_ingest_plex_batches_movies_and_episodes(caplog) -> None
             sample_items=None,
             movie_batch_size=2,
             episode_batch_size=2,
+            season_batch_size=2,
+            show_batch_size=2,
             sample_batch_size=10,
             output_queue=queue,
             completion_sentinel=INGEST_DONE,
@@ -332,6 +347,8 @@ def test_ingestion_stage_ingest_plex_batches_movies_and_episodes(caplog) -> None
             plex_server=plex,
             movie_batch_size=2,
             episode_batch_size=2,
+            season_batch_size=2,
+            show_batch_size=2,
             output_queue=queue,
             logger=stage.logger,
         )
@@ -420,6 +437,87 @@ def test_ingestion_stage_ingest_plex_batches_movies_and_episodes(caplog) -> None
     assert "Discovered 2 Plex show(s) for ingestion." in caplog.messages
 
 
+def test_ingestion_stage_ingest_plex_batches_seasons(caplog) -> None:
+    caplog.set_level(logging.INFO)
+
+    async def scenario() -> tuple[list[SeasonBatch], int, int]:
+        queue: asyncio.Queue = asyncio.Queue()
+
+        movie_section = Mock()
+        movie_section.totalSize = 0
+        movie_section.search.return_value = []
+
+        seasons: list[Season] = [create_autospec(Season, instance=True) for _ in range(3)]
+
+        def season_episodes(*, container_start=None, container_size=None, **_kwargs):
+            _ = container_start
+            _ = container_size
+            return []
+
+        for season in seasons:
+            season.episodes.side_effect = season_episodes
+
+        show = create_autospec(Show, instance=True, title="Seasoned Show")
+        show.seasons.return_value = seasons
+
+        shows = [show]
+        show_section = Mock()
+        show_section.totalSize = len(shows)
+
+        def show_search(*, container_start=None, container_size=None, **_kwargs):
+            start = container_start or 0
+            size = container_size or len(shows)
+            return shows[start : start + size]
+
+        show_section.search.side_effect = show_search
+        show_section.all.return_value = shows
+
+        library = Mock()
+        library.section.side_effect = lambda name: {
+            "Movies": movie_section,
+            "TV Shows": show_section,
+        }[name]
+
+        plex = create_autospec(PlexServer, instance=True)
+        plex.library = library
+
+        stage = IngestionStage(
+            plex_server=plex,
+            sample_items=None,
+            movie_batch_size=10,
+            episode_batch_size=10,
+            season_batch_size=2,
+            show_batch_size=10,
+            sample_batch_size=10,
+            output_queue=queue,
+            completion_sentinel=INGEST_DONE,
+        )
+
+        await stage._ingest_plex(
+            plex_server=plex,
+            movie_batch_size=10,
+            episode_batch_size=10,
+            season_batch_size=2,
+            show_batch_size=10,
+            output_queue=queue,
+            logger=stage.logger,
+        )
+
+        batches: list[SeasonBatch] = []
+        while not queue.empty():
+            batch = await queue.get()
+            if isinstance(batch, SeasonBatch):
+                batches.append(batch)
+
+        return batches, stage.items_ingested, stage.batches_ingested
+
+    batches, items_ingested, batches_ingested = asyncio.run(scenario())
+
+    assert [len(batch.seasons) for batch in batches] == [2, 1]
+    assert items_ingested == 3
+    assert batches_ingested == 2
+
+
 def test_ingestion_stage_ingest_plex_large_library_batches(caplog) -> None:
     caplog.set_level(logging.INFO)
 
@@ -505,6 +603,8 @@ def test_ingestion_stage_ingest_plex_large_library_batches(caplog) -> None:
             sample_items=None,
             movie_batch_size=movie_batch_size,
             episode_batch_size=episode_batch_size,
+            season_batch_size=25,
+            show_batch_size=25,
             sample_batch_size=10,
             output_queue=queue,
             completion_sentinel=INGEST_DONE,
@@ -514,6 +614,8 @@ def test_ingestion_stage_ingest_plex_large_library_batches(caplog) -> None:
             plex_server=plex,
             movie_batch_size=movie_batch_size,
             episode_batch_size=episode_batch_size,
+            season_batch_size=25,
+            show_batch_size=25,
             output_queue=queue,
             logger=stage.logger,
         )

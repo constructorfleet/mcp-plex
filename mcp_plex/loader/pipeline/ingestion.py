@@ -20,6 +20,7 @@ from .channels import (
     IngestSentinel,
     MovieBatch,
     SampleBatch,
+    SeasonBatch,
     chunk_sequence,
     enqueue_nowait,
 )
@@ -39,6 +40,8 @@ class IngestionStage:
         sample_items: Sequence[AggregatedItem] | None,
         movie_batch_size: int,
         episode_batch_size: int,
+        season_batch_size: int,
+        show_batch_size: int,
         sample_batch_size: int,
         output_queue: IngestQueue,
         completion_sentinel: IngestSentinel,
@@ -47,6 +50,8 @@ class IngestionStage:
         self._sample_items = list(sample_items) if sample_items is not None else None
         self._movie_batch_size = int(movie_batch_size)
         self._episode_batch_size = int(episode_batch_size)
+        self._season_batch_size = int(season_batch_size)
+        self._show_batch_size = int(show_batch_size)
         self._sample_batch_size = int(sample_batch_size)
         self._output_queue = output_queue
         self._completion_sentinel: IngestSentinel = completion_sentinel
@@ -142,6 +147,8 @@ class IngestionStage:
                 plex_server=self._plex_server,
                 movie_batch_size=self._movie_batch_size,
                 episode_batch_size=self._episode_batch_size,
+                season_batch_size=self._season_batch_size,
+                show_batch_size=self._show_batch_size,
                 output_queue=self._output_queue,
                 logger=self._logger,
             )
@@ -158,6 +165,8 @@ class IngestionStage:
         plex_server: PlexServer,
         movie_batch_size: int,
         episode_batch_size: int,
+        season_batch_size: int,
+        show_batch_size: int,
         output_queue: IngestQueue,
         logger: logging.Logger,
     ) -> None:
@@ -170,6 +179,14 @@ class IngestionStage:
         episode_batch_size = require_positive(
             int(episode_batch_size),
             name="episode_batch_size",
+        )
+        season_batch_size = require_positive(
+            int(season_batch_size),
+            name="season_batch_size",
+        )
+        show_batch_size = require_positive(
+            int(show_batch_size),
+            name="show_batch_size",
         )
 
         library = plex_server.library
@@ -211,11 +228,12 @@ class IngestionStage:
         movie_batches = 0
         movie_total = 0
 
+        # Ensure only movies are processed in MovieBatch
         def _fetch_movies(start: int) -> Sequence[Movie]:
-            return movies_section.search(
+            return [item for item in movies_section.search(
                 container_start=start,
                 container_size=movie_batch_size,
-            )
+            ) if isinstance(item, Movie)]
 
         for batch_index, batch_movies in enumerate(
             _iter_section_items(fetch_page=_fetch_movies, batch_size=movie_batch_size),
@@ -267,6 +285,8 @@ class IngestionStage:
                 show_total += 1
                 show_title = getattr(show, "title", str(show))
                 show_episode_count = 0
+
+                # Initialize variables to avoid unbound errors
                 pending_episodes: list[Episode] = []
                 show_batch_index = 0
 
@@ -342,11 +362,70 @@ class IngestionStage:
                 show_total,
             )
 
+        # Process seasons
+        season_batches = 0
+        season_total = 0
+
+        # Refine seasons handling to ensure correct types
+        shows_for_seasons = shows_section.all()
+        if not isinstance(shows_for_seasons, Iterable):
+            shows_for_seasons = []
+        for show in shows_for_seasons:
+            if not isinstance(show, Show):
+                continue
+
+            show_title = getattr(show, "title", str(show))
+            pending_seasons: list[Season] = []
+
+            seasons = [season for season in (show.seasons() or []) if isinstance(season, Season)]
+
+            # Ensure only valid episodes are processed and track seasons for batching
+            for season in seasons:
+                pending_seasons.append(season)
+
+                while len(pending_seasons) >= season_batch_size:
+                    batch_seasons = pending_seasons[:season_batch_size]
+                    pending_seasons = pending_seasons[season_batch_size:]
+                    batch = SeasonBatch(
+                        show=show,
+                        seasons=list(batch_seasons),
+                    )
+                    await enqueue_nowait(output_queue, batch)
+                    self._items_ingested += len(batch_seasons)
+                    self._batches_ingested += 1
+                    season_batches += 1
+                    season_total += len(batch_seasons)
+                    logger.info(
+                        "Queued Plex season batch for %s with %d seasons (total items=%d).",
+                        show_title,
+                        len(batch_seasons),
+                        self._items_ingested,
+                    )
+
+            if pending_seasons:
+                batch = SeasonBatch(
+                    show=show,
+                    seasons=list(pending_seasons),
+                )
+                await enqueue_nowait(output_queue, batch)
+                self._items_ingested += len(pending_seasons)
+                self._batches_ingested += 1
+                season_batches += 1
+                season_total += len(pending_seasons)
+                logger.info(
+                    "Queued Plex season batch for %s with %d seasons (total items=%d).",
+                    show_title,
+                    len(pending_seasons),
+                    self._items_ingested,
+                )
+
         logger.debug(
-            "Plex ingestion summary: %d movie batch(es), %d episode batch(es), %d episode(s).",
+            "Plex ingestion summary: %d movie batch(es), %d episode batch(es), %d season batch(es), %d episode(s), %d season(s).",
             movie_batches,
             episode_batches,
+            season_batches,
             episode_total,
+            season_total,
         )
 
     async def _enqueue_sample_batches(self, items: Sequence[AggregatedItem]) -> None:
