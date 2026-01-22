@@ -9,7 +9,7 @@ import sys
 import types
 from contextlib import contextmanager
 from pathlib import Path
-from typing import Any, Mapping, Optional, Union, cast
+from typing import Any, Mapping, Optional, cast
 import uuid
 
 import pytest
