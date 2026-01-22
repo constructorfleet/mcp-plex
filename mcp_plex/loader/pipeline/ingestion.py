@@ -367,6 +367,10 @@ class IngestionStage:
         season_total = 0
 
         # Refine seasons handling to ensure correct types
+        # Initialize variables to avoid unbound errors
+        pending_episodes: list[Episode] = []
+        show_batch_index = 0
+        
         for show in shows_section.all():
             if not isinstance(show, Show):
                 continue
