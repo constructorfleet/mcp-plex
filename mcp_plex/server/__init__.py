@@ -1160,7 +1160,7 @@ async def play_media(
     # Create a PlayQueue for the media item
     plex_server = await _get_plex_client()
     media_item = plex_server.fetchItem(f"/library/metadata/{rating_key_normalized}")
-    play_queue = plex_server.createPlayQueue(media_item, continuous=True, shuffle=random)
+    play_queue = plex_server.createPlayQueue(media_item, continuous=1, shuffle=1 if random else 0)
 
     players = await _get_plex_players()
     target = _match_player(player, players)
