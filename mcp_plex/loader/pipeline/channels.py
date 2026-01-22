@@ -52,7 +52,7 @@ PersistencePayload: TypeAlias = list["models.PointStruct"]
 class MovieBatch:
     """Batch of Plex movie items pending metadata enrichment."""
 
-    movies: Sequence["Movie"]
+    movies: list["Movie"]
 
 
 @dataclass(slots=True)

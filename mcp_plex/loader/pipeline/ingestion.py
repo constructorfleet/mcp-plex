@@ -420,7 +420,7 @@ class IngestionStage:
                     self._items_ingested,
                 )
 
-        logger.info(
+        logger.debug(
             "Plex ingestion summary: %d movie batch(es), %d episode batch(es), %d season batch(es), %d episode(s), %d season(s).",
             movie_batches,
             episode_batches,
