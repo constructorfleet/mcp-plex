@@ -654,7 +654,7 @@ def test_queue_media_adds_to_queue(monkeypatch):
             self.playQueueVersion = 5
             self.items = []
 
-        def moveItem(self, item: FakeMedia, after: FakeMedia | None = None, refresh: bool = True):
+        def moveItem(self, item: FakeMedia, after: Optional[FakeMedia] = None, refresh: bool = True):
             queue_calls.append(
                 {
                     "method": "moveItem",
