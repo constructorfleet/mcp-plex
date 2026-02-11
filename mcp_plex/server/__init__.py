@@ -1090,6 +1090,30 @@ def _resolve_rating_key(
     return rating_key_normalized, plex_info
 
 
+def _prepare_playback_target(
+    server: Any, rating_key: str, shuffle: bool
+) -> PlayQueue | Any:
+    """Fetch media item and create play queue in a thread to avoid blocking."""
+    media_item = server.fetchItem(f"/library/metadata/{rating_key}")
+    play_target: PlayQueue | Any = media_item
+    if hasattr(server, "createPlayQueue"):
+        try:
+            play_target = server.createPlayQueue(
+                media_item,
+                continuous=1,
+                shuffle=1 if shuffle else 0,
+            )
+        except PlexApiException as exc:
+            logger.warning(
+                "Failed to create PlayQueue for rating_key %s: %s",
+                rating_key,
+                exc,
+                exc_info=exc,
+            )
+            play_target = media_item
+    return play_target
+
+
 async def _start_playback(
     media: PlayQueue | str | Any, player: PlexPlayerMetadata, offset_seconds: int
 ) -> None:
@@ -1160,17 +1184,10 @@ async def play_media(
 
     # Create a PlayQueue for the media item when supported, otherwise play the item directly.
     plex_server = await _get_plex_client()
-    media_item = plex_server.fetchItem(f"/library/metadata/{rating_key_normalized}")
-    play_target: PlayQueue | Any = media_item
-    if hasattr(plex_server, "createPlayQueue"):
-        try:
-            play_target = plex_server.createPlayQueue(
-                media_item,
-                continuous=1,
-                shuffle=1 if random else 0,
-            )
-        except Exception:
-            play_target = media_item
+
+    play_target = await asyncio.to_thread(
+        _prepare_playback_target, plex_server, rating_key_normalized, random
+    )
 
     players = await _get_plex_players()
     target = _match_player(player, players)
