@@ -486,7 +486,7 @@ def test_actor_movies(monkeypatch):
 def test_play_media_requires_configuration(monkeypatch):
     with _load_server(monkeypatch) as server:
         with pytest.raises(RuntimeError):
-            asyncio.run(server.play_media.fn(identifier="49915", player="Living Room"))
+            asyncio.run(server.play_media.fn(identifier="49915", playerOrArea="Living Room"))
 
 
 def test_play_media_with_alias(monkeypatch):
@@ -541,7 +541,7 @@ def test_play_media_with_alias(monkeypatch):
         monkeypatch.setattr(server, "PlexServerClient", FakePlex)
 
         result = asyncio.run(
-            server.play_media.fn(identifier="49915", player="Living Room")
+            server.play_media.fn(identifier="49915", playerOrArea="Living Room")
         )
 
         assert result["player"] == "Living Room"
@@ -560,7 +560,7 @@ def test_play_media_with_alias(monkeypatch):
         offset_seconds = 37
         offset_result = asyncio.run(
             server.play_media.fn(
-                identifier="49915", player="Living Room", offset_seconds=offset_seconds
+                identifier="49915", playerOrArea="Living Room", offset_seconds=offset_seconds
             )
         )
 
@@ -577,7 +577,7 @@ def test_play_media_with_alias(monkeypatch):
         fetch_requests.clear()
 
         fuzzy_play = asyncio.run(
-            server.play_media.fn(identifier="The Gentleman", player="Living Room")
+            server.play_media.fn(identifier="The Gentleman", playerOrArea="Living Room")
         )
 
         assert fuzzy_play["rating_key"] == "49915"
@@ -775,7 +775,7 @@ def test_play_media_allows_controller_only_client(monkeypatch):
         server._plex_client = None
         server._plex_identity = None
         result = asyncio.run(
-            server.play_media.fn(identifier="49915", player="machine-999")
+            server.play_media.fn(identifier="49915", playerOrArea="machine-999")
         )
 
         assert result["player"] == "Controller Only"
