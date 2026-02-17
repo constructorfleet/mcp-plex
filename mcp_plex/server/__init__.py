@@ -1155,7 +1155,7 @@ async def play_media(
             examples=["49915", "tt8367814", "The Gentlemen"],
         ),
     ],
-    playerOrArea: PlayerIdentifier,
+    player: PlayerIdentifier,
     offset_seconds: Annotated[
         int | None,
         Field(
