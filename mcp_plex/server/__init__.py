@@ -77,7 +77,7 @@ except importlib.metadata.PackageNotFoundError:
 PlayerIdentifier = Annotated[
     str,
     Field(
-        description="Friendly name, machine identifier, or client identifier of the Plex player",
+        description="Friendly name, machine identifier, or client identifier of the Plex player or room name",
         examples=["Living Room", "machine-123"],
     ),
 ]
@@ -1155,7 +1155,7 @@ async def play_media(
             examples=["49915", "tt8367814", "The Gentlemen"],
         ),
     ],
-    player: PlayerIdentifier,
+    playerOrArea: PlayerIdentifier,
     offset_seconds: Annotated[
         int | None,
         Field(
@@ -1172,7 +1172,7 @@ async def play_media(
         )
     ] = False
 ) -> PlayMediaResponseModel:
-    """Play a media item on a specific Plex player."""
+    """Play a media item on a specific Plex player or named area."""
 
     from mcp_plex.server.tools.media_library import _strip_leading_article
     # Strip leading article for Qdrant/media lookup, but preserve original for reranking and response
@@ -1190,7 +1190,7 @@ async def play_media(
     )
 
     players = await _get_plex_players()
-    target = _match_player(player, players)
+    target = _match_player(playerOrArea, players)
     await _start_playback(play_target, target, offset_seconds or 0)
 
     capabilities = sorted(target.get("provides", set()))
