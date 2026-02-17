@@ -77,7 +77,7 @@ except importlib.metadata.PackageNotFoundError:
 PlayerIdentifier = Annotated[
     str,
     Field(
-        description="Friendly name, machine identifier, or client identifier of the Plex player",
+        description="Friendly name, machine identifier, or client identifier of the Plex player or room name",
         examples=["Living Room", "machine-123"],
     ),
 ]
@@ -1155,7 +1155,7 @@ async def play_media(
             examples=["49915", "tt8367814", "The Gentlemen"],
         ),
     ],
-    player: PlayerIdentifier,
+    playerOrArea: PlayerIdentifier,
     offset_seconds: Annotated[
         int | None,
         Field(
