@@ -131,6 +131,12 @@ environment variables. When set, those values override any conflicting CLI
 flags so Docker Compose or other orchestrators can control the exposed MCP
 endpoint without editing the container command.
 
+Docker secrets are supported for secret-bearing settings by appending `_FILE`
+to the environment variable name and pointing it at a mounted secret file. The
+entrypoint resolves `PLEX_TOKEN_FILE`, `TMDB_API_KEY_FILE`, and
+`QDRANT_API_KEY_FILE` before launching the loader or server, while leaving
+non-secret file settings like `PLEX_CLIENTS_FILE` untouched.
+
 #### Server Configuration
 
 Additional environment variables tune how the server searches and serves

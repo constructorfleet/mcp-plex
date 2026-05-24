@@ -25,6 +25,13 @@ PLEX_FIXTURE_DOC_TOKENS = (
     "Plex clients fixture",
 )
 
+DOCKER_SECRET_DOC_TOKENS = (
+    "PLEX_TOKEN_FILE",
+    "TMDB_API_KEY_FILE",
+    "QDRANT_API_KEY_FILE",
+    "PLEX_CLIENTS_FILE",
+)
+
 
 
 def _read_readme_text() -> str:
@@ -51,5 +58,11 @@ def test_readme_documents_ruff_check_command() -> None:
 
 @pytest.mark.parametrize("token", PLEX_FIXTURE_DOC_TOKENS)
 def test_readme_documents_plex_clients_fixture_settings(token: str) -> None:
+    content = _read_readme_text()
+    assert token in content
+
+
+@pytest.mark.parametrize("token", DOCKER_SECRET_DOC_TOKENS)
+def test_readme_documents_docker_secret_support(token: str) -> None:
     content = _read_readme_text()
     assert token in content
