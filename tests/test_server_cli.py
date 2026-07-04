@@ -162,7 +162,7 @@ def test_shared_http_app_no_redirect_on_exact_mount_path():
             )
 
 
-
+def test_main_env_vars_combined_transports(monkeypatch):
     monkeypatch.setenv("MCP_TRANSPORT", "sse,streamable-http")
     monkeypatch.setenv("MCP_HOST", "1.2.3.4")
     monkeypatch.setenv("MCP_PORT", "1234")
