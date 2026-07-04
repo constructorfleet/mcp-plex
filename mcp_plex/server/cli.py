@@ -101,7 +101,14 @@ def _resolve_transports(
     if "stdio" in transports and len(transports) > 1:
         parser.error("stdio cannot be combined with SSE or streamable-http")
 
-    return transports
+    deduped: list[str] = []
+    seen: set[str] = set()
+    for transport in transports:
+        if transport not in seen:
+            deduped.append(transport)
+            seen.add(transport)
+
+    return deduped
 
 
 def _resolve_http_mount(
@@ -236,8 +243,10 @@ def main(argv: list[str] | None = None) -> None:
             parser.error(
                 "--bind/--port or MCP_HOST/MCP_PORT are required when transport is not stdio"
             )
-    if transports == ["stdio"] and mount:
-        parser.error("--mount or MCP_MOUNT is not allowed when transport is stdio")
+    if transports == ["stdio"] and (mount or sse_mount or streamable_http_mount):
+        parser.error(
+            "--mount/--sse-mount/--streamable-http-mount (and MCP_MOUNT/MCP_SSE_MOUNT/MCP_STREAMABLE_HTTP_MOUNT) are not allowed when transport is stdio"
+        )
 
     settings.dense_model = args.dense_model
     settings.sparse_model = args.sparse_model

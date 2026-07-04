@@ -52,6 +52,13 @@ def test_main_http_with_mount_runs():
         )
 
 
+def test_main_rejects_transport_specific_mounts_for_stdio():
+    with pytest.raises(SystemExit):
+        server.main(["--sse-mount", "/sse"])
+    with pytest.raises(SystemExit):
+        server.main(["--streamable-http-mount", "/mcp"])
+
+
 def test_main_can_run_multiple_http_transports_on_same_port():
     with patch("mcp_plex.server.cli.uvicorn.run") as mock_run:
         server.main(
@@ -73,7 +80,6 @@ def test_main_can_run_multiple_http_transports_on_same_port():
     assert mock_run.call_args.kwargs["port"] == 8000
     assert [route.path for route in app.routes] == ["/sse", "/mcp"]
     assert [getattr(route.app.state, "path", None) for route in app.routes] == ["/", "/"]
-
 
 def test_main_supports_distinct_http_mounts_from_env(monkeypatch):
     monkeypatch.setenv("MCP_TRANSPORT", "sse,streamable-http")
