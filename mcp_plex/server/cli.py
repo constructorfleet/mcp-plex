@@ -6,7 +6,9 @@ import argparse
 import logging
 import os
 from dataclasses import dataclass
+from fastapi import FastAPI
 from fastmcp.server.middleware.logging import StructuredLoggingMiddleware
+import uvicorn
 
 from . import PlexServer, server, settings
 
@@ -35,6 +37,9 @@ class RunConfig:
         return kwargs
 
 
+DUAL_TRANSPORT = "sse+streamable-http"
+
+
 def _resolve_log_level(cli_value: str | None) -> str:
     """Return the desired log level name based on CLI or environment input."""
 
@@ -46,6 +51,56 @@ def _resolve_log_level(cli_value: str | None) -> str:
     return "info"
 
 
+def _normalize_transport(value: str) -> str:
+    normalized = value.strip().lower()
+    if normalized in {"both", DUAL_TRANSPORT, "streamable-http+sse"}:
+        return DUAL_TRANSPORT
+    if "," in normalized:
+        tokens = {token.strip() for token in normalized.split(",") if token.strip()}
+        if tokens == {"sse", "streamable-http"}:
+            return DUAL_TRANSPORT
+    return normalized
+
+
+def _normalize_mount(mount: str) -> str:
+    normalized = mount.strip()
+    if not normalized:
+        raise ValueError("mount must not be empty")
+    if not normalized.startswith("/"):
+        normalized = f"/{normalized}"
+    if len(normalized) > 1:
+        normalized = normalized.rstrip("/")
+    return normalized
+
+
+def _run_dual_http_transports(
+    *,
+    server_instance: PlexServer,
+    host: str,
+    port: int,
+    sse_mount: str,
+    streamable_http_mount: str,
+    log_level: str,
+) -> None:
+    app = FastAPI()
+    app.mount(sse_mount, server_instance.http_app(path="/", transport="sse"))
+    app.mount(
+        streamable_http_mount,
+        server_instance.http_app(path="/", transport="streamable-http"),
+    )
+
+    config = uvicorn.Config(
+        app,
+        host=host,
+        port=port,
+        timeout_graceful_shutdown=0,
+        lifespan="on",
+        ws="websockets-sansio",
+        log_level=log_level,
+    )
+    uvicorn.Server(config).run()
+
+
 def main(argv: list[str] | None = None) -> None:
     """CLI entrypoint for running the MCP server."""
 
@@ -54,11 +109,16 @@ def main(argv: list[str] | None = None) -> None:
     parser.add_argument("--port", type=int, help="Port to listen on")
     parser.add_argument(
         "--transport",
-        choices=["stdio", "sse", "streamable-http"],
+        choices=["stdio", "sse", "streamable-http", "both"],
         default="stdio",
         help="Transport protocol to use",
     )
     parser.add_argument("--mount", help="Mount path for HTTP transports")
+    parser.add_argument("--sse-mount", help="Mount path for SSE when using --transport both")
+    parser.add_argument(
+        "--streamable-http-mount",
+        help="Mount path for streamable HTTP when using --transport both",
+    )
     parser.add_argument(
         "--dense-model",
         default=settings.dense_model,
@@ -104,11 +164,11 @@ def main(argv: list[str] | None = None) -> None:
     env_port = os.getenv("MCP_PORT")
     env_mount = os.getenv("MCP_MOUNT")
 
-    transport = env_transport or args.transport
-    valid_transports = {"stdio", "sse", "streamable-http"}
+    transport = _normalize_transport(env_transport or args.transport)
+    valid_transports = {"stdio", "sse", "streamable-http", DUAL_TRANSPORT}
     if transport not in valid_transports:
         parser.error(
-            "transport must be one of stdio, sse, or streamable-http (via --transport or MCP_TRANSPORT)"
+            "transport must be one of stdio, sse, streamable-http, or both (via --transport or MCP_TRANSPORT)"
         )
 
     host = env_host or args.bind
@@ -131,8 +191,14 @@ def main(argv: list[str] | None = None) -> None:
     if transport == "stdio" and mount:
         parser.error("--mount or MCP_MOUNT is not allowed when transport is stdio")
 
+    env_sse_mount = os.getenv("MCP_SSE_MOUNT")
+    env_streamable_mount = os.getenv("MCP_STREAMABLE_HTTP_MOUNT")
+
+    sse_mount = env_sse_mount or args.sse_mount
+    streamable_mount = env_streamable_mount or args.streamable_http_mount or mount
+
     run_config = RunConfig()
-    if transport != "stdio":
+    if transport != "stdio" and transport != DUAL_TRANSPORT:
         if host is not None:
             run_config.host = host
         if port is not None:
@@ -155,7 +221,42 @@ def main(argv: list[str] | None = None) -> None:
             log_level=log_level
         )
     )
+    if transport == DUAL_TRANSPORT:
+        if not host or port is None:
+            parser.error(
+                "--bind/--port or MCP_HOST/MCP_PORT are required when transport is both"
+            )
+        if not sse_mount or not streamable_mount:
+            parser.error(
+                "--sse-mount/--streamable-http-mount or MCP_SSE_MOUNT/MCP_STREAMABLE_HTTP_MOUNT are required when transport is both"
+            )
+        try:
+            normalized_sse_mount = _normalize_mount(sse_mount)
+            normalized_streamable_mount = _normalize_mount(streamable_mount)
+        except ValueError:
+            parser.error("mount values must not be empty")
+        if normalized_sse_mount == normalized_streamable_mount:
+            parser.error(
+                "SSE and streamable HTTP mounts must be different when transport is both"
+            )
+        _run_dual_http_transports(
+            server_instance=plex_server,
+            host=host,
+            port=port,
+            sse_mount=normalized_sse_mount,
+            streamable_http_mount=normalized_streamable_mount,
+            log_level=log_level_name,
+        )
+        return
     plex_server.run(transport=transport, **run_config.to_kwargs())
 
 
-__all__ = ["RunConfig", "main", "server", "PlexServer", "plex_server", "settings"]
+__all__ = [
+    "DUAL_TRANSPORT",
+    "RunConfig",
+    "main",
+    "server",
+    "PlexServer",
+    "plex_server",
+    "settings",
+]

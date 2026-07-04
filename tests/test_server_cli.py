@@ -141,3 +141,95 @@ def test_main_configures_log_level(monkeypatch):
 
     assert configured["level"] == logging.DEBUG
     mock_run.assert_called_once_with(transport="stdio")
+
+
+def test_main_transport_both_runs_dual_http():
+    with patch.object(server, "_run_dual_http_transports") as mock_dual:
+        server.main(
+            [
+                "--transport",
+                "both",
+                "--bind",
+                "0.0.0.0",
+                "--port",
+                "8000",
+                "--sse-mount",
+                "/sse",
+                "--streamable-http-mount",
+                "/mcp",
+            ]
+        )
+    mock_dual.assert_called_once()
+    kwargs = mock_dual.call_args.kwargs
+    assert kwargs["host"] == "0.0.0.0"
+    assert kwargs["port"] == 8000
+    assert kwargs["sse_mount"] == "/sse"
+    assert kwargs["streamable_http_mount"] == "/mcp"
+    assert kwargs["log_level"] == "info"
+
+
+def test_main_transport_both_rejects_duplicate_mounts():
+    with pytest.raises(SystemExit):
+        server.main(
+            [
+                "--transport",
+                "both",
+                "--bind",
+                "0.0.0.0",
+                "--port",
+                "8000",
+                "--sse-mount",
+                "/mcp",
+                "--streamable-http-mount",
+                "/mcp",
+            ]
+        )
+
+
+def test_main_transport_both_uses_mount_fallback():
+    with patch.object(server, "_run_dual_http_transports") as mock_dual:
+        server.main(
+            [
+                "--transport",
+                "both",
+                "--bind",
+                "0.0.0.0",
+                "--port",
+                "8000",
+                "--sse-mount",
+                "/sse",
+                "--mount",
+                "/mcp",
+            ]
+        )
+    kwargs = mock_dual.call_args.kwargs
+    assert kwargs["sse_mount"] == "/sse"
+    assert kwargs["streamable_http_mount"] == "/mcp"
+
+
+def test_env_transport_both_overrides_cli(monkeypatch):
+    monkeypatch.setenv("MCP_TRANSPORT", "both")
+    monkeypatch.setenv("MCP_HOST", "1.2.3.4")
+    monkeypatch.setenv("MCP_PORT", "1234")
+    monkeypatch.setenv("MCP_SSE_MOUNT", "/events")
+    monkeypatch.setenv("MCP_STREAMABLE_HTTP_MOUNT", "/stream")
+    with patch.object(server, "_run_dual_http_transports") as mock_dual:
+        server.main(
+            [
+                "--transport",
+                "stdio",
+                "--bind",
+                "0.0.0.0",
+                "--port",
+                "9999",
+                "--sse-mount",
+                "/cli-sse",
+                "--streamable-http-mount",
+                "/cli-mcp",
+            ]
+        )
+    kwargs = mock_dual.call_args.kwargs
+    assert kwargs["host"] == "1.2.3.4"
+    assert kwargs["port"] == 1234
+    assert kwargs["sse_mount"] == "/events"
+    assert kwargs["streamable_http_mount"] == "/stream"

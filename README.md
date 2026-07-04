@@ -119,6 +119,17 @@ Server-Sent Events and wants automatic reconnection. Choose streamable HTTP
 for clients that expect a single streaming HTTP response (for example, CLI
 tools or proxies that terminate SSE).
 
+Run SSE and streamable HTTP side by side in one process:
+
+```bash
+uv run mcp-server --transport both --bind 0.0.0.0 --port 8000 --sse-mount /sse --streamable-http-mount /mcp
+```
+
+You can configure the same dual-transport mode with `MCP_TRANSPORT=both`,
+`MCP_HOST`, `MCP_PORT`, `MCP_SSE_MOUNT`, and `MCP_STREAMABLE_HTTP_MOUNT`.
+`MCP_MOUNT` (or `--mount`) is used as a fallback for streamable HTTP in dual
+mode when `MCP_STREAMABLE_HTTP_MOUNT` is not set.
+
 Provide `--recommend-user <username>` (or set `PLEX_RECOMMEND_USER`) when the
 server should hide items already watched by a specific Plex account from
 recommendations. Pair the flag with
