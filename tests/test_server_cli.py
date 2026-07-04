@@ -1,3 +1,4 @@
+from contextlib import asynccontextmanager
 from unittest.mock import patch
 
 import logging
@@ -7,6 +8,8 @@ import pytest
 
 from mcp_plex import server as server_package
 from mcp_plex.server import cli as server
+from starlette.applications import Starlette
+from starlette.testclient import TestClient
 
 
 @pytest.fixture(scope="module", autouse=True)
@@ -80,6 +83,46 @@ def test_main_can_run_multiple_http_transports_on_same_port():
     assert mock_run.call_args.kwargs["port"] == 8000
     assert [route.path for route in app.routes] == ["/sse", "/mcp"]
     assert [getattr(route.app.state, "path", None) for route in app.routes] == ["/", "/"]
+
+
+def test_shared_http_app_initializes_child_lifespans():
+    events: list[str] = []
+
+    class LifespanStarlette(Starlette):
+        @property
+        def lifespan(self):
+            return self.router.lifespan_context
+
+    def fake_http_app(*, path: str, transport: str) -> Starlette:
+        @asynccontextmanager
+        async def lifespan(app: Starlette):
+            events.append(f"{transport}:start")
+            yield
+            events.append(f"{transport}:stop")
+
+        app = LifespanStarlette(lifespan=lifespan)
+        app.state.path = path
+        app.state.transport = transport
+        return app
+
+    configs = [
+        server.HttpTransportConfig(transport="sse", path="/sse"),
+        server.HttpTransportConfig(transport="streamable-http", path="/mcp"),
+    ]
+
+    with patch.object(server.plex_server, "http_app", side_effect=fake_http_app):
+        app = server._build_shared_http_app(configs)
+
+    with TestClient(app):
+        pass
+
+    assert events == [
+        "sse:start",
+        "streamable-http:start",
+        "streamable-http:stop",
+        "sse:stop",
+    ]
+
 
 def test_main_supports_distinct_http_mounts_from_env(monkeypatch):
     monkeypatch.setenv("MCP_TRANSPORT", "sse,streamable-http")
