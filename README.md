@@ -141,10 +141,11 @@ recommendations. Pair the flag with
 how many watch-history entries the server inspects (defaults to 500) so large
 libraries avoid excessive Plex API calls.
 
-The runtime also reads `MCP_TRANSPORT`, `MCP_HOST`, `MCP_PORT`, and `MCP_MOUNT`
-environment variables. When set, those values override any conflicting CLI
-flags so Docker Compose or other orchestrators can control the exposed MCP
-endpoint without editing the container command.
+The runtime also reads `MCP_TRANSPORT`, `MCP_HOST` (or `MCP_BIND`), `MCP_PORT`,
+`MCP_MOUNT`, `MCP_SSE_MOUNT`, and `MCP_STREAMABLE_HTTP_MOUNT` environment
+variables. When set, those values override any conflicting CLI flags so Docker
+Compose or other orchestrators can control the exposed MCP endpoint without
+editing the container command.
 
 #### Server Configuration
 
