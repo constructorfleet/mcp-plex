@@ -100,21 +100,36 @@ uv run mcp-server
 ```
 Expose the server over SSE on port 8000:
 ```bash
-uv run mcp-server --transport sse --bind 0.0.0.0 --port 8000 --mount /mcp
+uv run mcp-server --transport sse --bind 0.0.0.0 --port 8000
 ```
+This transport uses `/sse` by default unless you override the mount.
 
 Expose the server over streamable HTTP when your MCP client expects a plain
-streamed response body instead of SSE events. This mode always requires explicit
-bind, port, and mount values provided on the command line or through
-environment variables. **Example command:**
+streamed response body instead of SSE events:
 
 ```bash
-uv run mcp-server --transport streamable-http --bind 0.0.0.0 --port 8800 --mount /mcp
+uv run mcp-server --transport streamable-http --bind 0.0.0.0 --port 8800
+```
+This transport uses `/mcp` by default unless you override the mount.
+
+Run SSE and streamable HTTP in the same process on the same host and port by
+repeating `--transport` and giving each transport its own mount point:
+
+```bash
+uv run mcp-server \
+  --transport sse \
+  --transport streamable-http \
+  --bind 0.0.0.0 \
+  --port 8000 \
+  --sse-mount /sse \
+  --streamable-http-mount /mcp
 ```
 
-Set `MCP_TRANSPORT=streamable-http` along with `MCP_BIND`, `MCP_PORT`, and
-`MCP_MOUNT` to configure the same behavior via environment variables. Use SSE
-for browser-based connectors or any client that natively supports
+Set `MCP_TRANSPORT=sse,streamable-http` along with `MCP_BIND`, `MCP_PORT`,
+`MCP_SSE_MOUNT`, and `MCP_STREAMABLE_HTTP_MOUNT` to configure the same
+behavior via environment variables. `MCP_MOUNT` still works for a single HTTP
+transport, but coexistence requires distinct transport-specific mount points.
+Use SSE for browser-based connectors or any client that natively supports
 Server-Sent Events and wants automatic reconnection. Choose streamable HTTP
 for clients that expect a single streaming HTTP response (for example, CLI
 tools or proxies that terminate SSE).
@@ -126,10 +141,11 @@ recommendations. Pair the flag with
 how many watch-history entries the server inspects (defaults to 500) so large
 libraries avoid excessive Plex API calls.
 
-The runtime also reads `MCP_TRANSPORT`, `MCP_HOST`, `MCP_PORT`, and `MCP_MOUNT`
-environment variables. When set, those values override any conflicting CLI
-flags so Docker Compose or other orchestrators can control the exposed MCP
-endpoint without editing the container command.
+The runtime also reads `MCP_TRANSPORT`, `MCP_HOST` (or `MCP_BIND`), `MCP_PORT`,
+`MCP_MOUNT`, `MCP_SSE_MOUNT`, and `MCP_STREAMABLE_HTTP_MOUNT` environment
+variables. When set, those values override any conflicting CLI flags so Docker
+Compose or other orchestrators can control the exposed MCP endpoint without
+editing the container command.
 
 #### Server Configuration
 
