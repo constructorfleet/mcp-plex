@@ -9,6 +9,7 @@ import pytest
 from mcp_plex import server as server_package
 from mcp_plex.server import cli as server
 from starlette.applications import Starlette
+from starlette.routing import Route
 from starlette.testclient import TestClient
 
 
@@ -119,7 +120,90 @@ def test_shared_http_app_initializes_child_lifespans():
     ]
 
 
-def test_main_supports_distinct_http_mounts_from_env(monkeypatch):
+def test_shared_http_app_no_redirect_on_exact_mount_path():
+    """GET /sse (no trailing slash) must be handled directly, not with a 307 redirect.
+
+    Starlette's ``Mount`` compiles a regex that only matches paths starting with
+    ``/sse/`` (trailing slash required), so without the
+    ``_TrailingSlashMiddleware`` a plain ``GET /sse`` would trigger Starlette's
+    built-in redirect_slashes 307 redirect.  Clients like Home Assistant do not
+    follow 307 redirects and would therefore fail to connect.
+    """
+    from starlette.responses import PlainTextResponse
+
+    def fake_http_app(*, path: str, transport: str) -> Starlette:
+        async def root_endpoint(request):
+            return PlainTextResponse("ok")
+
+        @asynccontextmanager
+        async def lifespan(app: Starlette):
+            yield
+
+        child = Starlette(
+            lifespan=lifespan,
+            routes=[Route("/", endpoint=root_endpoint, methods=["GET"])],
+        )
+        child.state.path = path
+        return child
+
+    configs = [
+        server.HttpTransportConfig(transport="sse", path="/sse"),
+        server.HttpTransportConfig(transport="streamable-http", path="/mcp"),
+    ]
+
+    with patch.object(server.plex_server, "http_app", side_effect=fake_http_app):
+        app = server._build_shared_http_app(configs)
+
+    with TestClient(app, follow_redirects=False) as client:
+        for mount_path in ("/sse", "/mcp"):
+            response = client.get(mount_path)
+            assert response.status_code == 200, (
+                f"GET {mount_path} returned {response.status_code}; expected 200, not a 307 redirect"
+            )
+
+
+def test_shared_http_app_does_not_rewrite_root_mount():
+    from starlette.responses import PlainTextResponse
+
+    observed_paths: list[str] = []
+
+    def fake_http_app(*, path: str, transport: str) -> Starlette:
+        async def root_endpoint(request):
+            observed_paths.append(request.scope["path"])
+            return PlainTextResponse(f"{transport}:{request.scope['path']}")
+
+        @asynccontextmanager
+        async def lifespan(app: Starlette):
+            yield
+
+        child = Starlette(
+            lifespan=lifespan,
+            routes=[Route("/", endpoint=root_endpoint, methods=["GET"])],
+        )
+        child.state.path = path
+        return child
+
+    configs = [
+        server.HttpTransportConfig(transport="sse", path="/"),
+        server.HttpTransportConfig(transport="streamable-http", path="/mcp"),
+    ]
+
+    with patch.object(server.plex_server, "http_app", side_effect=fake_http_app):
+        app = server._build_shared_http_app(configs)
+
+    with TestClient(app, follow_redirects=False) as client:
+        root_response = client.get("/")
+        assert root_response.status_code == 200
+        assert root_response.text == "sse:/"
+
+        mcp_response = client.get("/mcp")
+        assert mcp_response.status_code == 200
+        assert mcp_response.text == "streamable-http:/"
+
+    assert observed_paths == ["/", "/"]
+
+
+def test_main_env_vars_combined_transports(monkeypatch):
     monkeypatch.setenv("MCP_TRANSPORT", "sse,streamable-http")
     monkeypatch.setenv("MCP_HOST", "1.2.3.4")
     monkeypatch.setenv("MCP_PORT", "1234")
