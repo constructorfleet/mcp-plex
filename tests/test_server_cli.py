@@ -88,11 +88,6 @@ def test_main_can_run_multiple_http_transports_on_same_port():
 def test_shared_http_app_initializes_child_lifespans():
     events: list[str] = []
 
-    class LifespanStarlette(Starlette):
-        @property
-        def lifespan(self):
-            return self.router.lifespan_context
-
     def fake_http_app(*, path: str, transport: str) -> Starlette:
         @asynccontextmanager
         async def lifespan(app: Starlette):
@@ -100,7 +95,7 @@ def test_shared_http_app_initializes_child_lifespans():
             yield
             events.append(f"{transport}:stop")
 
-        app = LifespanStarlette(lifespan=lifespan)
+        app = Starlette(lifespan=lifespan)
         app.state.path = path
         app.state.transport = transport
         return app

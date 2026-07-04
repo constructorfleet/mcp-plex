@@ -145,12 +145,11 @@ def _build_shared_http_app(configs: list[HttpTransportConfig]) -> Starlette:
         child_apps.append((config.path, child_app))
 
     @asynccontextmanager
-    async def lifespan(app: Starlette):
+    async def lifespan(_app: Starlette):
         async with AsyncExitStack() as stack:
             for _, child_app in child_apps:
-                await stack.enter_async_context(child_app.lifespan(child_app))
+                await stack.enter_async_context(child_app.router.lifespan_context(child_app))
             yield
-
     app = Starlette(lifespan=lifespan)
     for mount_path, child_app in child_apps:
         app.mount(mount_path, child_app)
