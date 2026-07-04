@@ -5,6 +5,7 @@ from __future__ import annotations
 import argparse
 import logging
 import os
+from contextlib import AsyncExitStack, asynccontextmanager
 from dataclasses import dataclass
 from typing import Literal
 
@@ -138,10 +139,20 @@ def _resolve_http_mount(
 def _build_shared_http_app(configs: list[HttpTransportConfig]) -> Starlette:
     """Build a single ASGI app that exposes multiple FastMCP HTTP transports."""
 
-    app = Starlette()
+    child_apps = []
     for config in configs:
         child_app = plex_server.http_app(path="/", transport=config.transport)
-        app.mount(config.path, child_app)
+        child_apps.append((config.path, child_app))
+
+    @asynccontextmanager
+    async def lifespan(_app: Starlette):
+        async with AsyncExitStack() as stack:
+            for _, child_app in child_apps:
+                await stack.enter_async_context(child_app.router.lifespan_context(child_app))
+            yield
+    app = Starlette(lifespan=lifespan)
+    for mount_path, child_app in child_apps:
+        app.mount(mount_path, child_app)
     return app
 
 
