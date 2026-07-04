@@ -162,6 +162,47 @@ def test_shared_http_app_no_redirect_on_exact_mount_path():
             )
 
 
+def test_shared_http_app_does_not_rewrite_root_mount():
+    from starlette.responses import PlainTextResponse
+
+    observed_paths: list[str] = []
+
+    def fake_http_app(*, path: str, transport: str) -> Starlette:
+        async def root_endpoint(request):
+            observed_paths.append(request.scope["path"])
+            return PlainTextResponse(f"{transport}:{request.scope['path']}")
+
+        @asynccontextmanager
+        async def lifespan(app: Starlette):
+            yield
+
+        child = Starlette(
+            lifespan=lifespan,
+            routes=[Route("/", endpoint=root_endpoint, methods=["GET"])],
+        )
+        child.state.path = path
+        return child
+
+    configs = [
+        server.HttpTransportConfig(transport="sse", path="/"),
+        server.HttpTransportConfig(transport="streamable-http", path="/mcp"),
+    ]
+
+    with patch.object(server.plex_server, "http_app", side_effect=fake_http_app):
+        app = server._build_shared_http_app(configs)
+
+    with TestClient(app, follow_redirects=False) as client:
+        root_response = client.get("/")
+        assert root_response.status_code == 200
+        assert root_response.text == "sse:/"
+
+        mcp_response = client.get("/mcp")
+        assert mcp_response.status_code == 200
+        assert mcp_response.text == "streamable-http:/"
+
+    assert observed_paths == ["/", "/"]
+
+
 def test_main_env_vars_combined_transports(monkeypatch):
     monkeypatch.setenv("MCP_TRANSPORT", "sse,streamable-http")
     monkeypatch.setenv("MCP_HOST", "1.2.3.4")

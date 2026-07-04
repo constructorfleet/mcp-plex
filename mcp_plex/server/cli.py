@@ -142,11 +142,11 @@ class _TrailingSlashMiddleware:
     """Append a trailing slash to requests that exactly match a mount path.
 
     Starlette's ``Mount`` compiles a regex of the form ``^/path/(?P<path>.*)$``,
-    so it only matches URLs that have *at least* one character after the slash —
-    meaning a plain ``GET /sse`` falls through every ``Mount`` and Starlette's
-    built-in ``redirect_slashes`` emits a 307 → ``/sse/``.  Some MCP clients
-    (e.g. Home Assistant) do not follow 307 redirects, which prevents them from
-    connecting.
+    so it requires the trailing slash even though the captured suffix can be
+    empty. A plain ``GET /sse`` therefore falls through every ``Mount`` and
+    Starlette's built-in ``redirect_slashes`` emits a 307 → ``/sse/``. Some MCP
+    clients (e.g. Home Assistant) do not follow 307 redirects, which prevents
+    them from connecting.
 
     This middleware transparently rewrites an exact-path hit (``/sse``) to
     ``/sse/`` *before* the router sees it, so the ``Mount`` can match without
@@ -177,7 +177,9 @@ def _build_shared_http_app(configs: list[HttpTransportConfig]) -> Starlette:
             for _, child_app in child_apps:
                 await stack.enter_async_context(child_app.router.lifespan_context(child_app))
             yield
-    mount_paths: frozenset[str] = frozenset(config.path for config in configs)
+    mount_paths: frozenset[str] = frozenset(
+        config.path for config in configs if config.path != "/"
+    )
     app = Starlette(
         lifespan=lifespan,
         middleware=[Middleware(_TrailingSlashMiddleware, paths=mount_paths)],
