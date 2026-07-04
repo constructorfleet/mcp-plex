@@ -52,6 +52,64 @@ def test_main_http_with_mount_runs():
         )
 
 
+def test_main_can_run_multiple_http_transports_on_same_port():
+    with patch("mcp_plex.server.cli.uvicorn.run") as mock_run:
+        server.main(
+            [
+                "--transport",
+                "sse",
+                "--transport",
+                "streamable-http",
+                "--bind",
+                "0.0.0.0",
+                "--port",
+                "8000",
+            ]
+        )
+
+    mock_run.assert_called_once()
+    app = mock_run.call_args.args[0]
+    assert mock_run.call_args.kwargs["host"] == "0.0.0.0"
+    assert mock_run.call_args.kwargs["port"] == 8000
+    assert [route.path for route in app.routes] == ["/sse", "/mcp"]
+    assert [getattr(route.app.state, "path", None) for route in app.routes] == ["/", "/"]
+
+
+def test_main_supports_distinct_http_mounts_from_env(monkeypatch):
+    monkeypatch.setenv("MCP_TRANSPORT", "sse,streamable-http")
+    monkeypatch.setenv("MCP_HOST", "1.2.3.4")
+    monkeypatch.setenv("MCP_PORT", "1234")
+    monkeypatch.setenv("MCP_SSE_MOUNT", "/events")
+    monkeypatch.setenv("MCP_STREAMABLE_HTTP_MOUNT", "/stream")
+
+    with patch("mcp_plex.server.cli.uvicorn.run") as mock_run:
+        server.main([])
+
+    mock_run.assert_called_once()
+    app = mock_run.call_args.args[0]
+    assert mock_run.call_args.kwargs["host"] == "1.2.3.4"
+    assert mock_run.call_args.kwargs["port"] == 1234
+    assert [route.path for route in app.routes] == ["/events", "/stream"]
+
+
+def test_main_rejects_generic_mount_for_multiple_http_transports():
+    with pytest.raises(SystemExit):
+        server.main(
+            [
+                "--transport",
+                "sse",
+                "--transport",
+                "streamable-http",
+                "--bind",
+                "0.0.0.0",
+                "--port",
+                "8000",
+                "--mount",
+                "/mcp",
+            ]
+        )
+
+
 def test_main_model_overrides():
     with patch.object(server.server, "run") as mock_run:
         server.main(

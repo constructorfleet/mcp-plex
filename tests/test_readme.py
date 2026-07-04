@@ -8,12 +8,15 @@ def test_readme_documents_streamable_http_transport():
         "--transport streamable-http",
         "--bind",
         "--port",
-        "--mount",
+        "--sse-mount",
+        "--streamable-http-mount",
         "MCP_BIND",
         "MCP_PORT",
-        "MCP_MOUNT",
+        "MCP_SSE_MOUNT",
+        "MCP_STREAMABLE_HTTP_MOUNT",
         "SSE",
         "streamable HTTP",
+        "--transport sse",
         "Example",
     )
 

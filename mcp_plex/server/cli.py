@@ -6,12 +6,30 @@ import argparse
 import logging
 import os
 from dataclasses import dataclass
+from typing import Literal
+
+import uvicorn
 from fastmcp.server.middleware.logging import StructuredLoggingMiddleware
+from starlette.applications import Starlette
 
 from . import PlexServer, server, settings
 
 
 plex_server: PlexServer = server
+HTTP_TRANSPORTS = ("sse", "streamable-http")
+VALID_TRANSPORTS = ("stdio", *HTTP_TRANSPORTS)
+DEFAULT_HTTP_MOUNTS = {
+    "sse": "/sse",
+    "streamable-http": "/mcp",
+}
+
+
+@dataclass(frozen=True)
+class HttpTransportConfig:
+    """Resolved HTTP transport configuration for a shared-process server."""
+
+    transport: Literal["sse", "streamable-http"]
+    path: str
 
 
 @dataclass
@@ -35,6 +53,91 @@ class RunConfig:
         return kwargs
 
 
+def _normalize_mount_path(value: str | None) -> str | None:
+    """Return a canonical HTTP mount path or ``None`` when unset."""
+
+    if value is None:
+        return None
+    mount = value.strip()
+    if not mount:
+        return None
+    if not mount.startswith("/"):
+        mount = f"/{mount}"
+    if mount != "/":
+        mount = mount.rstrip("/")
+    return mount or "/"
+
+
+def _parse_transport_list(value: str | None) -> list[str]:
+    """Split a comma-delimited transport list into normalized names."""
+
+    if value is None:
+        return []
+    return [transport for transport in (item.strip() for item in value.split(",")) if transport]
+
+
+def _resolve_transports(
+    cli_values: list[str] | None,
+    env_value: str | None,
+    parser: argparse.ArgumentParser,
+) -> list[str]:
+    """Return the transport selection with environment overrides applied."""
+
+    if env_value is not None:
+        transports = _parse_transport_list(env_value)
+        if not transports:
+            parser.error("MCP_TRANSPORT must list at least one transport")
+    elif cli_values:
+        transports = cli_values
+    else:
+        transports = ["stdio"]
+
+    invalid = sorted(set(transports) - set(VALID_TRANSPORTS))
+    if invalid:
+        parser.error(
+            "transport must be one of stdio, sse, or streamable-http (via --transport or MCP_TRANSPORT)"
+        )
+
+    if "stdio" in transports and len(transports) > 1:
+        parser.error("stdio cannot be combined with SSE or streamable-http")
+
+    return transports
+
+
+def _resolve_http_mount(
+    transport: Literal["sse", "streamable-http"],
+    *,
+    multiple_http_transports: bool,
+    generic_mount: str | None,
+    transport_mount: str | None,
+    parser: argparse.ArgumentParser,
+) -> str:
+    """Resolve a transport-specific HTTP mount path."""
+
+    if multiple_http_transports:
+        if generic_mount is not None:
+            parser.error(
+                "--mount or MCP_MOUNT cannot be used when running both SSE and streamable-http; use --sse-mount and --streamable-http-mount"
+            )
+        mount = transport_mount or DEFAULT_HTTP_MOUNTS[transport]
+    else:
+        mount = transport_mount or generic_mount or DEFAULT_HTTP_MOUNTS[transport]
+    normalized = _normalize_mount_path(mount)
+    if normalized is None:
+        parser.error(f"{transport} mount path could not be resolved")
+    return normalized
+
+
+def _build_shared_http_app(configs: list[HttpTransportConfig]) -> Starlette:
+    """Build a single ASGI app that exposes multiple FastMCP HTTP transports."""
+
+    app = Starlette()
+    for config in configs:
+        child_app = plex_server.http_app(path="/", transport=config.transport)
+        app.mount(config.path, child_app)
+    return app
+
+
 def _resolve_log_level(cli_value: str | None) -> str:
     """Return the desired log level name based on CLI or environment input."""
 
@@ -54,11 +157,16 @@ def main(argv: list[str] | None = None) -> None:
     parser.add_argument("--port", type=int, help="Port to listen on")
     parser.add_argument(
         "--transport",
+        action="append",
         choices=["stdio", "sse", "streamable-http"],
-        default="stdio",
         help="Transport protocol to use",
     )
     parser.add_argument("--mount", help="Mount path for HTTP transports")
+    parser.add_argument("--sse-mount", help="Mount path for SSE transports")
+    parser.add_argument(
+        "--streamable-http-mount",
+        help="Mount path for streamable HTTP transports",
+    )
     parser.add_argument(
         "--dense-model",
         default=settings.dense_model,
@@ -103,13 +211,10 @@ def main(argv: list[str] | None = None) -> None:
     )
     env_port = os.getenv("MCP_PORT")
     env_mount = os.getenv("MCP_MOUNT")
+    env_sse_mount = os.getenv("MCP_SSE_MOUNT")
+    env_streamable_http_mount = os.getenv("MCP_STREAMABLE_HTTP_MOUNT")
 
-    transport = env_transport or args.transport
-    valid_transports = {"stdio", "sse", "streamable-http"}
-    if transport not in valid_transports:
-        parser.error(
-            "transport must be one of stdio, sse, or streamable-http (via --transport or MCP_TRANSPORT)"
-        )
+    transports = _resolve_transports(args.transport, env_transport, parser)
 
     host = env_host or args.bind
     port: int | None
@@ -122,23 +227,17 @@ def main(argv: list[str] | None = None) -> None:
         port = args.port
 
     mount = env_mount or args.mount
+    sse_mount = env_sse_mount or args.sse_mount
+    streamable_http_mount = env_streamable_http_mount or args.streamable_http_mount
+    http_transports = [transport for transport in transports if transport != "stdio"]
 
-    if transport != "stdio":
+    if http_transports:
         if host is None or port is None:
             parser.error(
                 "--bind/--port or MCP_HOST/MCP_PORT are required when transport is not stdio"
             )
-    if transport == "stdio" and mount:
+    if transports == ["stdio"] and mount:
         parser.error("--mount or MCP_MOUNT is not allowed when transport is stdio")
-
-    run_config = RunConfig()
-    if transport != "stdio":
-        if host is not None:
-            run_config.host = host
-        if port is not None:
-            run_config.port = port
-        if mount:
-            run_config.path = mount
 
     settings.dense_model = args.dense_model
     settings.sparse_model = args.sparse_model
@@ -151,11 +250,54 @@ def main(argv: list[str] | None = None) -> None:
     logging.basicConfig(level=log_level)
     plex_server.add_middleware(
         StructuredLoggingMiddleware(
-            include_payloads=True,
-            log_level=log_level
+            include_payloads=True, log_level=log_level
         )
     )
-    plex_server.run(transport=transport, **run_config.to_kwargs())
+
+    if transports == ["stdio"]:
+        plex_server.run(transport="stdio")
+        return
+
+    if len(http_transports) == 1:
+        transport = http_transports[0]
+        run_config = RunConfig()
+        if host is not None:
+            run_config.host = host
+        if port is not None:
+            run_config.port = port
+        resolved_mount = _resolve_http_mount(
+            transport,  # type: ignore[arg-type]
+            multiple_http_transports=False,
+            generic_mount=mount,
+            transport_mount=sse_mount if transport == "sse" else streamable_http_mount,
+            parser=parser,
+        )
+        if resolved_mount != DEFAULT_HTTP_MOUNTS[transport]:
+            run_config.path = resolved_mount
+        plex_server.run(transport=transport, **run_config.to_kwargs())
+        return
+
+    multi_http_configs = [
+        HttpTransportConfig(
+            transport=transport,  # type: ignore[arg-type]
+            path=_resolve_http_mount(
+                transport,  # type: ignore[arg-type]
+                multiple_http_transports=True,
+                generic_mount=mount,
+                transport_mount=(
+                    sse_mount if transport == "sse" else streamable_http_mount
+                ),
+                parser=parser,
+            ),
+        )
+        for transport in http_transports
+    ]
+    resolved_paths = [config.path for config in multi_http_configs]
+    if len(set(resolved_paths)) != len(resolved_paths):
+        parser.error("SSE and streamable-http must use different mount paths")
+
+    shared_app = _build_shared_http_app(multi_http_configs)
+    uvicorn.run(shared_app, host=host, port=port, log_level=log_level_name)
 
 
 __all__ = ["RunConfig", "main", "server", "PlexServer", "plex_server", "settings"]
