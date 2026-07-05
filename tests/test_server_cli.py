@@ -203,6 +203,42 @@ def test_shared_http_app_does_not_rewrite_root_mount():
     assert observed_paths == ["/", "/"]
 
 
+def test_shared_http_app_exposes_rest_docs_without_root_mount():
+    from starlette.responses import PlainTextResponse
+
+    def fake_http_app(*, path: str, transport: str) -> Starlette:
+        async def root_endpoint(request):
+            return PlainTextResponse(f"{transport}:{request.scope['path']}")
+
+        @asynccontextmanager
+        async def lifespan(app: Starlette):
+            yield
+
+        child = Starlette(
+            lifespan=lifespan,
+            routes=[Route("/", endpoint=root_endpoint, methods=["GET"])],
+        )
+        child.state.path = path
+        return child
+
+    configs = [
+        server.HttpTransportConfig(transport="sse", path="/sse"),
+        server.HttpTransportConfig(transport="streamable-http", path="/mcp"),
+    ]
+
+    with patch.object(server.plex_server, "http_app", side_effect=fake_http_app):
+        app = server._build_shared_http_app(configs)
+
+    with TestClient(app, follow_redirects=False) as client:
+        docs_response = client.get("/rest")
+        assert docs_response.status_code == 200
+        assert "Swagger UI" in docs_response.text
+
+        openapi_response = client.get("/openapi.json")
+        assert openapi_response.status_code == 200
+        assert "/rest/get-media" in openapi_response.json()["paths"]
+
+
 def test_main_env_vars_combined_transports(monkeypatch):
     monkeypatch.setenv("MCP_TRANSPORT", "sse,streamable-http")
     monkeypatch.setenv("MCP_HOST", "1.2.3.4")
