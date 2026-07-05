@@ -82,8 +82,13 @@ def test_main_can_run_multiple_http_transports_on_same_port():
     app = mock_run.call_args.args[0]
     assert mock_run.call_args.kwargs["host"] == "0.0.0.0"
     assert mock_run.call_args.kwargs["port"] == 8000
-    assert [route.path for route in app.routes] == ["/sse", "/mcp"]
-    assert [getattr(route.app.state, "path", None) for route in app.routes] == ["/", "/"]
+    route_paths = [route.path for route in app.routes]
+    assert "/rest" in route_paths
+    assert "/openapi.json" in route_paths
+    assert "/rest/get-media" in route_paths
+    assert route_paths[-2:] == ["/sse", "/mcp"]
+    mounted_routes = [route for route in app.routes if hasattr(getattr(route, "app", None), "state")]
+    assert [getattr(route.app.state, "path", None) for route in mounted_routes] == ["/", "/"]
 
 
 def test_shared_http_app_initializes_child_lifespans():
@@ -198,9 +203,50 @@ def test_shared_http_app_does_not_rewrite_root_mount():
 
         mcp_response = client.get("/mcp")
         assert mcp_response.status_code == 200
-        assert mcp_response.text == "streamable-http:/"
+        assert mcp_response.text == "streamable-http:/mcp/"
 
-    assert observed_paths == ["/", "/"]
+    assert observed_paths == ["/", "/mcp/"]
+
+
+def test_shared_http_app_exposes_rest_docs_without_root_mount():
+    from starlette.responses import PlainTextResponse
+
+    def fake_http_app(*, path: str, transport: str) -> Starlette:
+        async def root_endpoint(request):
+            return PlainTextResponse(f"{transport}:{request.scope['path']}")
+
+        @asynccontextmanager
+        async def lifespan(app: Starlette):
+            yield
+
+        child = Starlette(
+            lifespan=lifespan,
+            routes=[Route("/", endpoint=root_endpoint, methods=["GET"])],
+        )
+        child.state.path = path
+        return child
+
+    configs = [
+        server.HttpTransportConfig(transport="sse", path="/sse"),
+        server.HttpTransportConfig(transport="streamable-http", path="/mcp"),
+    ]
+
+    with patch.object(server.plex_server, "http_app", side_effect=fake_http_app):
+        app = server._build_shared_http_app(configs)
+
+    with TestClient(app, follow_redirects=False) as client:
+        docs_response = client.get("/rest")
+        assert docs_response.status_code == 200
+        assert "SwaggerUIBundle" in docs_response.text
+
+        openapi_response = client.get("/openapi.json")
+        assert openapi_response.status_code == 200
+        assert "/rest/get-media" in openapi_response.json()["paths"]
+
+    # Verify that the REST operation paths advertised by the schema are actually
+    # routable on the parent app (not just documented but unreachable).
+    parent_route_paths = {getattr(r, "path", None) for r in app.routes}
+    assert "/rest/get-media" in parent_route_paths
 
 
 def test_main_env_vars_combined_transports(monkeypatch):
@@ -217,7 +263,13 @@ def test_main_env_vars_combined_transports(monkeypatch):
     app = mock_run.call_args.args[0]
     assert mock_run.call_args.kwargs["host"] == "1.2.3.4"
     assert mock_run.call_args.kwargs["port"] == 1234
-    assert [route.path for route in app.routes] == ["/events", "/stream"]
+    route_paths = [route.path for route in app.routes]
+    # All REST handlers are now exposed at the parent level alongside the mounts.
+    assert "/rest" in route_paths
+    assert "/openapi.json" in route_paths
+    assert "/rest/get-media" in route_paths
+    # Transport mounts are appended after the REST routes.
+    assert route_paths[-2:] == ["/events", "/stream"]
 
 
 def test_main_rejects_generic_mount_for_multiple_http_transports():

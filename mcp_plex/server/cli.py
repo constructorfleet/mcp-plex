@@ -184,7 +184,13 @@ def _build_shared_http_app(configs: list[HttpTransportConfig]) -> Starlette:
         lifespan=lifespan,
         middleware=[Middleware(_TrailingSlashMiddleware, paths=mount_paths)],
     )
-    for mount_path, child_app in child_apps:
+    if all(config.path != "/" for config in configs):
+        for route in plex_server._get_additional_http_routes():
+            methods = [m for m in (route.methods or {"GET"}) if m != "HEAD"]
+            app.add_route(route.path, route.endpoint, methods=methods)
+    for mount_path, child_app in sorted(
+        child_apps, key=lambda entry: (entry[0] == "/", -len(entry[0]))
+    ):
         app.mount(mount_path, child_app)
     return app
 
