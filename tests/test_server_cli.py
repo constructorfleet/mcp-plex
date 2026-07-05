@@ -82,8 +82,9 @@ def test_main_can_run_multiple_http_transports_on_same_port():
     app = mock_run.call_args.args[0]
     assert mock_run.call_args.kwargs["host"] == "0.0.0.0"
     assert mock_run.call_args.kwargs["port"] == 8000
-    assert [route.path for route in app.routes] == ["/sse", "/mcp"]
-    assert [getattr(route.app.state, "path", None) for route in app.routes] == ["/", "/"]
+    assert [route.path for route in app.routes] == ["/rest", "/openapi.json", "/sse", "/mcp"]
+    mounted_routes = [route for route in app.routes if hasattr(getattr(route, "app", None), "state")]
+    assert [getattr(route.app.state, "path", None) for route in mounted_routes] == ["/", "/"]
 
 
 def test_shared_http_app_initializes_child_lifespans():
@@ -198,9 +199,9 @@ def test_shared_http_app_does_not_rewrite_root_mount():
 
         mcp_response = client.get("/mcp")
         assert mcp_response.status_code == 200
-        assert mcp_response.text == "streamable-http:/"
+        assert mcp_response.text == "streamable-http:/mcp/"
 
-    assert observed_paths == ["/", "/"]
+    assert observed_paths == ["/", "/mcp/"]
 
 
 def test_shared_http_app_exposes_rest_docs_without_root_mount():
@@ -232,7 +233,7 @@ def test_shared_http_app_exposes_rest_docs_without_root_mount():
     with TestClient(app, follow_redirects=False) as client:
         docs_response = client.get("/rest")
         assert docs_response.status_code == 200
-        assert "Swagger UI" in docs_response.text
+        assert "SwaggerUIBundle" in docs_response.text
 
         openapi_response = client.get("/openapi.json")
         assert openapi_response.status_code == 200
@@ -253,7 +254,7 @@ def test_main_env_vars_combined_transports(monkeypatch):
     app = mock_run.call_args.args[0]
     assert mock_run.call_args.kwargs["host"] == "1.2.3.4"
     assert mock_run.call_args.kwargs["port"] == 1234
-    assert [route.path for route in app.routes] == ["/events", "/stream"]
+    assert [route.path for route in app.routes] == ["/rest", "/openapi.json", "/events", "/stream"]
 
 
 def test_main_rejects_generic_mount_for_multiple_http_transports():
