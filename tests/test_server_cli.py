@@ -82,7 +82,11 @@ def test_main_can_run_multiple_http_transports_on_same_port():
     app = mock_run.call_args.args[0]
     assert mock_run.call_args.kwargs["host"] == "0.0.0.0"
     assert mock_run.call_args.kwargs["port"] == 8000
-    assert [route.path for route in app.routes] == ["/rest", "/openapi.json", "/sse", "/mcp"]
+    route_paths = [route.path for route in app.routes]
+    assert "/rest" in route_paths
+    assert "/openapi.json" in route_paths
+    assert "/rest/get-media" in route_paths
+    assert route_paths[-2:] == ["/sse", "/mcp"]
     mounted_routes = [route for route in app.routes if hasattr(getattr(route, "app", None), "state")]
     assert [getattr(route.app.state, "path", None) for route in mounted_routes] == ["/", "/"]
 
@@ -239,6 +243,11 @@ def test_shared_http_app_exposes_rest_docs_without_root_mount():
         assert openapi_response.status_code == 200
         assert "/rest/get-media" in openapi_response.json()["paths"]
 
+    # Verify that the REST operation paths advertised by the schema are actually
+    # routable on the parent app (not just documented but unreachable).
+    parent_route_paths = {getattr(r, "path", None) for r in app.routes}
+    assert "/rest/get-media" in parent_route_paths
+
 
 def test_main_env_vars_combined_transports(monkeypatch):
     monkeypatch.setenv("MCP_TRANSPORT", "sse,streamable-http")
@@ -254,7 +263,13 @@ def test_main_env_vars_combined_transports(monkeypatch):
     app = mock_run.call_args.args[0]
     assert mock_run.call_args.kwargs["host"] == "1.2.3.4"
     assert mock_run.call_args.kwargs["port"] == 1234
-    assert [route.path for route in app.routes] == ["/rest", "/openapi.json", "/events", "/stream"]
+    route_paths = [route.path for route in app.routes]
+    # All REST handlers are now exposed at the parent level alongside the mounts.
+    assert "/rest" in route_paths
+    assert "/openapi.json" in route_paths
+    assert "/rest/get-media" in route_paths
+    # Transport mounts are appended after the REST routes.
+    assert route_paths[-2:] == ["/events", "/stream"]
 
 
 def test_main_rejects_generic_mount_for_multiple_http_transports():

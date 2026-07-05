@@ -15,7 +15,7 @@ from starlette.applications import Starlette
 from starlette.middleware import Middleware
 from starlette.types import ASGIApp, Receive, Scope, Send
 
-from . import PlexServer, openapi_json, rest_docs, server, settings
+from . import PlexServer, server, settings
 
 
 plex_server: PlexServer = server
@@ -185,8 +185,9 @@ def _build_shared_http_app(configs: list[HttpTransportConfig]) -> Starlette:
         middleware=[Middleware(_TrailingSlashMiddleware, paths=mount_paths)],
     )
     if all(config.path != "/" for config in configs):
-        app.add_route("/rest", rest_docs, methods=["GET"])
-        app.add_route("/openapi.json", openapi_json, methods=["GET"])
+        for route in plex_server._get_additional_http_routes():
+            methods = [m for m in (route.methods or {"GET"}) if m != "HEAD"]
+            app.add_route(route.path, route.endpoint, methods=methods)
     for mount_path, child_app in sorted(
         child_apps, key=lambda entry: (entry[0] == "/", -len(entry[0]))
     ):
