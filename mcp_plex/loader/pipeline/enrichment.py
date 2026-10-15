@@ -293,9 +293,9 @@ def resolve_tmdb_season_number(
     # match by season name (e.g. "Season 2018" -> "2018")
     title_norm: str | None = None
     if isinstance(parent_title, str):
-        title_norm = parent_title.lower().lstrip("season ").strip()
+        title_norm = parent_title.lower().removeprefix("season ").strip()
         for season in seasons:
-            name_norm = (season.name or "").lower().lstrip("season ").strip()
+            name_norm = (season.name or "").lower().removeprefix("season ").strip()
             if name_norm == title_norm:
                 return season.season_number
 
