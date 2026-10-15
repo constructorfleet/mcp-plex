@@ -1,5 +1,5 @@
 version = 1
-revision = 3
+revision = 5
 requires-python = ">=3.11, <3.13"
 resolution-markers = [
     "python_full_version >= '3.12' and platform_machine == 'x86_64' and sys_platform == 'darwin'",
@@ -409,7 +409,7 @@ wheels = [
 
 [[package]]
 name = "fastembed"
-version = "0.7.4"
+version = "0.8.1"
 source = { registry = "https://pypi.org/simple" }
 dependencies = [
     { name = "huggingface-hub" },
@@ -423,14 +423,14 @@ dependencies = [
     { name = "tokenizers" },
     { name = "tqdm" },
 ]
-sdist = { url = "https://files.pythonhosted.org/packages/4c/c2/9c708680de1b54480161e0505f9d6d3d8eb47a1dc1a1f7f3c5106ba355d2/fastembed-0.7.4.tar.gz", hash = "sha256:8b8a4ea860ca295002f4754e8f5820a636e1065a9444959e18d5988d7f27093b", size = 68807, upload-time = "2025-12-05T12:08:10.447Z" }
+sdist = { url = "https://files.pythonhosted.org/packages/ae/84/09d221078b6e2e2169fab52506dc2e0a6c7a9a4f0699000e9b9df55b42b2/fastembed-0.8.1.tar.gz", hash = "sha256:ad815f14873dce918f755a99f16929a1384775f91ca8a14645993a165b5f65ba", size = 82392, upload-time = "2026-09-22T20:01:24.201Z" }
 wheels = [
-    { url = "https://files.pythonhosted.org/packages/10/3b/8da01492bc8b69184257d0c951bf0e77aec8ce110f06d8ce16c6ed9084f7/fastembed-0.7.4-py3-none-any.whl", hash = "sha256:79250a775f70bd6addb0e054204df042b5029ecae501e40e5bbd08e75844ad83", size = 108491, upload-time = "2025-12-05T12:08:09.059Z" },
+    { url = "https://files.pythonhosted.org/packages/c4/76/209f9f4c421853f729176c5a6ca99a9cd92b3b593390a20f9414fd333ad7/fastembed-0.8.1-py3-none-any.whl", hash = "sha256:b4f4043080af36ee820d22d2d3034df635c1a8b9764e5d2a642bc7aeb1d0e749", size = 129755, upload-time = "2026-09-22T20:01:22.789Z" },
 ]
 
 [[package]]
 name = "fastembed-gpu"
-version = "0.7.3"
+version = "0.8.1"
 source = { registry = "https://pypi.org/simple" }
 dependencies = [
     { name = "huggingface-hub" },
@@ -444,9 +444,9 @@ dependencies = [
     { name = "tokenizers" },
     { name = "tqdm" },
 ]
-sdist = { url = "https://files.pythonhosted.org/packages/de/b0/9d528c2dfc319d218a9829b9018e480cd23d620492636817321ad0fb5cce/fastembed_gpu-0.7.3.tar.gz", hash = "sha256:2ed106290677b4cc93e3a8467fd3fbcbf288c1e11fa02cebed67f02a7ccb2427", size = 66636, upload-time = "2025-08-29T11:20:05.13Z" }
+sdist = { url = "https://files.pythonhosted.org/packages/aa/af/7a149de972ffc717a66cfc3bab811218ca6e0a7ee1e4d2f3a4f57c6688e1/fastembed_gpu-0.8.1.tar.gz", hash = "sha256:c5e86f3d345b80bf450d8bd94e1307ea2fdbf7462f11cae904b956f86ea87c08", size = 82442, upload-time = "2026-09-22T20:01:33.342Z" }
 wheels = [
-    { url = "https://files.pythonhosted.org/packages/48/2b/8b1788989dcf9394195a43b6b5ee1b19ed5e628f9aa3c92b46946bca5748/fastembed_gpu-0.7.3-py3-none-any.whl", hash = "sha256:762385f788b55d05ccbb663516d127194d6567426916a7d8fc63378ffcfcdc41", size = 105371, upload-time = "2025-08-29T11:20:03.707Z" },
+    { url = "https://files.pythonhosted.org/packages/90/41/5daf0c101f8d0b5ff9488ac67d99b94e51311fc35cc3cdc5ed6f4ffa7216/fastembed_gpu-0.8.1-py3-none-any.whl", hash = "sha256:42c4bf7d90df5d318a09c2cb08702e8c6aa4e9f443b19ffc66ca20464e4e76fb", size = 129805, upload-time = "2026-09-22T20:01:31.972Z" },
 ]
 
 [[package]]
@@ -913,7 +913,7 @@ wheels = [
 
 [[package]]
 name = "mcp-plex"
-version = "2.2.35"
+version = "2.2.36"
 source = { editable = "." }
 dependencies = [
     { name = "fastapi" },
@@ -947,8 +947,8 @@ requires-dist = [
     { name = "pydantic", specifier = ">=2.11.7" },
     { name = "pytest", marker = "extra == 'dev'", specifier = ">=8.4.1" },
     { name = "pyyaml", specifier = ">=6.0.2" },
-    { name = "qdrant-client", extras = ["fastembed"], marker = "sys_platform == 'darwin'", specifier = ">=1.15.1" },
-    { name = "qdrant-client", extras = ["fastembed-gpu"], marker = "platform_machine == 'x86_64' and sys_platform != 'darwin'", specifier = ">=1.15.1" },
+    { name = "qdrant-client", extras = ["fastembed"], marker = "sys_platform == 'darwin'", specifier = ">=1.19.1" },
+    { name = "qdrant-client", extras = ["fastembed-gpu"], marker = "platform_machine == 'x86_64' and sys_platform != 'darwin'", specifier = ">=1.19.1" },
     { name = "rapidfuzz", specifier = ">=3.13.0,<3.14.0" },
     { name = "ruff", marker = "extra == 'dev'", specifier = ">=0.12.0" },
     { name = "scikit-learn", specifier = ">=1.7.1" },
@@ -1718,7 +1718,7 @@ wheels = [
 
 [[package]]
 name = "qdrant-client"
-version = "1.15.1"
+version = "1.19.1"
 source = { registry = "https://pypi.org/simple" }
 dependencies = [
     { name = "grpcio" },
@@ -1729,9 +1729,9 @@ dependencies = [
     { name = "pydantic" },
     { name = "urllib3" },
 ]
-sdist = { url = "https://files.pythonhosted.org/packages/79/8b/76c7d325e11d97cb8eb5e261c3759e9ed6664735afbf32fdded5b580690c/qdrant_client-1.15.1.tar.gz", hash = "sha256:631f1f3caebfad0fd0c1fba98f41be81d9962b7bf3ca653bed3b727c0e0cbe0e", size = 295297, upload-time = "2025-07-31T19:35:19.627Z" }
+sdist = { url = "https://files.pythonhosted.org/packages/4e/20/c8fcd645d3f595b086fa11a085980e9f641fd56fc6221fb325d634b8c4fa/qdrant_client-1.19.1.tar.gz", hash = "sha256:8f1d851a8463ce8cc11cf39ed8a9c9fb4b5f9de60e9a096ff56da42d1f074907", size = 360625, upload-time = "2026-09-16T06:43:13.818Z" }
 wheels = [
-    { url = "https://files.pythonhosted.org/packages/ef/33/d8df6a2b214ffbe4138db9a1efe3248f67dc3c671f82308bea1582ecbbb7/qdrant_client-1.15.1-py3-none-any.whl", hash = "sha256:2b975099b378382f6ca1cfb43f0d59e541be6e16a5892f282a4b8de7eff5cb63", size = 337331, upload-time = "2025-07-31T19:35:17.539Z" },
+    { url = "https://files.pythonhosted.org/packages/d0/9f/becebdda02beddd422587eba0d7dfac5b1f1e0aa1ada5bcf9b9e6f1c3717/qdrant_client-1.19.1-py3-none-any.whl", hash = "sha256:fca1a96c3f90f5fff853f6ee6877838a5768a04c963df9891a655a63313af8a0", size = 406533, upload-time = "2026-09-16T06:43:12.428Z" },
 ]
 
 [package.optional-dependencies]

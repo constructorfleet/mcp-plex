@@ -16,8 +16,10 @@ jobs:
       - uses: astral-sh/setup-uv@v6
         with:
           python-version: '3.12'
-      - run: uv sync --no-dev
-      - run: uv pip install pytest ruff pytest-cov
+      # Use the locked dev tooling (ruff, pytest) so CI lints with the same
+      # versions as local development instead of whatever is newest.
+      - run: uv sync --locked --extra dev
+      - run: uv pip install pytest-cov
       - name: Ruff
         run: uv run ruff check .
       - name: Pytest + coverage
