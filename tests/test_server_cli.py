@@ -82,6 +82,7 @@ def test_main_can_run_multiple_http_transports_on_same_port():
     app = mock_run.call_args.args[0]
     assert mock_run.call_args.kwargs["host"] == "0.0.0.0"
     assert mock_run.call_args.kwargs["port"] == 8000
+    assert mock_run.call_args.kwargs["ws"] == "websockets-sansio"
     route_paths = [route.path for route in app.routes]
     assert "/rest" in route_paths
     assert "/openapi.json" in route_paths
@@ -263,6 +264,7 @@ def test_main_env_vars_combined_transports(monkeypatch):
     app = mock_run.call_args.args[0]
     assert mock_run.call_args.kwargs["host"] == "1.2.3.4"
     assert mock_run.call_args.kwargs["port"] == 1234
+    assert mock_run.call_args.kwargs["ws"] == "websockets-sansio"
     route_paths = [route.path for route in app.routes]
     # All REST handlers are now exposed at the parent level alongside the mounts.
     assert "/rest" in route_paths

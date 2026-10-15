@@ -25,6 +25,9 @@ DEFAULT_HTTP_MOUNTS = {
     "sse": "/sse",
     "streamable-http": "/mcp",
 }
+# uvicorn's "auto" websocket protocol selects the deprecated websockets.legacy
+# implementation; match FastMCP's own default and use the sans-I/O protocol.
+UVICORN_WS_PROTOCOL = "websockets-sansio"
 
 
 @dataclass(frozen=True)
@@ -356,7 +359,13 @@ def main(argv: list[str] | None = None) -> None:
         parser.error("SSE and streamable-http must use different mount paths")
 
     shared_app = _build_shared_http_app(multi_http_configs)
-    uvicorn.run(shared_app, host=host, port=port, log_level=log_level_name)
+    uvicorn.run(
+        shared_app,
+        host=host,
+        port=port,
+        log_level=log_level_name,
+        ws=UVICORN_WS_PROTOCOL,
+    )
 
 
 __all__ = ["RunConfig", "main", "server", "PlexServer", "plex_server", "settings"]
