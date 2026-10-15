@@ -4,7 +4,8 @@ from __future__ import annotations
 
 import asyncio
 import inspect
-from typing import Awaitable, Callable, SupportsInt, TypeVar, Union
+from collections.abc import Awaitable, Callable
+from typing import SupportsInt, TypeVar
 
 T = TypeVar("T")
 RetryExceptions = tuple[type[BaseException], ...]
@@ -48,7 +49,7 @@ def retry(
     delay: float = 1.0,
     backoff: float = 2.0,
     retry_exceptions: RetryExceptions = (OSError, TimeoutError, ConnectionError),
-) -> Callable[[Callable[..., Union[T, Awaitable[T]]]], Callable[..., Awaitable[T]]]:
+) -> Callable[[Callable[..., T | Awaitable[T]]], Callable[..., Awaitable[T]]]:
     """Retry decorator for handling transient errors.
 
     Args:
@@ -58,7 +59,7 @@ def retry(
         retry_exceptions: Exception types that are considered transient and retried.
     """
 
-    def decorator(func: Callable[..., Union[T, Awaitable[T]]]) -> Callable[..., Awaitable[T]]:
+    def decorator(func: Callable[..., T | Awaitable[T]]) -> Callable[..., Awaitable[T]]:
         async def wrapper(*args, **kwargs) -> T:
             attempt = 0
             current_delay = delay
@@ -81,4 +82,4 @@ def retry(
     return decorator
 
 
-__all__ = ["require_positive", "coerce_plex_tag_id", "retry"]
+__all__ = ["coerce_plex_tag_id", "require_positive", "retry"]

@@ -8,8 +8,8 @@ from .types import JSONValue
 from .validation import require_positive
 
 __all__ = [
-	"MediaCache",
 	"JSONValue",
+	"MediaCache",
 	"require_positive",
 	"slugify",
 	"strip_leading_article",

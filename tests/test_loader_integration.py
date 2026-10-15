@@ -3,20 +3,20 @@ from __future__ import annotations
 import asyncio
 import json
 from pathlib import Path
-from typing import Any
+from typing import Any, ClassVar
 
-from qdrant_client.async_qdrant_client import AsyncQdrantClient
-from qdrant_client import models
 import pytest
+from qdrant_client import models
+from qdrant_client.async_qdrant_client import AsyncQdrantClient
 
 from mcp_plex import loader
 
 
 class CaptureClient(AsyncQdrantClient):
-    instance: "CaptureClient" | None = None
-    captured_points: list[models.PointStruct] = []
+    instance: CaptureClient | None = None
+    captured_points: ClassVar[list[models.PointStruct]] = []
     upsert_calls: int = 0
-    created_indexes: list[tuple[str, Any]] = []
+    created_indexes: ClassVar[list[tuple[str, Any]]] = []
     close_calls: int = 0
 
     def __init__(self, *args, **kwargs):
@@ -93,8 +93,8 @@ def test_run_writes_points(monkeypatch):
         "directors" in movie_point.payload
         and "Guy Ritchie" in movie_point.payload["directors"]
     )
-    assert "writers" in movie_point.payload and movie_point.payload["writers"]
-    assert "genres" in movie_point.payload and movie_point.payload["genres"]
+    assert movie_point.payload.get("writers")
+    assert movie_point.payload.get("genres")
     assert movie_point.payload.get("summary")
     assert movie_point.payload.get("overview")
     assert movie_point.payload.get("plot")
@@ -168,7 +168,7 @@ def test_run_closes_client_once(monkeypatch):
 
 def test_run_skips_existing_media(monkeypatch):
     class ExistingClient(CaptureClient):
-        retrieved_ids: list[tuple[int | str, ...]] = []
+        retrieved_ids: ClassVar[list[tuple[int | str, ...]]] = []
 
         async def retrieve(self, collection_name: str, ids, **kwargs):
             ExistingClient.retrieved_ids.append(tuple(ids))

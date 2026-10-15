@@ -3,6 +3,10 @@ import types
 
 import httpx
 
+from mcp_plex.common.types import (
+    TMDBSeason,
+    TMDBShow,
+)
 from mcp_plex.loader.pipeline.enrichment import (
     _build_plex_item,
     _extract_external_ids,
@@ -11,10 +15,6 @@ from mcp_plex.loader.pipeline.enrichment import (
     _fetch_tmdb_movie,
     _fetch_tmdb_show,
     resolve_tmdb_season_number,
-)
-from mcp_plex.common.types import (
-    TMDBSeason,
-    TMDBShow,
 )
 
 
@@ -248,6 +248,31 @@ def test_resolve_tmdb_season_number_matches_name():
         seasons=[TMDBSeason(season_number=14, name="2018")],
     )
     assert resolve_tmdb_season_number(show, episode) == 14
+
+
+def test_resolve_tmdb_season_number_matches_word_season_name():
+    # Stripping the characters of "season " (rather than the prefix) reduced
+    # "Season One" to an empty string, which matched an unnamed TMDb season.
+    episode = types.SimpleNamespace(parentIndex=7, parentTitle="Season One")
+    show = TMDBShow(
+        id=1399,
+        name="Game of Thrones",
+        seasons=[
+            TMDBSeason(season_number=0, name=""),
+            TMDBSeason(season_number=1, name="Season One"),
+        ],
+    )
+    assert resolve_tmdb_season_number(show, episode) == 1
+
+
+def test_resolve_tmdb_season_number_does_not_match_different_word_season():
+    episode = types.SimpleNamespace(parentIndex=7, parentTitle="Season One")
+    show = TMDBShow(
+        id=1399,
+        name="Game of Thrones",
+        seasons=[TMDBSeason(season_number=2, name="Season Two")],
+    )
+    assert resolve_tmdb_season_number(show, episode) == 7
 
 
 def test_resolve_tmdb_season_number_matches_air_date():

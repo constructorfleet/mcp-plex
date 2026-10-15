@@ -12,7 +12,7 @@ def test_loader_pipeline_removed() -> None:
     module = importlib.reload(module)
 
     with pytest.raises(AttributeError):
-        getattr(module, "LoaderPipeline")
+        _ = module.LoaderPipeline
 
     with pytest.raises(AttributeError):
-        getattr(module, "LegacyLoaderPipeline")
+        _ = module.LegacyLoaderPipeline

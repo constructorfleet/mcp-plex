@@ -10,7 +10,6 @@ from pydantic import BaseModel
 from mcp_plex import server as server_module
 from mcp_plex.server import media as media_helpers
 
-
 MEDIA_LIBRARY_TOOL_NAMES = [
     "get_media",
     "query_media",

@@ -22,21 +22,8 @@ from contextlib import (
 from typing import Protocol, cast
 
 import httpx
+from plexapi.base import PlexPartialObject
 from pydantic import ValidationError
-
-from .channels import (
-    EpisodeBatch,
-    IMDbRetryQueue,
-    INGEST_DONE,
-    PERSIST_DONE,
-    IngestQueue,
-    MovieBatch,
-    PersistenceQueue,
-    SampleBatch,
-    chunk_sequence,
-    enqueue_nowait,
-)
-from ...common.validation import coerce_plex_tag_id, require_positive
 
 from ...common.types import (
     AggregatedItem,
@@ -51,11 +38,21 @@ from ...common.types import (
     TMDBMovie,
     TMDBShow,
 )
+from ...common.validation import coerce_plex_tag_id, require_positive
 from ..imdb_cache import IMDbCache
 from ..qdrant import rehydrate_aggregated_item
-
-from plexapi.base import PlexPartialObject
-
+from .channels import (
+    INGEST_DONE,
+    PERSIST_DONE,
+    EpisodeBatch,
+    IMDbRetryQueue,
+    IngestQueue,
+    MovieBatch,
+    PersistenceQueue,
+    SampleBatch,
+    chunk_sequence,
+    enqueue_nowait,
+)
 
 LOGGER = logging.getLogger(__name__)
 
@@ -293,9 +290,9 @@ def resolve_tmdb_season_number(
     # match by season name (e.g. "Season 2018" -> "2018")
     title_norm: str | None = None
     if isinstance(parent_title, str):
-        title_norm = parent_title.lower().lstrip("season ").strip()
+        title_norm = parent_title.lower().removeprefix("season ").strip()
         for season in seasons:
-            name_norm = (season.name or "").lower().lstrip("season ").strip()
+            name_norm = (season.name or "").lower().removeprefix("season ").strip()
             if name_norm == title_norm:
                 return season.season_number
 
@@ -311,9 +308,13 @@ def resolve_tmdb_season_number(
     if year is not None:
         for season in seasons:
             air = getattr(season, "air_date", None)
-            if isinstance(air, str) and len(air) >= 4 and air[:4].isdigit():
-                if int(air[:4]) == year:
-                    return season.season_number
+            if (
+                isinstance(air, str)
+                and len(air) >= 4
+                and air[:4].isdigit()
+                and int(air[:4]) == year
+            ):
+                return season.season_number
 
     if isinstance(parent_index, int):
         return parent_index

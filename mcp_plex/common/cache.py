@@ -7,7 +7,6 @@ from typing import TypeVar
 
 from .types import JSONValue
 
-
 CachedPayload = dict[str, JSONValue]
 _CacheValueT = TypeVar("_CacheValueT")
 

@@ -10,7 +10,11 @@ from __future__ import annotations
 
 import asyncio
 import logging
-from typing import Callable, Iterable, Sequence
+from collections.abc import Callable, Iterable, Sequence
+
+from plexapi.library import LibrarySection
+from plexapi.server import PlexServer
+from plexapi.video import Episode, Movie, Season, Show
 
 from ...common.types import AggregatedItem
 from ...common.validation import require_positive
@@ -24,10 +28,6 @@ from .channels import (
     chunk_sequence,
     enqueue_nowait,
 )
-
-from plexapi.library import LibrarySection
-from plexapi.server import PlexServer
-from plexapi.video import Episode, Movie, Season, Show
 
 
 class IngestionStage:

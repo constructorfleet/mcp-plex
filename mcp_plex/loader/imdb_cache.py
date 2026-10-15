@@ -9,7 +9,6 @@ from pydantic import ValidationError
 
 from ..common.types import IMDbTitle, JSONValue
 
-
 CachedIMDbPayload: TypeAlias = IMDbTitle | JSONValue
 
 
@@ -24,7 +23,7 @@ class IMDbCache:
         if path.exists():
             try:
                 raw_contents = path.read_text(encoding="utf-8")
-            except Exception as exc:  # noqa: BLE001 - ensure any read failure is surfaced
+            except Exception as exc:
                 self._logger.warning(
                     "Failed to read IMDb cache from %s; starting with empty cache.",
                     path,

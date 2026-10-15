@@ -1,9 +1,8 @@
 import asyncio
 import logging
-from typing import Any
+from typing import Any, Self
 
 import httpx
-
 import pytest
 
 from mcp_plex.common.types import (
@@ -15,17 +14,17 @@ from mcp_plex.common.types import (
     TMDBShow,
 )
 from mcp_plex.loader.pipeline.channels import (
-    EpisodeBatch,
-    IMDbRetryQueue,
     INGEST_DONE,
     PERSIST_DONE,
+    EpisodeBatch,
+    IMDbRetryQueue,
     MovieBatch,
     SampleBatch,
 )
 from mcp_plex.loader.pipeline.enrichment import (
     EnrichmentStage,
-    _RequestThrottler,
     _fetch_imdb_batch,
+    _RequestThrottler,
 )
 
 
@@ -311,7 +310,7 @@ class _FakeClient(_StubHTTPClient):
         super().__init__()
         self._log = log
 
-    async def __aenter__(self) -> "_FakeClient":
+    async def __aenter__(self) -> Self:
         self._log.append("enter")
         return self
 

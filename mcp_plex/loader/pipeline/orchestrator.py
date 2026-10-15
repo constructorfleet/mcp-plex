@@ -5,8 +5,9 @@ from __future__ import annotations
 import asyncio
 import inspect
 import logging
+from collections.abc import Awaitable, Callable
 from dataclasses import dataclass
-from typing import Awaitable, Callable, Protocol
+from typing import Protocol
 
 from .channels import IngestQueue, PersistenceQueue
 
@@ -79,16 +80,16 @@ class LoaderOrchestrator:
                 group.create_task(
                     self._run_stage(
                         _StageSpec(role="ingestion"),
-                        getattr(self._ingestion_stage, "run"),
+                        self._ingestion_stage.run,
                     )
                 )
                 group.create_task(
                     self._run_stage(
                         _StageSpec(role="enrichment"),
-                        getattr(self._enrichment_stage, "run"),
+                        self._enrichment_stage.run,
                     )
                 )
-                persistence_runner = getattr(self._persistence_stage, "run")
+                persistence_runner = self._persistence_stage.run
                 for worker_id in range(self._persistence_worker_count):
                     group.create_task(
                         self._run_stage(

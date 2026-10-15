@@ -5,7 +5,8 @@ import asyncio
 import pytest
 
 from mcp_plex.server import media as media_helpers
-from mcp_plex.server import media_background, media_poster, server as plex_server
+from mcp_plex.server import media_background, media_poster
+from mcp_plex.server import server as plex_server
 
 
 def test_media_poster_raises_when_missing(monkeypatch):

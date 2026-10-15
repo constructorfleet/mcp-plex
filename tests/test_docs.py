@@ -1,6 +1,6 @@
 from pathlib import Path
-import pytest
 
+import pytest
 
 IMDB_RETRY_DOC_TOKENS = (
     "--imdb-cache",

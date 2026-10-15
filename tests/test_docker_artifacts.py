@@ -4,7 +4,6 @@ from pathlib import Path
 
 import pytest
 
-
 DOCKERFILE = Path("Dockerfile")
 DOCKERIGNORE = Path(".dockerignore")
 CUDA_IMAGE = "nvidia/cuda:12.4.1-cudnn-runtime-ubuntu22.04"

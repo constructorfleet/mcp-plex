@@ -3,21 +3,16 @@
 from __future__ import annotations
 
 import asyncio
+import logging
 import math
 import random
 import time
-import logging
 import warnings
+from collections.abc import Collection, Iterable, Mapping, Sequence
 from typing import (
     TYPE_CHECKING,
-    Collection,
-    Iterable,
-    List,
-    Mapping,
-    Optional,
-    Sequence,
-    TypedDict,
     Any,
+    TypedDict,
 )
 
 from qdrant_client import models
@@ -603,7 +598,7 @@ async def _upsert_batch(
     *,
     max_retries: int,
     initial_backoff_s: float,
-    retry_queue: Optional[asyncio.Queue[List[models.PointStruct]]],
+    retry_queue: asyncio.Queue[list[models.PointStruct]] | None,
     batch_idx: int,
     total_batches: int,
 ) -> int:
@@ -667,11 +662,10 @@ async def _upsert_batch(
                         logger.exception("Failed to enqueue failed batch %d/%d", batch_idx, total_batches)
                 else:
                     logger.exception(
-                        "Batch %d/%d permanently failed after %d attempts (no retry queue): %s",
+                        "Batch %d/%d permanently failed after %d attempts (no retry queue)",
                         batch_idx,
                         total_batches,
                         attempt - 1,
-                        e,
                     )
                 return 0
 
@@ -710,7 +704,7 @@ async def _upsert_in_batches(
     concurrency: int = 8,
     max_retries: int = 4,
     initial_backoff_s: float = 0.25,
-    retry_queue: Optional[asyncio.Queue[List[models.PointStruct]]] = None,
+    retry_queue: asyncio.Queue[list[models.PointStruct]] | None = None,
 ) -> None:
     """
     High-throughput upsert:
@@ -782,7 +776,7 @@ async def _process_qdrant_retry_queue(
     collection_name: str,
     retry_queue: asyncio.Queue[list[models.PointStruct]],
     *,
-    config: "QdrantRuntimeConfig",
+    config: QdrantRuntimeConfig,
 ) -> tuple[int, int]:
     """Retry failed Qdrant batches with exponential backoff.
 
@@ -866,21 +860,21 @@ class QdrantManager:
 
 __all__ = [
     "_DENSE_MODEL_PARAMS",
-    "_resolve_dense_model_params",
-    "_is_local_qdrant",
-    "_ensure_collection",
-    "_build_point_text",
+    "QdrantManager",
+    "QdrantPayload",
     "_build_point_payload",
-    "_point_id_from_rating_key",
-    "_normalise_point_id",
-    "_payload_rating_key",
+    "_build_point_text",
+    "_delete_missing_rating_keys",
+    "_ensure_collection",
     "_existing_point_ids",
     "_find_record_by_external_ids",
-    "_delete_missing_rating_keys",
-    "rehydrate_aggregated_item",
-    "QdrantPayload",
-    "build_point",
-    "_upsert_in_batches",
+    "_is_local_qdrant",
+    "_normalise_point_id",
+    "_payload_rating_key",
+    "_point_id_from_rating_key",
     "_process_qdrant_retry_queue",
-    "QdrantManager",
+    "_resolve_dense_model_params",
+    "_upsert_in_batches",
+    "build_point",
+    "rehydrate_aggregated_item",
 ]
