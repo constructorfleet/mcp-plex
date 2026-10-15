@@ -8,18 +8,21 @@ import inspect
 import json
 import logging
 import uuid
+from collections.abc import Callable, Mapping, Sequence
 from functools import wraps
 from pathlib import Path
-from typing import TYPE_CHECKING, Annotated, Any, Callable, Mapping, Sequence, cast
+from typing import TYPE_CHECKING, Annotated, Any, cast
 from xml.etree import ElementTree
 
 import yaml
 from fastapi import FastAPI
 from fastapi.openapi.docs import get_swagger_ui_html
 from fastapi.openapi.utils import get_openapi
-from fastmcp.prompts import Message
+from fastmcp.prompts import Message, Prompt
+from fastmcp.resources import ResourceTemplate
 from fastmcp.server import FastMCP
 from fastmcp.server.context import Context as FastMCPContext
+from fastmcp.tools import Tool
 from plexapi import base as plex_base
 from plexapi.client import PlexClient
 from plexapi.exceptions import PlexApiException
@@ -99,7 +102,7 @@ class PlexServer(FastMCP):
         *,
         settings: Settings | None = None,
         qdrant_client: AsyncQdrantClient | None = None,
-    ) -> None:  # noqa: D401 - short description inherited
+    ) -> None:
         self._settings = settings or Settings()
         location = self.settings.qdrant_url
         host = self.settings.qdrant_host
@@ -122,22 +125,19 @@ class PlexServer(FastMCP):
             self._qdrant_client = qdrant_client
 
         class _ServerLifespan:
-            def __init__(self, plex_server: "PlexServer") -> None:
+            def __init__(self, plex_server: PlexServer) -> None:
                 self._plex_server = plex_server
 
-            async def __aenter__(self) -> None:  # noqa: D401 - matching protocol
+            async def __aenter__(self) -> None:
                 return None
 
-            async def __aexit__(self, exc_type, exc, tb) -> None:  # noqa: ANN001
+            async def __aexit__(self, exc_type, exc, tb) -> None:
                 await self._plex_server.close()
 
-        def _lifespan(app: FastMCP) -> _ServerLifespan:  # noqa: ARG001
+        def _lifespan(app: FastMCP) -> _ServerLifespan:
             return _ServerLifespan(self)
 
         super().__init__(name=SERVER_NAME, lifespan=_lifespan)
-        def _low_level_lifespan(_server: Any):  # noqa: ANN001
-            return self._lifespan(self)
-        self._mcp_server.lifespan = _low_level_lifespan
         self._reranker: CrossEncoder | None = None
         self._reranker_loaded = False
         self._reranker_loaded = False
@@ -240,7 +240,7 @@ class PlexServer(FastMCP):
 
             try:
                 plex_client = await _get_plex_client()
-            except Exception as exc:  # noqa: BLE001 - allow logged fallback
+            except Exception as exc:
                 logger.warning(
                     "Unable to load Plex client for watch history: %s", exc, exc_info=exc
                 )
@@ -257,7 +257,7 @@ class PlexServer(FastMCP):
                         "Failed to load Plex account for watch history: %s", exc, exc_info=exc
                     )
                     return set()
-                except Exception as exc:  # noqa: BLE001 - unexpected library error
+                except Exception as exc:
                     logger.warning(
                         "Unexpected error loading Plex account: %s", exc, exc_info=exc
                     )
@@ -273,7 +273,7 @@ class PlexServer(FastMCP):
                         "Failed to resolve Plex user %s: %s", user, exc, exc_info=exc
                     )
                     return set()
-                except Exception as exc:  # noqa: BLE001 - unexpected library error
+                except Exception as exc:
                     logger.warning(
                         "Unexpected error resolving Plex user %s: %s", user, exc, exc_info=exc
                     )
@@ -294,7 +294,7 @@ class PlexServer(FastMCP):
                         if history_limit > 0:
                             history_kwargs["maxresults"] = history_limit
                         history_items = plex_client.history(**history_kwargs)
-                    except Exception as exc:  # noqa: BLE001 - unexpected signature change
+                    except Exception as exc:
                         logger.warning(
                             "Unable to load Plex history for %s: %s",
                             user,
@@ -310,7 +310,7 @@ class PlexServer(FastMCP):
                         exc_info=exc,
                     )
                     return set()
-                except Exception as exc:  # noqa: BLE001 - unexpected library error
+                except Exception as exc:
                     logger.warning(
                         "Unexpected error loading Plex history for %s: %s",
                         user,
@@ -364,15 +364,49 @@ _MEDIA_RESOURCE_EXPORTS = {
 
 _MEDIA_PROMPT_EXPORTS = {"media_info": "media-info"}
 
+
+def _registered_tools() -> dict[str, Tool]:
+    """Return the tools registered on :data:`server`, keyed by name."""
+
+    return {
+        component.name: component
+        for component in server.local_provider._components.values()
+        if isinstance(component, Tool)
+    }
+
+
+def _registered_prompts() -> dict[str, Prompt]:
+    """Return the prompts registered on :data:`server`, keyed by name."""
+
+    return {
+        component.name: component
+        for component in server.local_provider._components.values()
+        if isinstance(component, Prompt)
+    }
+
+
+def _registered_resource_templates() -> dict[str, ResourceTemplate]:
+    """Return the resource templates registered on :data:`server`, keyed by URI."""
+
+    return {
+        component.uri_template: component
+        for component in server.local_provider._components.values()
+        if isinstance(component, ResourceTemplate)
+    }
+
+
+_tools = _registered_tools()
 for attr_name, tool_name in _MEDIA_TOOL_EXPORTS.items():
-    if tool_name in server._tool_manager._tools:
-        globals()[attr_name] = server._tool_manager._tools[tool_name]
+    if tool_name in _tools:
+        globals()[attr_name] = _tools[tool_name]
 
+_resource_templates = _registered_resource_templates()
 for attr_name, resource_uri in _MEDIA_RESOURCE_EXPORTS.items():
-    globals()[attr_name] = server._resource_manager._templates[resource_uri]
+    globals()[attr_name] = _resource_templates[resource_uri]
 
+_prompts = _registered_prompts()
 for attr_name, prompt_name in _MEDIA_PROMPT_EXPORTS.items():
-    globals()[attr_name] = server._prompt_manager._prompts[prompt_name]
+    globals()[attr_name] = _prompts[prompt_name]
 
 
 def _request_model(name: str, fn: Callable[..., object]) -> type[BaseModel] | None:
@@ -538,11 +572,11 @@ def _monkey_patch_plex_session_player() -> None:
         return value
 
     patched = plex_base.cached_data_property(_patched_player)
-    setattr(patched, "_mcp_plex_patched", True)
-    setattr(patched, "_mcp_plex_original", descriptor)
-    setattr(patched, "_mcp_plex_original_func", original_func)
+    patched._mcp_plex_patched = True
+    patched._mcp_plex_original = descriptor
+    patched._mcp_plex_original_func = original_func
     patched.__set_name__(plex_base.PlexSession, "player")
-    setattr(plex_base.PlexSession, "player", patched)
+    plex_base.PlexSession.player = patched
 
 
 def _parse_configured_clients_payload(
@@ -698,32 +732,32 @@ def _build_configured_client(entry: Mapping[str, Any]) -> PlexClient:
     )
 
     if identifier:
-        setattr(plex_client, "identifier", identifier)
+        plex_client.identifier = identifier
     if client_identifier:
-        setattr(plex_client, "clientIdentifier", client_identifier)
+        plex_client.clientIdentifier = client_identifier
     if machine_identifier:
-        setattr(plex_client, "machineIdentifier", machine_identifier)
+        plex_client.machineIdentifier = machine_identifier
     if host_value:
-        setattr(plex_client, "host", host_value)
+        plex_client.host = host_value
     if address_value:
-        setattr(plex_client, "address", address_value)
+        plex_client.address = address_value
     if port is not None:
-        setattr(plex_client, "port", port)
+        plex_client.port = port
     elif xml_attributes.get("port"):
-        setattr(plex_client, "port", xml_attributes["port"])
+        plex_client.port = xml_attributes["port"]
 
     title_value = xml_attributes.get("title") or xml_attributes.get("name")
     if title_value:
-        setattr(plex_client, "title", title_value)
+        plex_client.title = title_value
     name_value = xml_attributes.get("name") or title_value
     if name_value:
-        setattr(plex_client, "name", name_value)
+        plex_client.name = name_value
 
     if capabilities:
-        setattr(plex_client, "provides", capabilities)
+        plex_client.provides = capabilities
 
     if alias_values:
-        setattr(plex_client, "aliases", tuple(alias_values))
+        plex_client.aliases = tuple(alias_values)
 
     return plex_client
 
@@ -804,9 +838,11 @@ async def _get_plex_players() -> list[PlexPlayerMetadata]:
 
         friendly_names: list[str] = []
 
-        def _add_alias(value: str | None) -> None:
-            if value and value not in friendly_names:
-                friendly_names.append(value)
+        def _add_alias(
+            value: str | None, _names: list[str] = friendly_names
+        ) -> None:
+            if value and value not in _names:
+                _names.append(value)
 
         def _collect_alias(identifier: str | None) -> None:
             if not identifier:
@@ -1643,6 +1679,7 @@ def _normalize_stream_language(stream: MediaPartStream | Any) -> str | None:
         try:
             text = str(value)
         except Exception:
+            logger.debug("Unable to read stream %s as text", attribute, exc_info=True)
             continue
         normalized = text.strip().lower()
         if not normalized:
@@ -1812,6 +1849,26 @@ async def set_audio(
     return response.with_updates(**updates)
 
 
+_PLAYER_TOOL_EXPORTS = {
+    "play_media": "play-media",
+    "queue_media": "queue-media",
+    "pause_media": "pause-media",
+    "resume_media": "resume-media",
+    "next_media": "next-media",
+    "previous_media": "previous-media",
+    "fastforward_media": "fastforward-media",
+    "rewind_media": "rewind-media",
+    "set_subtitle": "set-subtitle",
+    "set_audio": "set-audio",
+}
+
+# FastMCP decorators return the undecorated function, so rebind the module
+# attributes to the registered tools to expose their metadata and ``fn``.
+_tools = _registered_tools()
+for attr_name, tool_name in _PLAYER_TOOL_EXPORTS.items():
+    globals()[attr_name] = _tools[tool_name]
+
+
 @server.custom_route("/rest", methods=["GET"])
 async def rest_docs(request: Request) -> Response:
     """Serve Swagger UI for REST endpoints."""
@@ -1820,7 +1877,7 @@ async def rest_docs(request: Request) -> Response:
 
 def _build_openapi_schema() -> dict[str, object]:
     app = FastAPI()
-    for name, tool in server._tool_manager._tools.items():
+    for name, tool in _registered_tools().items():
         request_model = _request_model(name, tool.fn)
 
         if request_model is None:
@@ -1844,9 +1901,9 @@ def _build_openapi_schema() -> dict[str, object]:
         )
 
         app.post(f"/rest/{name}")(_tool_stub)
-    for name, prompt in server._prompt_manager._prompts.items():
+    for name, prompt in _registered_prompts().items():
 
-        async def _p_stub(**kwargs):  # noqa: ARG001
+        async def _p_stub(**kwargs):
             pass
 
         _p_stub.__name__ = f"prompt_{name.replace('-', '_')}"
@@ -1869,10 +1926,10 @@ def _build_openapi_schema() -> dict[str, object]:
                 return_annotation=inspect.Signature.empty,
             )
         app.post(f"/rest/prompt/{name}")(_p_stub)
-    for uri, resource in server._resource_manager._templates.items():
+    for uri, resource in _registered_resource_templates().items():
         path = uri.replace("resource://", "")
 
-        async def _r_stub(**kwargs):  # noqa: ARG001
+        async def _r_stub(**kwargs):
             pass
 
         _r_stub.__name__ = (
@@ -1890,7 +1947,7 @@ _OPENAPI_SCHEMA = _build_openapi_schema()
 
 
 @server.custom_route("/openapi.json", methods=["GET"])
-async def openapi_json(request: Request) -> Response:  # noqa: ARG001
+async def openapi_json(request: Request) -> Response:
     """Return the OpenAPI schema for REST endpoints."""
     return JSONResponse(_OPENAPI_SCHEMA)
 
@@ -1921,9 +1978,9 @@ def _register_rest_endpoints() -> None:
         )
         server.custom_route(path, methods=[method])(handler)
 
-    for name, tool in server._tool_manager._tools.items():
+    for name, tool in _registered_tools().items():
 
-        async def _rest_tool(request: Request, _tool=tool) -> Response:  # noqa: ARG001
+        async def _rest_tool(request: Request, _tool=tool) -> Response:
             try:
                 arguments = await request.json()
             except Exception:
@@ -1941,16 +1998,15 @@ def _register_rest_endpoints() -> None:
             f"rest_{name.replace('-', '_')}",
         )
 
-    for name, prompt in server._prompt_manager._prompts.items():
+    for name, prompt in _registered_prompts().items():
 
-        async def _rest_prompt(request: Request, _prompt=prompt) -> Response:  # noqa: ARG001
+        async def _rest_prompt(request: Request, _prompt=prompt) -> Response:
             try:
                 arguments = await request.json()
             except Exception:
                 arguments = None
-            async with FastMCPContext(fastmcp=server):
-                messages = await _prompt.render(arguments)
-            return JSONResponse([m.model_dump() for m in messages])
+            result = await server.render_prompt(_prompt.name, arguments)
+            return JSONResponse([m.model_dump() for m in result.messages])
 
         _register(
             f"/rest/prompt/{name}",
@@ -1960,7 +2016,7 @@ def _register_rest_endpoints() -> None:
             f"rest_prompt_{name.replace('-', '_')}",
         )
 
-    for uri, resource in server._resource_manager._templates.items():
+    for uri, resource in _registered_resource_templates().items():
         path = uri.replace("resource://", "")
 
         async def _rest_resource(
@@ -1969,8 +2025,8 @@ def _register_rest_endpoints() -> None:
             formatted = _uri_template
             for key, value in request.path_params.items():
                 formatted = formatted.replace(f"{{{key}}}", value)
-            async with FastMCPContext(fastmcp=server):
-                data = await server._resource_manager.read_resource(formatted)
+            result = await server.read_resource(formatted)
+            data = result.contents[0].content
             if isinstance(data, bytes):
                 return Response(content=data, media_type=_resource.mime_type)
             try:
@@ -2020,10 +2076,10 @@ def __getattr__(name: str) -> Any:
 
 
 __all__ = [
+    "Message",
     "PlexServer",
+    "RunConfig",
+    "main",
     "server",
     "settings",
-    "main",
-    "RunConfig",
-    "Message",
 ]

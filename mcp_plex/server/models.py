@@ -339,31 +339,31 @@ class PlayerCommandResponseModel(_DictLikeModel):
 
     def with_updates(
         self, **updates: object | None
-    ) -> "PlayerCommandResponseModel":
+    ) -> PlayerCommandResponseModel:
         """Return a copy of the response with additional fields set."""
 
         return self.model_copy(update=updates)
 
 
 __all__ = [
-    "PlexTag",
-    "PlexTagModel",
-    "PersonEntry",
-    "ExternalIds",
-    "ExternalIdsModel",
-    "PlexMediaMetadata",
-    "PlexMediaMetadataModel",
     "AggregatedMediaItem",
     "AggregatedMediaItemModel",
+    "ExternalIds",
+    "ExternalIdsModel",
     "MediaSummaryIdentifiers",
     "MediaSummaryIdentifiersModel",
-    "SummarizedMediaItem",
-    "SummarizedMediaItemModel",
     "MediaSummaryResponse",
     "MediaSummaryResponseModel",
-    "QdrantMediaPayload",
-    "PlexPlayerMetadata",
+    "PersonEntry",
     "PlayMediaResponseModel",
-    "QueueMediaResponseModel",
     "PlayerCommandResponseModel",
+    "PlexMediaMetadata",
+    "PlexMediaMetadataModel",
+    "PlexPlayerMetadata",
+    "PlexTag",
+    "PlexTagModel",
+    "QdrantMediaPayload",
+    "QueueMediaResponseModel",
+    "SummarizedMediaItem",
+    "SummarizedMediaItemModel",
 ]

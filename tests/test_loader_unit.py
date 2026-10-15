@@ -4,35 +4,15 @@ import importlib
 import json
 from datetime import datetime
 from pathlib import Path
-
-import httpx
-from qdrant_client import models
-from qdrant_client.http.exceptions import ResponseHandlingException
-import pytest
 from types import SimpleNamespace
 
-from mcp_plex import loader
+import httpx
+import pytest
+from qdrant_client import models
+from qdrant_client.http.exceptions import ResponseHandlingException
+
 import mcp_plex.loader.qdrant as loader_qdrant
-from mcp_plex.loader.imdb_cache import IMDbCache
-from mcp_plex.loader import (
-    IMDbRuntimeConfig,
-    QdrantRuntimeConfig,
-    _build_loader_orchestrator,
-    _fetch_imdb,
-    _load_imdb_retry_queue,
-    _persist_imdb_retry_queue,
-    _process_imdb_retry_queue,
-)
-from mcp_plex.loader.qdrant import (
-    _ensure_collection,
-    _existing_point_ids,
-    _is_embedding_model_failure,
-    _process_qdrant_retry_queue,
-    _resolve_dense_model_params,
-    build_point,
-)
-from mcp_plex.loader.pipeline.channels import IMDbRetryQueue
-from mcp_plex.loader import samples as loader_samples
+from mcp_plex import loader
 from mcp_plex.common.types import (
     AggregatedItem,
     IMDbName,
@@ -42,6 +22,26 @@ from mcp_plex.common.types import (
     PlexItem,
     PlexPerson,
     TMDBMovie,
+)
+from mcp_plex.loader import (
+    IMDbRuntimeConfig,
+    QdrantRuntimeConfig,
+    _build_loader_orchestrator,
+    _fetch_imdb,
+    _load_imdb_retry_queue,
+    _persist_imdb_retry_queue,
+    _process_imdb_retry_queue,
+)
+from mcp_plex.loader import samples as loader_samples
+from mcp_plex.loader.imdb_cache import IMDbCache
+from mcp_plex.loader.pipeline.channels import IMDbRetryQueue
+from mcp_plex.loader.qdrant import (
+    _ensure_collection,
+    _existing_point_ids,
+    _is_embedding_model_failure,
+    _process_qdrant_retry_queue,
+    _resolve_dense_model_params,
+    build_point,
 )
 
 

@@ -5,7 +5,8 @@ from __future__ import annotations
 import asyncio
 import json
 import logging
-from typing import TYPE_CHECKING, Annotated, Any, Mapping, Sequence, cast
+from collections.abc import Mapping, Sequence
+from typing import TYPE_CHECKING, Annotated, Any, cast
 
 from fastmcp.prompts import Message, PromptMessage
 from pydantic import Field
@@ -113,7 +114,7 @@ def _build_rerank_document(media: AggregatedMediaItem) -> str:
 
 
 async def _rerank_media_candidates(
-        server: "PlexServer",
+        server: PlexServer,
         query_text: str,
         items: list[AggregatedMediaItem],
         # Any is used here to accept arbitrary keyword arguments from tool callers
@@ -165,9 +166,7 @@ async def _rerank_media_candidates(
                 ratio = fuzz.ratio(q_title_low, item_title)
                 if ratio == 100:
                     boost += 10.0  # Exact title match
-                elif ratio > 90:
-                    boost += 5.0
-                elif fuzz.token_set_ratio(q_title_low, item_title) == 100:
+                elif ratio > 90 or fuzz.token_set_ratio(q_title_low, item_title) == 100:
                     boost += 5.0
                 elif fuzz.token_sort_ratio(q_title_low, item_title) > 95:
                     boost += 4.0
@@ -200,7 +199,7 @@ async def _rerank_media_candidates(
         return [entry[2] for entry in ranked]
 
 
-def register_media_library_tools(server: "PlexServer") -> None:
+def register_media_library_tools(server: PlexServer) -> None:
     """Register media discovery tools and resources on the provided server."""
 
     def _media_tool(name: str, *, title: str, operation: str):

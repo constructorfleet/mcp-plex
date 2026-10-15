@@ -1,5 +1,7 @@
-from mcp_plex.server.tools.media_library import _strip_leading_article
 import pytest
+
+from mcp_plex.server.tools.media_library import _strip_leading_article
+
 
 @pytest.mark.parametrize("title,expected", [
     ("The Predator", "Predator"),

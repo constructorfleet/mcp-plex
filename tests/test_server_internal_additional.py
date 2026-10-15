@@ -2,14 +2,14 @@ from __future__ import annotations
 
 import asyncio
 import importlib
-import importlib.metadata as metadata
 import json
+from importlib import metadata
 from types import SimpleNamespace
 from xml.etree import ElementTree
 
 import pytest
-from plexapi.exceptions import PlexApiException
 from plexapi import base as plex_base
+from plexapi.exceptions import PlexApiException
 
 from mcp_plex import server as server_module
 from mcp_plex.server import PlexServer
@@ -190,7 +190,7 @@ def test_get_plex_players_uses_fixture_when_available(monkeypatch, tmp_path):
 
     async def _unexpected_call() -> None:
         calls.append("clients")
-        return SimpleNamespace(clients=lambda: [])
+        return SimpleNamespace(clients=list)
 
     monkeypatch.setattr(server_module, "_get_plex_client", _unexpected_call)
 

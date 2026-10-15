@@ -2,8 +2,9 @@
 
 from __future__ import annotations
 
+import logging
 from collections.abc import Collection, Iterable, Mapping, MutableMapping, Sequence
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 from typing import TYPE_CHECKING, Any, cast
 
 from qdrant_client import models
@@ -24,6 +25,8 @@ if TYPE_CHECKING:  # pragma: no cover - imported for type checking only
     from ..common.cache import MediaCache
     from . import PlexServer
 
+logger = logging.getLogger(__name__)
+
 
 def _is_imdb_identifier(identifier: str) -> bool:
     text = identifier.strip().lower()
@@ -40,7 +43,7 @@ def _is_embedding_model_failure(error: Exception) -> bool:
 
 
 async def _rerank_records(
-    server: "PlexServer",
+    server: PlexServer,
     query_text: str,
     points: Sequence[models.Record | models.ScoredPoint],
     *,
@@ -91,7 +94,7 @@ async def _rerank_records(
 
 
 async def _find_records(
-    server: "PlexServer",
+    server: PlexServer,
     identifier: str,
     limit: int = 5,
     *,
@@ -118,7 +121,11 @@ async def _find_records(
         if recs:
             return cast(list[models.Record | models.ScoredPoint], recs)
     except Exception:
-        pass
+        logger.debug(
+            "Direct Qdrant lookup failed for %s; falling back to a filter search",
+            normalized_identifier,
+            exc_info=True,
+        )
 
     if _should_use_identifier_filter(normalized_identifier):
         should: list[models.FieldCondition] = [
@@ -337,11 +344,11 @@ def _normalize_epoch_timestamp(value: Any) -> int | None:
     else:
         return None
     if dt.tzinfo is None:
-        dt = dt.replace(tzinfo=timezone.utc)
+        dt = dt.replace(tzinfo=UTC)
     return int(dt.timestamp())
 
 
-def _normalize_identifier(value: str | int | float | None) -> str | None:
+def _normalize_identifier(value: str | float | None) -> str | None:
     """Convert mixed identifier formats into a normalized string."""
 
     if value is None:
@@ -375,7 +382,7 @@ def _normalize_history_rating_key(value: object) -> str | None:
         return normalized or None
     try:
         normalized = str(value).strip()
-    except Exception:  # noqa: BLE001 - guard against unusual reprs
+    except Exception:
         return None
     return normalized or None
 
@@ -439,7 +446,7 @@ def _filter_watched_recommendations(
 
 
 async def _history_recommendations(
-    server: "PlexServer",
+    server: PlexServer,
     rating_keys: Collection[str],
     limit: int,
 ) -> list[AggregatedMediaItem]:
@@ -479,7 +486,7 @@ async def _history_recommendations(
 def _collect_cache_keys(
     data: AggregatedMediaItem,
     plex_info: PlexMediaMetadata,
-    *extra_identifiers: str | int | float | None,
+    *extra_identifiers: str | float | None,
 ) -> set[str]:
     """Gather normalized cache keys from an aggregated media payload."""
 
@@ -508,7 +515,7 @@ def _collect_cache_keys(
 
 
 def _cache_media_artwork(
-    cache: "MediaCache", cache_keys: set[str], plex_info: PlexMediaMetadata
+    cache: MediaCache, cache_keys: set[str], plex_info: PlexMediaMetadata
 ) -> None:
     """Persist poster and background URLs for each cache key."""
 
@@ -538,7 +545,7 @@ def _ensure_rating_key_cached(
 
 
 def _identifier_matches_payload(
-    identifier: str | int | float | None, payload: AggregatedMediaItem
+    identifier: str | float | None, payload: AggregatedMediaItem
 ) -> bool:
     """Return True when an identifier corresponds to cached payload fields."""
 
@@ -551,7 +558,7 @@ def _identifier_matches_payload(
 
 
 def _get_cached_payload(
-    cache: "MediaCache", identifier: str | int | float | None
+    cache: MediaCache, identifier: str | float | None
 ) -> AggregatedMediaItem | None:
     """Return a cached payload when the identifier matches stored keys."""
 
@@ -572,7 +579,7 @@ def _get_cached_payload(
 
 
 async def _get_media_data(
-    server: "PlexServer", identifier: str, *, allow_vector: bool | None = None
+    server: PlexServer, identifier: str, *, allow_vector: bool | None = None
 ) -> AggregatedMediaItem:
     """Return the first matching media record's payload."""
 

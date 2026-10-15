@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "mcp-plex"
-version = "2.2.36"
+version = "2.2.37"
 
 description = "Plex-Oriented Model Context Protocol Server"
 requires-python = ">=3.11,<3.13"
@@ -20,6 +20,10 @@ dependencies = [
   "scikit-learn>=1.7.1",
   "httpx>=0.27.0",
   "sentence-transformers>=2.7.0",
+  # Declared directly so the CUDA 12 index sources below apply; the PyPI
+  # builds of these packages now target CUDA 13.
+  "onnxruntime-gpu>=1.29.0; platform_machine == 'x86_64' and sys_platform != 'darwin'",
+  "torch>=2.14.1; platform_machine == 'x86_64' and sys_platform != 'darwin'",
 ]
 
 [project.optional-dependencies]
@@ -37,8 +41,23 @@ name = "onnxruntime-cuda-12"
 url = "https://aiinfra.pkgs.visualstudio.com/PublicPackages/_packaging/onnxruntime-cuda-12/pypi/simple/"
 explicit = true
 
+[[tool.uv.index]]
+name = "pytorch-cu126"
+url = "https://download.pytorch.org/whl/cu126"
+explicit = true
+
 [tool.uv.sources]
-onnxruntime-gpu = { index = "onnxruntime-cuda-12" }
+onnxruntime-gpu = { index = "onnxruntime-cuda-12", marker = "platform_machine == 'x86_64' and sys_platform != 'darwin'" }
+torch = { index = "pytorch-cu126", marker = "platform_machine == 'x86_64' and sys_platform != 'darwin'" }
+
+[tool.ruff.lint]
+extend-ignore = [
+  # Tool, REST and loader boundaries deliberately catch broad exceptions so
+  # Plex, TMDb and Qdrant failures become error responses or retries.
+  "BLE001",
+  # Pydantic validators must raise ValueError; a TypeError escapes validation.
+  "TRY004",
+]
 
 [tool.coverage.run]
 source = ["mcp_plex"]

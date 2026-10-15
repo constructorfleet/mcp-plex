@@ -4,11 +4,11 @@ from pathlib import Path
 
 import pytest
 from click.testing import CliRunner
+from qdrant_client import models
 
 from mcp_plex import loader
-from mcp_plex.loader import samples as loader_samples
 from mcp_plex.loader import cli as loader_cli
-from qdrant_client import models
+from mcp_plex.loader import samples as loader_samples
 
 
 class DummyClient:
@@ -20,7 +20,7 @@ class DummyClient:
 
     async def close(self):
         """Match the AsyncQdrantClient interface used by the loader."""
-        return None
+        return
 
     async def collection_exists(self, name):
         return False
@@ -197,7 +197,6 @@ def test_main_accepts_log_level(monkeypatch, tmp_path):
 
     def fake_asyncio_run(coro):
         coro.close()
-        return None
 
     monkeypatch.setattr(loader_cli.logging, "basicConfig", fake_basic_config)
     monkeypatch.setattr(loader_cli.asyncio, "run", fake_asyncio_run)

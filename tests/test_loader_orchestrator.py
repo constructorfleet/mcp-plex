@@ -125,9 +125,11 @@ def test_ingestion_failure_cancels_downstream(caplog: pytest.LogCaptureFixture) 
     async def _run() -> None:
         await orchestrator.run()
 
-    with caplog.at_level(logging.ERROR, logger="mcp_plex.loader.orchestrator"):
-        with pytest.raises(RuntimeError, match="ingestion boom"):
-            asyncio.run(_run())
+    with (
+        caplog.at_level(logging.ERROR, logger="mcp_plex.loader.orchestrator"),
+        pytest.raises(RuntimeError, match="ingestion boom"),
+    ):
+        asyncio.run(_run())
 
     assert enrichment_stage.cancelled.is_set()
     assert persistence_stage.cancelled.is_set()
@@ -154,9 +156,11 @@ def test_persistence_failure_cancels_upstream(caplog: pytest.LogCaptureFixture) 
     async def _run() -> None:
         await orchestrator.run()
 
-    with caplog.at_level(logging.ERROR, logger="mcp_plex.loader.orchestrator"):
-        with pytest.raises(RuntimeError, match="persistence boom"):
-            asyncio.run(_run())
+    with (
+        caplog.at_level(logging.ERROR, logger="mcp_plex.loader.orchestrator"),
+        pytest.raises(RuntimeError, match="persistence boom"),
+    ):
+        asyncio.run(_run())
 
     assert ingestion_stage.cancelled.is_set()
     assert enrichment_stage.cancelled.is_set()

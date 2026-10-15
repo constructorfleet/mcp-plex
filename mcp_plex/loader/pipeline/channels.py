@@ -10,22 +10,21 @@ from __future__ import annotations
 
 import asyncio
 from collections import deque
+from collections.abc import Iterable, Sequence
 from dataclasses import dataclass
 from itertools import islice
 from typing import (
     TYPE_CHECKING,
     Final,
-    Iterable,
     Literal,
-    Sequence,
     TypeAlias,
     TypeVar,
 )
 
+from plexapi.video import Episode, Movie, Season, Show
+
 from ...common.types import AggregatedItem
 from ...common.validation import require_positive
-
-from plexapi.video import Episode, Movie, Season, Show
 
 T = TypeVar("T")
 
@@ -52,23 +51,23 @@ PersistencePayload: TypeAlias = list["models.PointStruct"]
 class MovieBatch:
     """Batch of Plex movie items pending metadata enrichment."""
 
-    movies: list["Movie"]
+    movies: list[Movie]
 
 
 @dataclass(slots=True)
 class EpisodeBatch:
     """Batch of Plex episodes along with their parent show."""
 
-    show: "Show"
-    episodes: list["Episode"]
+    show: Show
+    episodes: list[Episode]
 
 
 @dataclass(slots=True)
 class SeasonBatch:
     """Batch of Plex seasons along with their parent show."""
 
-    show: "Show"
-    seasons: list["Season"]
+    show: Show
+    seasons: list[Season]
 
 
 @dataclass(slots=True)
@@ -145,18 +144,18 @@ async def enqueue_nowait(queue: asyncio.Queue[T], item: T) -> None:
 
 
 __all__ = [
-    "MovieBatch",
-    "EpisodeBatch",
-    "SeasonBatch",
-    "SampleBatch",
-    "IngestBatch",
     "INGEST_DONE",
-    "IngestSentinel",
     "PERSIST_DONE",
-    "PersistenceSentinel",
-    "IngestQueue",
-    "PersistenceQueue",
-    "chunk_sequence",
+    "EpisodeBatch",
     "IMDbRetryQueue",
+    "IngestBatch",
+    "IngestQueue",
+    "IngestSentinel",
+    "MovieBatch",
+    "PersistenceQueue",
+    "PersistenceSentinel",
+    "SampleBatch",
+    "SeasonBatch",
+    "chunk_sequence",
     "enqueue_nowait",
 ]

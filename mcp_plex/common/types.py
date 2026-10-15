@@ -2,9 +2,10 @@
 
 from __future__ import annotations
 
+from collections.abc import Mapping, MutableMapping, Sequence
 from dataclasses import dataclass
 from datetime import datetime
-from typing import List, Literal, Mapping, MutableMapping, Optional, Sequence, TypeAlias
+from typing import Literal, TypeAlias
 
 from pydantic import BaseModel, Field, model_validator
 
@@ -12,8 +13,8 @@ from pydantic import BaseModel, Field, model_validator
 class IMDbRating(BaseModel):
     """Subset of IMDb rating information."""
 
-    aggregateRating: Optional[float] = None
-    voteCount: Optional[int] = None
+    aggregateRating: float | None = None
+    voteCount: int | None = None
 
 
 class IMDbImage(BaseModel):
@@ -35,15 +36,15 @@ class IMDbTitle(BaseModel):
     id: str
     type: str
     primaryTitle: str
-    startYear: Optional[int] = None
-    runtimeSeconds: Optional[int] = None
-    genres: List[str] = Field(default_factory=list)
-    rating: Optional[IMDbRating] = None
-    plot: Optional[str] = None
-    primaryImage: Optional[IMDbImage] = None
-    directors: List[IMDbName] = Field(default_factory=list)
-    writers: List[IMDbName] = Field(default_factory=list)
-    stars: List[IMDbName] = Field(default_factory=list)
+    startYear: int | None = None
+    runtimeSeconds: int | None = None
+    genres: list[str] = Field(default_factory=list)
+    rating: IMDbRating | None = None
+    plot: str | None = None
+    primaryImage: IMDbImage | None = None
+    directors: list[IMDbName] = Field(default_factory=list)
+    writers: list[IMDbName] = Field(default_factory=list)
+    stars: list[IMDbName] = Field(default_factory=list)
 
 
 class TMDBGenre(BaseModel):
@@ -54,48 +55,48 @@ class TMDBGenre(BaseModel):
 class TMDBSeason(BaseModel):
     season_number: int
     name: str
-    air_date: Optional[str] = None
+    air_date: str | None = None
 
 
 class TMDBCrewMember(BaseModel):
-    id: Optional[int] = None
-    name: Optional[str] = None
-    original_name: Optional[str] = None
-    known_for_department: Optional[str] = None
-    department: Optional[str] = None
-    job: Optional[str] = None
-    credit_id: Optional[str] = None
-    adult: Optional[bool] = None
-    gender: Optional[int] = None
-    popularity: Optional[float] = None
-    profile_path: Optional[str] = None
+    id: int | None = None
+    name: str | None = None
+    original_name: str | None = None
+    known_for_department: str | None = None
+    department: str | None = None
+    job: str | None = None
+    credit_id: str | None = None
+    adult: bool | None = None
+    gender: int | None = None
+    popularity: float | None = None
+    profile_path: str | None = None
 
 
 class TMDBGuestStar(BaseModel):
-    id: Optional[int] = None
-    name: Optional[str] = None
-    original_name: Optional[str] = None
-    known_for_department: Optional[str] = None
-    character: Optional[str] = None
-    credit_id: Optional[str] = None
-    order: Optional[int] = None
-    adult: Optional[bool] = None
-    gender: Optional[int] = None
-    popularity: Optional[float] = None
-    profile_path: Optional[str] = None
+    id: int | None = None
+    name: str | None = None
+    original_name: str | None = None
+    known_for_department: str | None = None
+    character: str | None = None
+    credit_id: str | None = None
+    order: int | None = None
+    adult: bool | None = None
+    gender: int | None = None
+    popularity: float | None = None
+    profile_path: str | None = None
 
 
 class TMDBMovie(BaseModel):
     id: int
     title: str
-    overview: Optional[str] = None
-    release_date: Optional[str] = None
-    imdb_id: Optional[str] = None
-    genres: List[TMDBGenre] = Field(default_factory=list)
-    poster_path: Optional[str] = None
-    backdrop_path: Optional[str] = None
-    tagline: Optional[str] = None
-    reviews: List[dict] = Field(default_factory=list)
+    overview: str | None = None
+    release_date: str | None = None
+    imdb_id: str | None = None
+    genres: list[TMDBGenre] = Field(default_factory=list)
+    poster_path: str | None = None
+    backdrop_path: str | None = None
+    tagline: str | None = None
+    reviews: list[dict] = Field(default_factory=list)
 
     @classmethod
     def model_validate(cls, data):  # type: ignore[override]
@@ -108,15 +109,15 @@ class TMDBMovie(BaseModel):
 class TMDBShow(BaseModel):
     id: int
     name: str
-    overview: Optional[str] = None
-    first_air_date: Optional[str] = None
-    last_air_date: Optional[str] = None
-    genres: List[TMDBGenre] = Field(default_factory=list)
-    seasons: List[TMDBSeason] = Field(default_factory=list)
-    poster_path: Optional[str] = None
-    backdrop_path: Optional[str] = None
-    tagline: Optional[str] = None
-    reviews: List[dict] = Field(default_factory=list)
+    overview: str | None = None
+    first_air_date: str | None = None
+    last_air_date: str | None = None
+    genres: list[TMDBGenre] = Field(default_factory=list)
+    seasons: list[TMDBSeason] = Field(default_factory=list)
+    poster_path: str | None = None
+    backdrop_path: str | None = None
+    tagline: str | None = None
+    reviews: list[dict] = Field(default_factory=list)
 
     @classmethod
     def model_validate(cls, data):  # type: ignore[override]
@@ -129,19 +130,19 @@ class TMDBShow(BaseModel):
 class TMDBEpisode(BaseModel):
     id: str
     name: str
-    overview: Optional[str] = None
-    season_number: Optional[int] = None
-    episode_number: Optional[int] = None
-    air_date: Optional[str] = None
-    episode_type: Optional[str] = None
-    production_code: Optional[str] = None
-    runtime: Optional[int] = None
-    show_id: Optional[int] = None
-    still_path: Optional[str] = None
-    vote_average: Optional[float] = None
-    vote_count: Optional[int] = None
-    crew: List[TMDBCrewMember] = Field(default_factory=list)
-    guest_stars: List[TMDBGuestStar] = Field(default_factory=list)
+    overview: str | None = None
+    season_number: int | None = None
+    episode_number: int | None = None
+    air_date: str | None = None
+    episode_type: str | None = None
+    production_code: str | None = None
+    runtime: int | None = None
+    show_id: int | None = None
+    still_path: str | None = None
+    vote_average: float | None = None
+    vote_count: int | None = None
+    crew: list[TMDBCrewMember] = Field(default_factory=list)
+    guest_stars: list[TMDBGuestStar] = Field(default_factory=list)
 
     @model_validator(mode="before")
     @classmethod
@@ -181,8 +182,8 @@ class PlexPerson(BaseModel):
 
     id: int
     tag: str
-    thumb: Optional[str] = None
-    role: Optional[str] = None
+    thumb: str | None = None
+    role: str | None = None
 
 
 class PlexItem(BaseModel):
@@ -190,57 +191,57 @@ class PlexItem(BaseModel):
     guid: str
     type: Literal["movie", "episode", "show", "season"]
     title: str
-    show_title: Optional[str] = None
-    season_title: Optional[str] = None
-    season_number: Optional[int] = None
-    episode_number: Optional[int] = None
-    summary: Optional[str] = None
-    year: Optional[int] = None
-    added_at: Optional[datetime] = None
-    guids: List[PlexGuid] = Field(default_factory=list)
-    thumb: Optional[str] = None
-    art: Optional[str] = None
-    tagline: Optional[str] = None
-    content_rating: Optional[str] = None
-    directors: List[PlexPerson] = Field(default_factory=list)
-    writers: List[PlexPerson] = Field(default_factory=list)
-    actors: List[PlexPerson] = Field(default_factory=list)
-    genres: List[str] = Field(default_factory=list)
-    collections: List[str] = Field(default_factory=list)
+    show_title: str | None = None
+    season_title: str | None = None
+    season_number: int | None = None
+    episode_number: int | None = None
+    summary: str | None = None
+    year: int | None = None
+    added_at: datetime | None = None
+    guids: list[PlexGuid] = Field(default_factory=list)
+    thumb: str | None = None
+    art: str | None = None
+    tagline: str | None = None
+    content_rating: str | None = None
+    directors: list[PlexPerson] = Field(default_factory=list)
+    writers: list[PlexPerson] = Field(default_factory=list)
+    actors: list[PlexPerson] = Field(default_factory=list)
+    genres: list[str] = Field(default_factory=list)
+    collections: list[str] = Field(default_factory=list)
 
 
 class AggregatedItem(BaseModel):
     """Aggregated Plex/IMDb/TMDb metadata."""
 
     plex: PlexItem
-    imdb: Optional[IMDbTitle] = None
-    tmdb: Optional[TMDBItem] = None
+    imdb: IMDbTitle | None = None
+    tmdb: TMDBItem | None = None
 
 
 @dataclass
 class ExternalIDs:
-    imdb: Optional[str] = None
-    tmdb: Optional[str] = None
+    imdb: str | None = None
+    tmdb: str | None = None
 
 
 __all__ = [
-    "IMDbRating",
-    "IMDbTitle",
+    "AggregatedItem",
+    "ExternalIDs",
     "IMDbImage",
     "IMDbName",
+    "IMDbRating",
+    "IMDbTitle",
+    "PlexGuid",
+    "PlexItem",
+    "PlexPerson",
+    "TMDBCrewMember",
+    "TMDBEpisode",
     "TMDBGenre",
+    "TMDBGuestStar",
+    "TMDBItem",
     "TMDBMovie",
     "TMDBSeason",
     "TMDBShow",
-    "TMDBEpisode",
-    "TMDBCrewMember",
-    "TMDBGuestStar",
-    "TMDBItem",
-    "PlexGuid",
-    "PlexPerson",
-    "PlexItem",
-    "AggregatedItem",
-    "ExternalIDs",
 ]
 JSONScalar: TypeAlias = str | int | float | bool | None
 JSONValue: TypeAlias = JSONScalar | Sequence["JSONValue"] | Mapping[str, "JSONValue"]

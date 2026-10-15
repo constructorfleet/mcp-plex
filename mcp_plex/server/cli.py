@@ -17,7 +17,6 @@ from starlette.types import ASGIApp, Receive, Scope, Send
 
 from . import PlexServer, server, settings
 
-
 plex_server: PlexServer = server
 HTTP_TRANSPORTS = ("sse", "streamable-http")
 VALID_TRANSPORTS = ("stdio", *HTTP_TRANSPORTS)
@@ -291,11 +290,10 @@ def main(argv: list[str] | None = None) -> None:
     streamable_http_mount = env_streamable_http_mount or args.streamable_http_mount
     http_transports = [transport for transport in transports if transport != "stdio"]
 
-    if http_transports:
-        if host is None or port is None:
-            parser.error(
-                "--bind/--port or MCP_HOST/MCP_PORT are required when transport is not stdio"
-            )
+    if http_transports and (host is None or port is None):
+        parser.error(
+            "--bind/--port or MCP_HOST/MCP_PORT are required when transport is not stdio"
+        )
     if transports == ["stdio"] and (mount or sse_mount or streamable_http_mount):
         parser.error(
             "--mount/--sse-mount/--streamable-http-mount (and MCP_MOUNT/MCP_SSE_MOUNT/MCP_STREAMABLE_HTTP_MOUNT) are not allowed when transport is stdio"
@@ -368,4 +366,4 @@ def main(argv: list[str] | None = None) -> None:
     )
 
 
-__all__ = ["RunConfig", "main", "server", "PlexServer", "plex_server", "settings"]
+__all__ = ["PlexServer", "RunConfig", "main", "plex_server", "server", "settings"]

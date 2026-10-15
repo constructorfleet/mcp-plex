@@ -3,8 +3,8 @@
 from __future__ import annotations
 
 import asyncio
+from collections.abc import Sequence
 from types import SimpleNamespace
-from typing import Sequence
 
 from qdrant_client.http.exceptions import ResponseHandlingException
 

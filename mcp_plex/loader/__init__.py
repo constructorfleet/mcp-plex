@@ -9,36 +9,36 @@ import sys
 import time
 import warnings
 from abc import ABC, abstractmethod
+from collections.abc import Sequence
 from dataclasses import dataclass, field
 from pathlib import Path
-from typing import TYPE_CHECKING, Sequence, TypedDict, cast
+from typing import TYPE_CHECKING, TypedDict, cast
 
 import httpx
+from plexapi.base import PlexPartialObject as _PlexPartialObject
+from plexapi.server import PlexServer
 from qdrant_client import models
 from qdrant_client.async_qdrant_client import AsyncQdrantClient
 
-from plexapi.base import PlexPartialObject as _PlexPartialObject
-from plexapi.server import PlexServer
-
-from .imdb_cache import IMDbCache
-from .pipeline.channels import (
-    IMDbRetryQueue,
-    INGEST_DONE,
-    IngestQueue,
-    PersistenceQueue,
-    chunk_sequence,
-)
-from ..common.validation import require_positive
-from .pipeline.orchestrator import LoaderOrchestrator
-from .pipeline.persistence import PersistenceStage as _PersistenceStage
 from ..common.types import (
     AggregatedItem,
     ExternalIDs,
     IMDbTitle,
     JSONValue,
 )
+from ..common.validation import require_positive
 from . import qdrant as _qdrant
 from . import samples as samples
+from .imdb_cache import IMDbCache
+from .pipeline.channels import (
+    INGEST_DONE,
+    IMDbRetryQueue,
+    IngestQueue,
+    PersistenceQueue,
+    chunk_sequence,
+)
+from .pipeline.orchestrator import LoaderOrchestrator
+from .pipeline.persistence import PersistenceStage as _PersistenceStage
 from .samples import _load_from_sample as _load_from_sample
 
 _DENSE_MODEL_PARAMS = _qdrant._DENSE_MODEL_PARAMS
@@ -209,8 +209,8 @@ def _build_loader_orchestrator(
     set[str],
 ]:
     """Wire the staged loader pipeline and return the orchestrator helpers."""
-    from .pipeline.ingestion import IngestionStage
     from .pipeline.enrichment import EnrichmentStage
+    from .pipeline.ingestion import IngestionStage
 
     rating_keys_seen: set[str] = set()
 

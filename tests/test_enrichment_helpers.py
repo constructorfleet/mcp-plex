@@ -3,6 +3,10 @@ import types
 
 import httpx
 
+from mcp_plex.common.types import (
+    TMDBSeason,
+    TMDBShow,
+)
 from mcp_plex.loader.pipeline.enrichment import (
     _build_plex_item,
     _extract_external_ids,
@@ -11,10 +15,6 @@ from mcp_plex.loader.pipeline.enrichment import (
     _fetch_tmdb_movie,
     _fetch_tmdb_show,
     resolve_tmdb_season_number,
-)
-from mcp_plex.common.types import (
-    TMDBSeason,
-    TMDBShow,
 )
 
 

@@ -4,24 +4,24 @@ from __future__ import annotations
 
 import asyncio
 import logging
-from typing import Awaitable, Callable, Sequence, TypeAlias
+from collections.abc import Awaitable, Callable, Sequence
+from typing import TypeAlias
 
+from ...common.validation import require_positive
 from .channels import (
     PERSIST_DONE,
     PersistenceQueue,
     chunk_sequence,
     enqueue_nowait,
 )
-from ...common.validation import require_positive
 
 try:  # pragma: no cover - allow import to fail when qdrant_client is absent
-    from qdrant_client import AsyncQdrantClient, models # type: ignore
+    from qdrant_client import AsyncQdrantClient, models  # type: ignore
 except ModuleNotFoundError:  # pragma: no cover - tooling without qdrant installed
 
     class AsyncQdrantClient:  # type: ignore[too-few-public-methods]
         """Fallback stub used when qdrant_client is unavailable."""
 
-        pass
 
     class _ModelsStub:  # type: ignore[too-few-public-methods]
         class PointStruct:  # type: ignore[too-few-public-methods]
@@ -167,7 +167,7 @@ class PersistenceStage:
 
         return drained
 
-    async def enqueue_points(self, points: Sequence["PointStruct"]) -> None:
+    async def enqueue_points(self, points: Sequence[PointStruct]) -> None:
         """Chunk *points* and place them on the persistence queue."""
 
         if not points:

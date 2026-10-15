@@ -7,12 +7,15 @@ import json
 import logging
 import sys
 import types
+import uuid
+from collections.abc import Mapping
 from contextlib import contextmanager
 from pathlib import Path
-from typing import Any, Mapping, Optional, cast
-import uuid
+from typing import Any, cast
 
 import pytest
+from fastmcp.prompts import PromptResult
+from fastmcp.resources import ResourceResult
 from plexapi.exceptions import PlexApiException
 from pydantic import ValidationError
 from qdrant_client import models
@@ -50,7 +53,7 @@ def _load_server(monkeypatch):
     from qdrant_client import async_qdrant_client
 
     class SharedClient(async_qdrant_client.AsyncQdrantClient):
-        _instance: Optional["SharedClient"] = None
+        _instance: SharedClient | None = None
         _initialized = False
 
         def __new__(cls, *args, **kwargs):
@@ -66,7 +69,7 @@ def _load_server(monkeypatch):
 
         async def close(self) -> None:  # type: ignore[override]
             """Prevent sample data teardown from closing the shared instance."""
-            return None
+            return
 
     monkeypatch.setattr(loader, "AsyncQdrantClient", SharedClient)
     monkeypatch.setattr(async_qdrant_client, "AsyncQdrantClient", SharedClient)
@@ -484,9 +487,8 @@ def test_actor_movies(monkeypatch):
 
 
 def test_play_media_requires_configuration(monkeypatch):
-    with _load_server(monkeypatch) as server:
-        with pytest.raises(RuntimeError):
-            asyncio.run(server.play_media.fn(identifier="49915", playerOrArea="Living Room"))
+    with _load_server(monkeypatch) as server, pytest.raises(RuntimeError):
+        asyncio.run(server.play_media.fn(identifier="49915", playerOrArea="Living Room"))
 
 
 def test_play_media_with_alias(monkeypatch):
@@ -654,7 +656,7 @@ def test_queue_media_adds_to_queue(monkeypatch):
             self.playQueueVersion = 5
             self.items = []
 
-        def moveItem(self, item: FakeMedia, after: Optional[FakeMedia] = None, refresh: bool = True):
+        def moveItem(self, item: FakeMedia, after: FakeMedia | None = None, refresh: bool = True):
             queue_calls.append(
                 {
                     "method": "moveItem",
@@ -1025,7 +1027,7 @@ def test_playback_control_reports_command_errors(monkeypatch):
             self.address = "127.0.0.1"
             self.port = 32500
 
-        def pause(self, mtype: str = "video") -> None:  # noqa: ARG002 - plexapi parity
+        def pause(self, mtype: str = "video") -> None:
             raise PlexApiException("Mock pause failure")
 
     class FaultyPlex:
@@ -1072,7 +1074,7 @@ def test_set_subtitle_requires_language(monkeypatch):
             self.provides = "player"
             self.title = "Living Room"
 
-        def setSubtitleStream(self, language: str, mtype: str = "video") -> None:  # noqa: ARG002
+        def setSubtitleStream(self, language: str, mtype: str = "video") -> None:
             raise AssertionError("Should not be called")
 
     class FakePlex:
@@ -1281,7 +1283,7 @@ def test_ensure_reranker_uses_thread_executor(monkeypatch):
 
 
 def test_ensure_reranker_concurrent_calls_share_single_instance(monkeypatch):
-    module, Dummy = _reload_server_with_dummy_reranker(monkeypatch)
+    module, _dummy = _reload_server_with_dummy_reranker(monkeypatch)
     call_count = 0
 
     async def fake_to_thread(fn, *args, **kwargs):  # type: ignore[no-untyped-def]
@@ -1419,11 +1421,11 @@ def test_run_config_to_kwargs():
     assert kwargs["path"] == "/plex"
 
 
-def test_find_records_handles_retrieve_error(monkeypatch):
+def test_find_records_handles_retrieve_error(monkeypatch, caplog):
     with _load_server(monkeypatch) as module:
 
         async def fail_retrieve(*args, **kwargs):
-            raise RuntimeError("boom")
+            raise RuntimeError("Qdrant connection refused")
 
         async def fake_scroll(*args, **kwargs):
             payload = {"data": {"plex": {"rating_key": "1"}}}
@@ -1432,8 +1434,10 @@ def test_find_records_handles_retrieve_error(monkeypatch):
         monkeypatch.setattr(module.server.qdrant_client, "retrieve", fail_retrieve)
         monkeypatch.setattr(module.server.qdrant_client, "scroll", fake_scroll)
 
-        records = asyncio.run(media_helpers._find_records(module.server, "123"))
+        with caplog.at_level(logging.DEBUG, logger="mcp_plex.server.media"):
+            records = asyncio.run(media_helpers._find_records(module.server, "123"))
         assert records and records[0].payload["data"]["plex"]["rating_key"] == "1"
+        assert "Direct Qdrant lookup failed for 123" in caplog.text
 
 
 def test_find_records_uses_vector_for_titles(monkeypatch):
@@ -1579,13 +1583,13 @@ def test_rest_query_media_invalid_json(monkeypatch):
 
 def test_rest_prompt_invalid_json(monkeypatch):
     with _load_server(monkeypatch) as module:
-        prompt_cls = type(module.server._prompt_manager._prompts["media-info"])
+        rendered: list[tuple[str, object]] = []
 
-        async def fake_render(self, arguments):
-            assert arguments is None
-            return [module.Message("ok")]
+        async def fake_render_prompt(name, arguments=None):
+            rendered.append((name, arguments))
+            return PromptResult([module.Message("Alien: Earth: We were safer in space.")])
 
-        monkeypatch.setattr(prompt_cls, "render", fake_render)
+        monkeypatch.setattr(module.server, "render_prompt", fake_render_prompt)
         client = TestClient(module.server.http_app())
         response = client.post(
             "/rest/prompt/media-info",
@@ -1593,6 +1597,10 @@ def test_rest_prompt_invalid_json(monkeypatch):
             headers={"content-type": "application/json"},
         )
         assert response.status_code == 200
+        assert rendered == [("media-info", None)]
+        assert response.json()[0]["content"]["text"] == (
+            "Alien: Earth: We were safer in space."
+        )
 
 
 def test_rest_resource_content_types(monkeypatch):
@@ -1600,16 +1608,12 @@ def test_rest_resource_content_types(monkeypatch):
 
         async def fake_read_resource(formatted: str):
             if formatted.endswith("binary"):
-                return b"binary"
+                return ResourceResult(b"binary")
             if formatted.endswith("json"):
-                return json.dumps({"value": 1})
-            return "plain"
+                return ResourceResult(json.dumps({"value": 1}))
+            return ResourceResult("plain")
 
-        monkeypatch.setattr(
-            module.server._resource_manager,
-            "read_resource",
-            fake_read_resource,
-        )
+        monkeypatch.setattr(module.server, "read_resource", fake_read_resource)
 
         client = TestClient(module.server.http_app())
 
@@ -1872,6 +1876,6 @@ def test_openapi_schema_tool_without_params(monkeypatch):
         schema = module._build_openapi_schema()
         assert "/rest/coverage-noop" in schema["paths"]
     finally:
-        module.server._tool_manager._tools.pop("coverage-noop", None)
+        module.server.local_provider.remove_tool("coverage-noop")
         if hasattr(module, "_coverage_noop"):
             delattr(module, "_coverage_noop")

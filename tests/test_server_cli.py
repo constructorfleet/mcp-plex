@@ -1,16 +1,16 @@
+import asyncio
+import importlib
+import logging
 from contextlib import asynccontextmanager
 from unittest.mock import patch
 
-import logging
-import asyncio
-import importlib
 import pytest
-
-from mcp_plex import server as server_package
-from mcp_plex.server import cli as server
 from starlette.applications import Starlette
 from starlette.routing import Route
 from starlette.testclient import TestClient
+
+from mcp_plex import server as server_package
+from mcp_plex.server import cli as server
 
 
 @pytest.fixture(scope="module", autouse=True)

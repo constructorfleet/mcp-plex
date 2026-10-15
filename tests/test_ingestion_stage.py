@@ -12,8 +12,8 @@ from mcp_plex.loader.pipeline.channels import (
     EpisodeBatch,
     IngestSentinel,
     MovieBatch,
-    SeasonBatch,
     SampleBatch,
+    SeasonBatch,
 )
 from mcp_plex.loader.pipeline.ingestion import IngestionStage
 

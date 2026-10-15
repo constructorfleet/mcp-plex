@@ -1,8 +1,8 @@
 import asyncio
 from unittest.mock import AsyncMock
 
-import pytest
 import httpx
+import pytest
 from qdrant_client import models
 from qdrant_client.http.exceptions import UnexpectedResponse
 
