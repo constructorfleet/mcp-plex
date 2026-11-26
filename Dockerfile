@@ -2,7 +2,7 @@
 
 # -------------------- Builder --------------------
 
-FROM nvidia/cuda:12.4.1-cudnn-runtime-ubuntu22.04 AS builder
+FROM nvidia/cuda:12.6.3-cudnn-runtime-ubuntu24.04 AS builder
 ENV PATH="/root/.local/bin:$PATH"
 COPY --from=ghcr.io/astral-sh/uv:latest /uv /uvx /usr/local/bin/
 ENV UV_PYTHON_INSTALL_DIR=/opt/uv
@@ -12,7 +12,7 @@ WORKDIR /app
 COPY pyproject.toml uv.lock ./
 
 RUN --mount=type=cache,target=/root/.cache/uv \
-    uv python install 3.12 && \
+    uv python install 3.13 && \
     uv venv "${UV_PROJECT_ENVIRONMENT}" && \
     uv sync --locked --no-install-project --no-editable --link-mode=copy
 
@@ -25,7 +25,7 @@ RUN chmod +x /app/entrypoint.sh
 
 # -------------------- Runtime --------------------
 
-FROM nvidia/cuda:12.4.1-cudnn-runtime-ubuntu22.04
+FROM nvidia/cuda:12.6.3-cudnn-runtime-ubuntu24.04
 ENV UV_PYTHON_INSTALL_DIR=/opt/uv
 ENV UV_PROJECT_ENVIRONMENT=/app/.venv
 WORKDIR /app

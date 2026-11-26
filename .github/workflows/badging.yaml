@@ -18,7 +18,7 @@ jobs:
 
       - uses: astral-sh/setup-uv@v6
         with:
-          python-version: '3.12'
+          python-version: '3.13'
 
       - run: uv sync --no-dev
       - run: uv pip install pytest pytest-cov 'genbadge[all]'

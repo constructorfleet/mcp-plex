@@ -1,14 +1,20 @@
 """Tests to guard Docker build artifacts stay optimized."""
 
+import re
+import tomllib
 from pathlib import Path
 
 import pytest
+from packaging.specifiers import SpecifierSet
 
 DOCKERFILE = Path("Dockerfile")
 DOCKERIGNORE = Path(".dockerignore")
-CUDA_IMAGE = "nvidia/cuda:12.4.1-cudnn-runtime-ubuntu22.04"
+CUDA_IMAGE = "nvidia/cuda:12.6.3-cudnn-runtime-ubuntu24.04"
 BUILDER_STAGE_DESCRIPTOR = f"{CUDA_IMAGE} AS builder"
 RUNTIME_STAGE_DESCRIPTOR = CUDA_IMAGE
+DEPS_MANIFEST = Path("docker/pyproject.deps.toml")
+PROJECT_MANIFEST = Path("pyproject.toml")
+DOCKER_PYTHON_VERSION = "3.13"
 UV_INSTALL_DIR = "/opt/uv"
 UV_INSTALL_ENV_DIRECTIVE = f"ENV UV_PYTHON_INSTALL_DIR={UV_INSTALL_DIR}"
 UV_INSTALL_COPY_DIRECTIVE = (
@@ -179,3 +185,37 @@ def test_dockerfile_preserves_uv_python_installation(dockerfile_contents: str) -
     assert (
         UV_INSTALL_COPY_DIRECTIVE in runtime_section
     ), "Runtime stage should copy the uv-managed Python interpreter into place"
+
+
+def _installed_python_version(contents: str) -> str:
+    """Return the Python version the builder stage installs via uv."""
+
+    match = re.search(r"uv python install (\S+)", _builder_section(contents))
+    assert match, "Builder stage must install Python with uv"
+    return match.group(1)
+
+
+def test_builder_installs_supported_python(dockerfile_contents: str) -> None:
+    """The image Python must be current and allowed by both project manifests."""
+
+    installed = _installed_python_version(dockerfile_contents)
+
+    assert installed == DOCKER_PYTHON_VERSION
+    for manifest in (PROJECT_MANIFEST, DEPS_MANIFEST):
+        requires = tomllib.loads(manifest.read_text(encoding="utf-8"))["project"][
+            "requires-python"
+        ]
+        assert SpecifierSet(requires).contains(
+            installed
+        ), f"{manifest} requires-python {requires} excludes Python {installed}"
+
+
+def test_installed_python_detects_unsupported_version() -> None:
+    """An outdated or missing interpreter install should be caught."""
+
+    stale = f"FROM {BUILDER_STAGE_DESCRIPTOR}\nRUN uv python install 3.12\n"
+    assert _installed_python_version(stale) != DOCKER_PYTHON_VERSION
+    assert not SpecifierSet(">=3.11,<3.13").contains(DOCKER_PYTHON_VERSION)
+
+    with pytest.raises(AssertionError, match="must install Python"):
+        _installed_python_version(f"FROM {BUILDER_STAGE_DESCRIPTOR}\nRUN uv sync\n")
